@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Greedy Nose — UI Mocks</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { padding: 40px; }
+  .frame-label a { text-decoration: none; }
+  .intro {
+    width: 100%;
+    max-width: 900px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin-bottom: 8px;
+  }
+  .intro h1 { margin-bottom: 4px; }
+  .intro p { color: #444; max-width: 640px; }
+  .intro ol { color: #333; }
+</style>
+</head>
+<body>
+  <div class="intro">
+    <h1>Greedy Nose — UI Mocks</h1>
+    <p>Static, framework-agnostic phone mocks for the bank-transaction / bad-debitor-alert app.
+    Layout uses flexbox throughout so it maps fairly directly to React Native, and serves as a
+    precise blueprint if implemented in Flutter or another stack instead.</p>
+    <p>Flow: connect bank → one-time onboarding review of existing debitors → every debitor defaults to Bad until marked Trusted → manage rules (with optional amount/frequency thresholds) → get notified next time a bad debitor charges you.</p>
+  </div>
+
+  <div class="frame-label">
+    <span>1. Connect Bank</span>
+    <iframe src="01-connect-bank.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>1b. Grant Access (consent)</span>
+    <iframe src="01b-connect-consent.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>1e. Connection Failed</span>
+    <iframe src="01e-connect-error.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>1bb. Syncing (fetching transactions)</span>
+    <iframe src="01bb-syncing.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>1c. Review Debitors (onboarding)</span>
+    <iframe src="01c-classify-debitors.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>2. Transaction List</span>
+    <iframe src="02-transaction-list.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>2b. Transaction List — Empty</span>
+    <iframe src="02b-transaction-list-empty.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>1d. Connection Expired (reconnect)</span>
+    <iframe src="01d-connection-expired.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>3. Transaction Detail — Mark Good/Bad</span>
+    <iframe src="03-transaction-detail.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>4. Debitor Rules (manage all)</span>
+    <iframe src="04-debitor-rules.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>6. Settings</span>
+    <iframe src="06-settings.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>4c. Rules — Empty</span>
+    <iframe src="04c-debitor-rules-empty.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>4b. Debitor Rule — Edit Thresholds</span>
+    <iframe src="04b-debitor-edit.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>6b. Confirm Disconnect Bank</span>
+    <iframe src="06b-disconnect-confirm.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>6c. Confirm Delete Account</span>
+    <iframe src="06c-delete-confirm.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>5. Notification — Bad Debitor Charge</span>
+    <iframe src="05-notification.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+</body>
+</html>

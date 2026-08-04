@@ -1,0 +1,488 @@
+/* Shared phone-mock styles. Layout uses flexbox throughout so it maps
+   fairly directly onto React Native (View/flexDirection) or is easy to
+   re-express as a Flutter widget tree. */
+
+:root {
+  --bg: #f2f2f7;
+  --surface: #ffffff;
+  --text: #1c1c1e;
+  --text-muted: #6e6e73;
+  --border: #e5e5ea;
+  --accent: #0a84ff;
+  --good: #1f9254;
+  --good-bg: #e3f6ea;
+  --bad: #d5372e;
+  --bad-bg: #fbe6e4;
+  --neutral-bg: #ececef;
+}
+
+@media (prefers-color-scheme: dark) {
+  .phone {
+    --bg: #000000;
+    --surface: #1c1c1e;
+    --text: #f2f2f7;
+    --text-muted: #98989d;
+    --border: #38383a;
+    --good: #30d158;
+    --good-bg: rgba(48, 209, 88, 0.16);
+    --bad: #ff453a;
+    --bad-bg: rgba(255, 69, 58, 0.16);
+    --neutral-bg: #2c2c2e;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 40px;
+  background: #d9d9de;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  align-items: flex-start;
+}
+
+.frame-label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.frame-label span {
+  font-size: 13px;
+  color: #444;
+  font-weight: 600;
+}
+
+.phone {
+  width: 375px;
+  height: 812px;
+  background: var(--bg);
+  border-radius: 40px;
+  border: 8px solid #111;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.25);
+  position: relative;
+}
+
+.status-bar {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.nav-bar {
+  flex: none;
+  padding: 8px 16px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg);
+}
+
+.nav-bar h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.nav-link {
+  font-size: 15px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.screen {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 12px;
+}
+
+.tab-bar {
+  flex: none;
+  display: flex;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 8px 0 20px;
+}
+
+.tab-item {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding-top: 6px;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.tab-item svg {
+  display: block;
+}
+
+.tab-item.active {
+  color: var(--accent);
+}
+
+.tab-item.active::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 24px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.card {
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 14px;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-bad {
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+
+.btn-outline {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.tx-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 12px 14px;
+  text-decoration: none;
+  color: inherit;
+  gap: 12px;
+}
+
+.tx-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tx-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tx-date {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.tx-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex: none;
+}
+
+.tx-amount {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.pill-good { background: var(--good-bg); color: var(--good); }
+.pill-bad { background: var(--bad-bg); color: var(--bad); }
+.pill-neutral { background: var(--neutral-bg); color: var(--text-muted); }
+
+.section-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 8px 4px 0;
+}
+
+.empty-note {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 24px;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--neutral-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--text-muted);
+  flex: none;
+}
+
+.notif-banner {
+  position: absolute;
+  top: 56px;
+  left: 10px;
+  right: 10px;
+  background: rgba(250,250,252,0.95);
+  backdrop-filter: blur(6px);
+  border-radius: 16px;
+  padding: 12px;
+  display: flex;
+  gap: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  align-items: flex-start;
+  color: var(--text);
+}
+
+@media (prefers-color-scheme: dark) {
+  .notif-banner {
+    background: rgba(28,28,30,0.85);
+  }
+}
+
+.notif-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--bad);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  flex: none;
+}
+
+.notif-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notif-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.notif-body {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.notif-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.bank-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 14px;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.bank-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #00e5b0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  color: #06251f;
+  flex: none;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.toggle-row {
+  display: flex;
+  gap: 8px;
+}
+
+.toggle-btn {
+  flex: 1;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  border-radius: 10px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+.toggle-btn.good-active {
+  background: var(--good-bg);
+  color: var(--good);
+  border-color: var(--good);
+}
+
+.toggle-btn.bad-active {
+  background: var(--bad-bg);
+  color: var(--bad);
+  border-color: var(--bad);
+}
+
+.toast {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 96px;
+  background: rgba(28,28,30,0.92);
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  text-align: center;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+}
+
+.modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-box {
+  width: 270px;
+  background: var(--surface);
+  border-radius: 14px;
+  overflow: hidden;
+  text-align: center;
+}
+
+.modal-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 16px 16px 4px;
+}
+
+.modal-body {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 0 16px 16px;
+}
+
+.modal-actions {
+  display: flex;
+  border-top: 1px solid var(--border);
+}
+
+.modal-actions a {
+  flex: 1;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  text-decoration: none;
+  color: var(--accent);
+}
+
+.modal-actions a:first-child {
+  border-right: 1px solid var(--border);
+}
+
+.modal-actions a.destructive {
+  color: var(--bad);
+  font-weight: 600;
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

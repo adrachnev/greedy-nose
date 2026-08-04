@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bank Consent</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
+    <div class="nav-bar"><h1>Grant Access</h1><span></span></div>
+    <div class="screen">
+      <div class="content">
+        <div class="card" style="align-items:center;text-align:center;gap:12px;">
+          <div class="bank-logo" style="width:56px;height:56px;font-size:18px;">N26</div>
+          <div class="tx-name" style="font-size:17px;">Greedy Nose is requesting access</div>
+          <p class="hint">This app (via Enable Banking) will be able to:</p>
+        </div>
+
+        <div class="section-label">Access granted</div>
+        <div class="card">
+          <div class="tx-info"><div class="tx-name">View account information</div></div>
+          <div class="divider"></div>
+          <div class="tx-info"><div class="tx-name">View transaction history</div></div>
+        </div>
+
+        <div class="section-label" style="color:var(--bad);">Not allowed</div>
+        <div class="card">
+          <div class="tx-info"><div class="tx-name" style="color:var(--bad);">Move or withdraw money</div></div>
+        </div>
+
+        <p class="hint">Access is valid for 90 days, per PSD2 regulation. You can revoke it anytime from your N26 app.</p>
+
+        <div style="flex:1"></div>
+
+        <a class="btn btn-primary" href="01bb-syncing.html">Allow Access</a>
+        <a class="btn btn-outline" href="01-connect-bank.html">Cancel</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

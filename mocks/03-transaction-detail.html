@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Transaction Detail</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
+    <div class="nav-bar">
+      <a class="nav-link" href="02-transaction-list.html">‹ Back</a>
+      <h1 style="font-size:17px;">Transaction</h1>
+      <span style="width:44px;"></span>
+    </div>
+    <div class="screen">
+      <div class="content">
+
+        <div class="card" style="align-items:center;text-align:center;gap:6px;">
+          <div class="avatar" style="width:56px;height:56px;background:var(--bad-bg);color:var(--bad);font-size:18px;">SC</div>
+          <div class="tx-name" style="font-size:18px;">ScamyLoans GmbH</div>
+          <div class="tx-amount" style="font-size:22px;">−€49.00</div>
+          <div class="tx-date">Direct debit · Aug 3, 2026 · 18:02</div>
+        </div>
+
+        <div class="card">
+          <div class="tx-info"><div class="tx-date">Debitor IBAN</div><div class="tx-name" style="font-size:14px;">DE12 3456 7890 0000 1234 00</div></div>
+          <div class="divider"></div>
+          <div class="tx-info"><div class="tx-date">Reference</div><div class="tx-name" style="font-size:14px;">Invoice #99213 loan installment</div></div>
+        </div>
+
+        <div class="section-label">Mark this debitor</div>
+        <p class="hint">This applies to <strong>all</strong> current and future transactions from ScamyLoans GmbH — not just this one.</p>
+
+        <div class="toggle-row">
+          <div class="toggle-btn">Trusted</div>
+          <div class="toggle-btn bad-active">Bad</div>
+        </div>
+
+        <div class="section-label">Alert conditions (optional)</div>
+        <p class="hint">Leave blank to get notified on every charge from this debitor.</p>
+
+        <div class="card">
+          <div class="tx-info">
+            <div class="tx-date">Only alert if amount exceeds</div>
+            <div class="tx-name" style="font-size:15px;display:flex;align-items:center;gap:6px;">
+              €<span style="border-bottom:1px solid var(--border);flex:1;padding:4px 0;color:var(--text-muted);">e.g. 20.00</span>
+            </div>
+          </div>
+          <div class="divider"></div>
+          <div class="tx-info">
+            <div class="tx-date">Only alert if charged more than</div>
+            <div class="tx-name" style="font-size:15px;display:flex;align-items:center;gap:6px;">
+              <span style="border-bottom:1px solid var(--border);flex:1;padding:4px 0;color:var(--text-muted);">e.g. 1</span> times per <span style="border-bottom:1px solid var(--border);padding:4px 8px;color:var(--text-muted);">month ▾</span>
+            </div>
+          </div>
+        </div>
+        <p class="hint">If you set both, <strong>both</strong> must be true to trigger an alert (AND).</p>
+
+        <div style="flex:1"></div>
+        <p class="hint" style="text-align:center;">You'll get an instant notification when this debitor's charges match the conditions above.</p>
+      </div>
+    </div>
+
+    <div class="toast" style="bottom:24px;">Saved — ScamyLoans GmbH marked Bad</div>
+  </div>
+</body>
+</html>
