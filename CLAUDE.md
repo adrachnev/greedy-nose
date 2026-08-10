@@ -6,8 +6,10 @@ deliberately not a general finance/budgeting app.
 
 ## Status
 
-Design phase. No app code yet — only HTML/CSS phone mockups in `mocks/`. Framework (React
-Native vs Flutter) is not decided yet; that choice comes after the mocks settle.
+Mocks in `mocks/` are reviewed and settled. Framework decided: **React Native**. Bare RN app
+scaffolded in `app/` (Android target). Toolchain validated end-to-end: build → wireless adb
+deploy → live on physical device. First screen ported: `01-connect-bank` →
+`app/src/screens/ConnectBankScreen.tsx`. Remaining screens still need porting.
 
 ## Product decisions (settled)
 
@@ -47,8 +49,7 @@ Native vs Flutter) is not decided yet; that choice comes after the mocks settle.
 ## `mocks/`
 
 Static HTML/CSS phone mockups, one file per screen, ~375×812 viewport, Flexbox layout
-throughout (chosen so it maps fairly directly to React Native if that's the eventual stack, and
-still serves as a precise blueprint for Flutter or elsewhere).
+throughout (chosen so it maps fairly directly to React Native, the chosen stack).
 
 - `index.html` — overview embedding every screen with a labelled flow order; open this first.
 - `style.css` — shared design tokens/components (`.card`, `.pill`, `.btn`, `.tab-item`,
@@ -61,3 +62,19 @@ still serves as a precise blueprint for Flutter or elsewhere).
 
 Iterate on mocks before touching architecture/code — that was an explicit ordering decision:
 mocks first, then pick the stack, then implement and test.
+
+## `app/`
+
+Bare React Native project (via `@react-native-community/cli`, package `com.greedynose`),
+Android target set up first. `src/theme/colors.ts` mirrors `mocks/style.css`'s light/dark
+tokens; `src/screens/` holds ported screens, one component per mock screen.
+
+Local Windows toolchain notes (only relevant if the build breaks again):
+- Requires JDK 17 (Android Gradle Plugin + a very new bundled JDK 25 from Android Studio
+  trips a "restricted method" false-failure bug) — set `JAVA_HOME` to a JDK 17 install
+  (e.g. Temurin) before running Gradle, not the Android Studio JBR.
+- Requires the Microsoft Visual C++ Redistributable installed (CMake, used for RN's native
+  build, fails with STATUS_DLL_NOT_FOUND without it).
+- `npx react-native run-android` fails to invoke `gradlew.bat` from Git Bash/execa on this
+  machine; run Gradle directly instead (`.\gradlew.bat app:installDebug ...`) via PowerShell.
+- Device is connected via wireless adb (`adb pair`/`adb connect`), not USB.
