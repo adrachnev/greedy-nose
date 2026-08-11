@@ -2,6 +2,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import MockDataBadge from '../components/MockDataBadge';
 import Toast from '../components/Toast';
 import { useDebtor, useRuleForDebtor, useSetDebtorTrusted, useTransaction } from '../data/hooks';
 import { TransactionsStackParamList } from '../navigation/types';
@@ -39,6 +40,7 @@ export default function TransactionDetailScreen({ route, navigation }: Props) {
   if (!transaction || !debtor) {
     return (
       <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
+        <MockDataBadge />
         <Text style={[styles.hint, styles.notFoundText, { color: theme.textMuted }]}>
           Transaction not found.
         </Text>
@@ -53,6 +55,7 @@ export default function TransactionDetailScreen({ route, navigation }: Props) {
     <View
       style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}
     >
+      <MockDataBadge />
       <View style={styles.navBar}>
         <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
           <Text style={[styles.navLink, { color: theme.accent }]}>‹ Back</Text>
