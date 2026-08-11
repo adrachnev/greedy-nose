@@ -9,7 +9,25 @@ deliberately not a general finance/budgeting app.
 Mocks in `mocks/` are reviewed and settled. Framework decided: **React Native**. Bare RN app
 scaffolded in `app/` (Android target). Toolchain validated end-to-end: build → wireless adb
 deploy → live on physical device. First screen ported: `01-connect-bank` →
-`app/src/screens/ConnectBankScreen.tsx`. Remaining screens still need porting.
+`app/src/screens/ConnectBankScreen.tsx`.
+
+Navigation is now wired up with React Navigation (native-stack + bottom-tabs). A mock
+fixture-data layer (`app/src/mocks/data.ts`, consumed via `app/src/data/hooks.ts`) now backs
+the app. `TransactionListScreen` and `TransactionDetailScreen` are ported in addition to
+`ConnectBankScreen`, reachable via a bottom-tab main navigator (Transactions/Rules/Settings,
+with Rules/Settings as stub placeholders for now) plus an onboarding stack (Connect Bank +
+stub placeholders for consent/syncing/classify). Remaining screens still need porting.
+
+The Trusted/Bad toggle on `TransactionDetailScreen` is fully wired end-to-end: tapping it
+calls `setDebtorTrusted` (`app/src/mocks/data.ts`), shows a confirmation toast
+(`app/src/components/Toast.tsx`), and `TransactionListScreen` correctly re-renders to reflect
+the change via `useSyncExternalStore` in `app/src/data/hooks.ts`. This flow hit a real bug
+during development — mutating the debtor in place without a new array reference silently broke
+React's change detection — since fixed and covered by regression tests
+(`app/src/mocks/__tests__/data.test.ts`, `app/src/data/__tests__/hooks.test.tsx`) that assert
+on reference identity, not just end value, so it can't regress unnoticed. `npm test` (Jest,
+`app/jest.config.js`) passes cleanly, including the pre-existing `App.test.tsx` smoke test
+(needed a `transformIgnorePatterns` fix to let `@react-navigation`'s ESM through Babel).
 
 ## Product decisions (settled)
 
@@ -45,6 +63,11 @@ deploy → live on physical device. First screen ported: `01-connect-bank` →
 - Offline state handling for the main list (only the initial-connect error state exists).
 - Notification grouping/bundling (a "Group multiple alerts" toggle exists in the Settings mock
   but defaults Off — one notification per charge is the current decision).
+- **`app/src/mocks/mockOnboardingState.ts` and `app/src/mocks/data.ts` are temporary
+  scaffolding, not real state.** They currently drive which navigator (onboarding vs. main)
+  shows and what transaction/debitor data renders. Both MUST be replaced with real persisted
+  app state and live data from the backend/Enable Banking integration once those exist — do
+  not let this quietly become permanent.
 
 ## `mocks/`
 
