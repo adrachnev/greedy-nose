@@ -16,7 +16,16 @@
 import React from 'react';
 import ReactTestRenderer, { act } from 'react-test-renderer';
 import { Text } from 'react-native';
-import { useDebtor, useDebtors, useSetDebtorTrusted } from '../hooks';
+import {
+  useAcknowledgeAutoFlipNotice,
+  useAutoFlipNotices,
+  useDebtor,
+  useDebtors,
+  useRuleForDebtor,
+  useSetDebtorRule,
+  useSetDebtorTrusted,
+} from '../hooks';
+import { addTransaction } from '../../mocks/data';
 
 const DEBTOR_ID = 'debtor-scamyloans';
 
@@ -69,8 +78,9 @@ describe('useDebtors / useDebtor re-render on mutation', () => {
       ReactTestRenderer.create(<Capture />);
     });
 
+    let result: ReturnType<ReturnType<typeof useSetDebtorTrusted>> | undefined;
     act(() => {
-      setTrusted(DEBTOR_ID, true);
+      result = setTrusted(DEBTOR_ID, true);
     });
 
     // The regression: this must reflect the change, not just the detail
@@ -78,5 +88,116 @@ describe('useDebtors / useDebtor re-render on mutation', () => {
     // useDebtors() snapshots) never changed reference, so this stayed 'Bad'.
     expect(textAt(renderer.root, 'list-status')).toBe('Trusted');
     expect(textAt(renderer.root, 'detail-status')).toBe('Trusted');
+    // debtor-scamyloans had no rule to begin with, so nothing to clear.
+    expect(result).toEqual({ clearedAmountThresholdEUR: undefined });
+  });
+});
+
+/**
+ * Same regression shape as above, applied to useSetDebtorRule()/
+ * useRuleForDebtor(): a sibling consumer of the rule for the same debtor
+ * must see the update once useSetDebtorRule() is called elsewhere, since
+ * useRuleForDebtor() is now useSyncExternalStore-backed (via useRules()).
+ */
+const RULE_DEBTOR_ID = 'debtor-spotify';
+
+function RuleProbe() {
+  const rule = useRuleForDebtor(RULE_DEBTOR_ID);
+  return (
+    <Text testID="rule-status">
+      {rule?.amountThresholdEUR != null ? `over-${rule.amountThresholdEUR}` : 'none'}
+    </Text>
+  );
+}
+
+describe('useRuleForDebtor re-render on mutation', () => {
+  it('updates a sibling consumer after setDebtorRule() is called from elsewhere', () => {
+    let renderer!: ReactTestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = ReactTestRenderer.create(<RuleProbe />);
+    });
+
+    expect(textAt(renderer.root, 'rule-status')).toBe('none');
+
+    let setRule!: ReturnType<typeof useSetDebtorRule>;
+    function Capture() {
+      setRule = useSetDebtorRule();
+      return null;
+    }
+    act(() => {
+      ReactTestRenderer.create(<Capture />);
+    });
+
+    let result: ReturnType<ReturnType<typeof useSetDebtorRule>> | undefined;
+    act(() => {
+      result = setRule(RULE_DEBTOR_ID, { amountThresholdEUR: 15 });
+    });
+
+    expect(textAt(renderer.root, 'rule-status')).toBe('over-15');
+    // debtor-spotify's most recent transaction (-9.99) does not exceed 15,
+    // and debtor-spotify defaults to Bad — so this flips them to Trusted.
+    expect(result).toEqual({ autoFlippedTo: 'Trusted' });
+  });
+});
+
+/**
+ * useAutoFlipNotices()/useAcknowledgeAutoFlipNotice(): same sibling-consumer
+ * re-render shape as the hooks above, since autoFlipNotices is also
+ * useSyncExternalStore-backed.
+ */
+const NOTICE_DEBTOR_ID = 'debtor-landlord';
+
+function NoticeProbe() {
+  const notices = useAutoFlipNotices();
+  const notice = notices.find(n => n.debtorId === NOTICE_DEBTOR_ID);
+  return <Text testID="notice-status">{notice ? 'pending' : 'none'}</Text>;
+}
+
+describe('useAutoFlipNotices / useAcknowledgeAutoFlipNotice', () => {
+  it('reflects a passive auto-flip notice and clears it on acknowledge', () => {
+    let renderer!: ReactTestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = ReactTestRenderer.create(<NoticeProbe />);
+    });
+    expect(textAt(renderer.root, 'notice-status')).toBe('none');
+
+    let setRule!: ReturnType<typeof useSetDebtorRule>;
+    let acknowledge!: ReturnType<typeof useAcknowledgeAutoFlipNotice>;
+    function Capture() {
+      setRule = useSetDebtorRule();
+      acknowledge = useAcknowledgeAutoFlipNotice();
+      return null;
+    }
+    act(() => {
+      ReactTestRenderer.create(<Capture />);
+    });
+
+    // Setting a threshold via Save (setRule) their last charge (-850) does
+    // NOT exceed keeps debtor-landlord Trusted (no flip, no notice) —
+    // avoids the Save-time flip path entirely, so the notice below can only
+    // come from the passive path.
+    act(() => {
+      setRule(NOTICE_DEBTOR_ID, { amountThresholdEUR: 900 });
+    });
+    expect(textAt(renderer.root, 'notice-status')).toBe('none');
+
+    // A passively-arriving transaction exceeding the threshold flips
+    // Trusted -> Bad and records a notice — no toast/screen involved.
+    act(() => {
+      addTransaction({
+        id: 'tx-notice-test',
+        debtorId: NOTICE_DEBTOR_ID,
+        amountEUR: -950,
+        timestamp: new Date().toISOString(),
+        paymentType: 'Bank transfer',
+        reference: 'Large unexpected charge',
+      });
+    });
+    expect(textAt(renderer.root, 'notice-status')).toBe('pending');
+
+    act(() => {
+      acknowledge(NOTICE_DEBTOR_ID);
+    });
+    expect(textAt(renderer.root, 'notice-status')).toBe('none');
   });
 });

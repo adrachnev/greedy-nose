@@ -29,40 +29,27 @@
           <div class="tx-info"><div class="tx-date">Reference</div><div class="tx-name" style="font-size:14px;">Invoice #99213 loan installment</div></div>
         </div>
 
-        <div class="section-label">Mark this debitor</div>
-        <p class="hint">This applies to <strong>all</strong> current and future transactions from ScamyLoans GmbH — not just this one.</p>
-
-        <div class="toggle-row">
-          <div class="toggle-btn">Trusted</div>
-          <div class="toggle-btn bad-active">Bad</div>
-        </div>
-
-        <div class="section-label">Alert conditions (optional)</div>
-        <p class="hint">Leave blank to get notified on every charge from this debitor.</p>
-
-        <div class="card">
+        <!--
+          Display-only: this screen shows the transaction and the debitor's
+          current status, but does not edit either. Classification (Trusted/
+          Bad) and alert-threshold editing both live on the Edit Rule screen
+          (04b-debitor-edit.html) now — reached via "Manage this debitor"
+          below — so there is exactly one place that owns that state.
+        -->
+        <a class="card" href="04b-debitor-edit.html" style="flex-direction:row;align-items:center;justify-content:space-between;text-decoration:none;">
           <div class="tx-info">
-            <div class="tx-date">Only alert if amount exceeds</div>
-            <div class="tx-name" style="font-size:15px;display:flex;align-items:center;gap:6px;">
-              €<span style="border-bottom:1px solid var(--border);flex:1;padding:4px 0;color:var(--text-muted);">e.g. 20.00</span>
-            </div>
+            <div class="tx-date">Debitor status</div>
+            <div class="tx-name" style="font-size:15px;">ScamyLoans GmbH</div>
           </div>
-          <div class="divider"></div>
-          <div class="tx-info">
-            <div class="tx-date">Only alert if charged more than</div>
-            <div class="tx-name" style="font-size:15px;display:flex;align-items:center;gap:6px;">
-              <span style="border-bottom:1px solid var(--border);flex:1;padding:4px 0;color:var(--text-muted);">e.g. 1</span> times per <span style="border-bottom:1px solid var(--border);padding:4px 8px;color:var(--text-muted);">month ▾</span>
-            </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="pill pill-bad">Bad</span>
+            <span style="color:var(--text-muted);">Manage ›</span>
           </div>
-        </div>
-        <p class="hint">If you set both, <strong>both</strong> must be true to trigger an alert (AND).</p>
+        </a>
 
         <div style="flex:1"></div>
-        <p class="hint" style="text-align:center;">You'll get an instant notification when this debitor's charges match the conditions above.</p>
       </div>
     </div>
-
-    <div class="toast" style="bottom:24px;">Saved — ScamyLoans GmbH marked Bad</div>
   </div>
 </body>
 </html>

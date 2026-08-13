@@ -5,20 +5,26 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import {
+  AutoFlipNotice,
   Debtor,
   Rule,
+  RuleThresholds,
   Transaction,
+  acknowledgeAutoFlipNotice,
+  autoFlipNotices,
   debtors,
   rules,
+  setDebtorRule,
   setDebtorTrusted,
   subscribeToDataChanges,
   transactions,
 } from '../mocks/data';
 
-// Debtors are mutable (setDebtorTrusted) — subscribe via useSyncExternalStore
-// so screens re-render when the Trusted/Bad flag changes elsewhere (e.g.
-// navigating back to the list after toggling on the detail screen).
-// Transactions/Rules have no write path yet, so they're returned as-is.
+// Debtors, Rules, and Transactions are all mutable (setDebtorTrusted /
+// setDebtorRule / addTransaction) — subscribe via useSyncExternalStore so
+// screens re-render when any of them changes elsewhere (e.g. navigating
+// back to the list after editing a rule on DebitorEditScreen, or a new
+// transaction arriving via addTransaction).
 
 export function useDebtors(): Debtor[] {
   return useSyncExternalStore(subscribeToDataChanges, () => debtors);
@@ -30,24 +36,52 @@ export function useDebtor(debtorId: string): Debtor | undefined {
 }
 
 /** Exposes the Trusted/Bad mutation to screens (e.g. TransactionDetailScreen's toggle). */
-export function useSetDebtorTrusted(): (debtorId: string, trusted: boolean) => void {
+export function useSetDebtorTrusted(): (
+  debtorId: string,
+  trusted: boolean,
+) => { clearedAmountThresholdEUR: number | undefined } {
   return useCallback((debtorId: string, trusted: boolean) => {
-    setDebtorTrusted(debtorId, trusted);
+    return setDebtorTrusted(debtorId, trusted);
   }, []);
 }
 
 export function useTransactions(): Transaction[] {
-  return transactions;
+  return useSyncExternalStore(subscribeToDataChanges, () => transactions);
 }
 
 export function useTransaction(transactionId: string): Transaction | undefined {
-  return useMemo(() => transactions.find(t => t.id === transactionId), [transactionId]);
+  const all = useTransactions();
+  return useMemo(() => all.find(t => t.id === transactionId), [all, transactionId]);
 }
 
 export function useRules(): Rule[] {
-  return rules;
+  return useSyncExternalStore(subscribeToDataChanges, () => rules);
 }
 
 export function useRuleForDebtor(debtorId: string): Rule | undefined {
-  return useMemo(() => rules.find(r => r.debtorId === debtorId), [debtorId]);
+  const all = useRules();
+  return useMemo(() => all.find(r => r.debtorId === debtorId), [all, debtorId]);
+}
+
+/** Exposes the alert-condition mutation to screens (DebitorEditScreen's Save/Clear). */
+export function useSetDebtorRule(): (
+  debtorId: string,
+  thresholds: RuleThresholds,
+) => { autoFlippedTo: 'Bad' | 'Trusted' | null } {
+  return useCallback((debtorId: string, thresholds: RuleThresholds) => {
+    return setDebtorRule(debtorId, thresholds);
+  }, []);
+}
+
+/** Pending passive auto-flip-to-Bad markers, surfaced on RulesListScreen
+ * until the user opens that debtor's Edit screen — see acknowledgeAutoFlipNotice. */
+export function useAutoFlipNotices(): AutoFlipNotice[] {
+  return useSyncExternalStore(subscribeToDataChanges, () => autoFlipNotices);
+}
+
+/** Exposes clearing a debtor's pending auto-flip notice (DebitorEditScreen, on mount). */
+export function useAcknowledgeAutoFlipNotice(): (debtorId: string) => void {
+  return useCallback((debtorId: string) => {
+    acknowledgeAutoFlipNotice(debtorId);
+  }, []);
 }

@@ -5,6 +5,8 @@ import { useColorScheme } from 'react-native';
 import TabIcon, { TabIconName } from '../components/TabIcon';
 import { isOnboardingComplete } from '../mocks/mockOnboardingState';
 import ConnectBankScreen from '../screens/ConnectBankScreen';
+import DebitorEditScreen from '../screens/DebitorEditScreen';
+import RulesListScreen from '../screens/RulesListScreen';
 import StubScreen from '../screens/StubScreen';
 import TransactionDetailScreen from '../screens/TransactionDetailScreen';
 import TransactionListScreen from '../screens/TransactionListScreen';
@@ -12,11 +14,13 @@ import { dark, light } from '../theme/colors';
 import {
   MainTabParamList,
   OnboardingStackParamList,
+  RulesStackParamList,
   TransactionsStackParamList,
 } from './types';
 
 const OnboardingStack = createNativeStackNavigator<OnboardingStackParamList>();
 const TransactionsStack = createNativeStackNavigator<TransactionsStackParamList>();
+const RulesStack = createNativeStackNavigator<RulesStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 /**
@@ -70,13 +74,18 @@ function TransactionsNavigator() {
     <TransactionsStack.Navigator screenOptions={{ headerShown: false }}>
       <TransactionsStack.Screen name="TransactionList" component={TransactionListScreen} />
       <TransactionsStack.Screen name="TransactionDetail" component={TransactionDetailScreen} />
+      <TransactionsStack.Screen name="DebitorEdit" component={DebitorEditScreen} />
     </TransactionsStack.Navigator>
   );
 }
 
-function RulesStub() {
+/** Rules tab: list + edit nested stack, so the tab bar stays visible. */
+function RulesNavigator() {
   return (
-    <StubScreen title="Rules" mockFile="04-debitor-rules.html" showMockBadge />
+    <RulesStack.Navigator screenOptions={{ headerShown: false }}>
+      <RulesStack.Screen name="RulesList" component={RulesListScreen} />
+      <RulesStack.Screen name="DebitorEdit" component={DebitorEditScreen} />
+    </RulesStack.Navigator>
   );
 }
 
@@ -128,7 +137,7 @@ function MainTabs() {
       })}
     >
       <Tab.Screen name="Transactions" component={TransactionsNavigator} />
-      <Tab.Screen name="Rules" component={RulesStub} />
+      <Tab.Screen name="Rules" component={RulesNavigator} />
       <Tab.Screen name="Settings" component={SettingsStub} />
     </Tab.Navigator>
   );

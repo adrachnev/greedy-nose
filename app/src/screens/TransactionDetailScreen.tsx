@@ -1,15 +1,12 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useEffect, useRef, useState } from 'react';
+import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MockDataBadge from '../components/MockDataBadge';
-import Toast from '../components/Toast';
-import { useDebtor, useRuleForDebtor, useSetDebtorTrusted, useTransaction } from '../data/hooks';
+import { useDebtor, useTransaction } from '../data/hooks';
 import { TransactionsStackParamList } from '../navigation/types';
 import { dark, light } from '../theme/colors';
 import { formatCurrencyEUR, formatLongDate, formatTime } from '../utils/format';
-
-const TOAST_DURATION_MS = 2000;
 
 type Props = NativeStackScreenProps<TransactionsStackParamList, 'TransactionDetail'>;
 
@@ -18,24 +15,6 @@ export default function TransactionDetailScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const transaction = useTransaction(route.params.transactionId);
   const debtor = useDebtor(transaction?.debtorId ?? '');
-  const rule = useRuleForDebtor(transaction?.debtorId ?? '');
-  const setDebtorTrusted = useSetDebtorTrusted();
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  useEffect(() => {
-    return () => clearTimeout(toastTimer.current);
-  }, []);
-
-  function handleSetTrusted(trusted: boolean) {
-    if (!debtor || debtor.trusted === trusted) {
-      return;
-    }
-    setDebtorTrusted(debtor.id, trusted);
-    setToastMessage(`Saved — ${debtor.name} marked ${trusted ? 'Trusted' : 'Bad'}`);
-    clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToastMessage(null), TOAST_DURATION_MS);
-  }
 
   if (!transaction || !debtor) {
     return (
@@ -93,89 +72,32 @@ export default function TransactionDetailScreen({ route, navigation }: Props) {
           </View>
         </View>
 
-        <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
-          Mark this debitor
-        </Text>
-        <Text style={[styles.hint, { color: theme.textMuted }]}>
-          This applies to <Text style={styles.bold}>all</Text> current and future transactions
-          from {debtor.name} — not just this one.
-        </Text>
-
-        <View style={styles.toggleRow}>
-          <Pressable
-            onPress={() => handleSetTrusted(true)}
-            style={[
-              styles.toggleBtn,
-              { borderColor: theme.border, backgroundColor: theme.surface },
-              debtor.trusted && { borderColor: theme.good, backgroundColor: theme.goodBg },
-            ]}
-          >
-            <Text
-              style={[
-                styles.toggleBtnText,
-                { color: theme.textMuted },
-                debtor.trusted && { color: theme.good },
-              ]}
-            >
-              Trusted
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => handleSetTrusted(false)}
-            style={[
-              styles.toggleBtn,
-              { borderColor: theme.border, backgroundColor: theme.surface },
-              !debtor.trusted && { borderColor: theme.bad, backgroundColor: theme.badBg },
-            ]}
-          >
-            <Text
-              style={[
-                styles.toggleBtnText,
-                { color: theme.textMuted },
-                !debtor.trusted && { color: theme.bad },
-              ]}
-            >
-              Bad
-            </Text>
-          </Pressable>
-        </View>
-
-        <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
-          Alert conditions (optional)
-        </Text>
-        <Text style={[styles.hint, { color: theme.textMuted }]}>
-          Leave blank to get notified on every charge from this debitor.
-        </Text>
-
-        <View style={[styles.card, { backgroundColor: theme.surface }]}>
-          <View style={styles.infoRow}>
-            <Text style={[styles.infoLabel, { color: theme.textMuted }]}>
-              Only alert if amount exceeds
-            </Text>
-            <Text style={[styles.infoValue, { color: theme.text }]}>
-              {rule?.amountThresholdEUR != null
-                ? formatCurrencyEUR(rule.amountThresholdEUR)
-                : '— (every charge)'}
-            </Text>
+        {/*
+          Display-only: this screen shows the transaction and the debitor's
+          current status, but does not edit either. Classification
+          (Trusted/Bad) and alert-threshold editing both live on the Edit
+          Rule screen now — reached via "Manage this debitor" below — so
+          there is exactly one place that owns that state. See
+          mocks/03-transaction-detail.html.
+        */}
+        <Pressable
+          onPress={() => navigation.navigate('DebitorEdit', { debtorId: debtor.id })}
+          style={[styles.card, styles.manageRow, { backgroundColor: theme.surface }]}
+        >
+          <View>
+            <Text style={[styles.infoLabel, { color: theme.textMuted }]}>Debitor status</Text>
+            <Text style={[styles.debtorNameSmall, { color: theme.text }]}>{debtor.name}</Text>
           </View>
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          <View style={styles.infoRow}>
-            <Text style={[styles.infoLabel, { color: theme.textMuted }]}>
-              Only alert if charged more than
-            </Text>
-            <Text style={[styles.infoValue, { color: theme.text }]}>
-              {rule?.frequencyThreshold
-                ? `${rule.frequencyThreshold.count}x per ${rule.frequencyThreshold.period}`
-                : '— (every charge)'}
-            </Text>
+          <View style={styles.manageRowRight}>
+            <View style={[styles.pill, { backgroundColor: avatarBg }]}>
+              <Text style={[styles.pillText, { color: avatarColor }]}>
+                {debtor.trusted ? 'Trusted' : 'Bad'}
+              </Text>
+            </View>
+            <Text style={[styles.manageLink, { color: theme.textMuted }]}>Manage ›</Text>
           </View>
-        </View>
-        <Text style={[styles.hint, { color: theme.textMuted }]}>
-          If you set both, <Text style={styles.bold}>both</Text> must be true to trigger an
-          alert (AND).
-        </Text>
+        </Pressable>
       </ScrollView>
-      <Toast message={toastMessage} />
     </View>
   );
 }
@@ -230,6 +152,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
+  debtorNameSmall: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
   amount: {
     fontSize: 22,
     fontWeight: '600',
@@ -240,9 +166,6 @@ const styles = StyleSheet.create({
   },
   notFoundText: {
     padding: 16,
-  },
-  bold: {
-    fontWeight: '700',
   },
   infoRow: {
     gap: 2,
@@ -257,28 +180,26 @@ const styles = StyleSheet.create({
   divider: {
     height: 1,
   },
-  sectionLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
-    marginTop: 8,
-    marginHorizontal: 4,
-  },
-  toggleRow: {
+  manageRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  manageRowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
   },
-  toggleBtn: {
-    flex: 1,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  toggleBtnText: {
+  manageLink: {
     fontSize: 14,
+  },
+  pill: {
+    borderRadius: 999,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+  },
+  pillText: {
+    fontSize: 11,
     fontWeight: '600',
   },
 });

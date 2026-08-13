@@ -23,6 +23,25 @@ export function formatLongDate(isoTimestamp: string): string {
   });
 }
 
+/** "just now" / "5m ago" / "3h ago", falling back to a short date for
+ * anything a day or older. Used for the "Auto-marked Bad · Xm ago" marker
+ * on RulesListScreen — a minor UI nicety, so simple buckets are fine. */
+export function formatRelativeTime(isoTimestamp: string): string {
+  const diffMs = Date.now() - new Date(isoTimestamp).getTime();
+  const diffMinutes = Math.floor(diffMs / 60000);
+  if (diffMinutes < 1) {
+    return 'just now';
+  }
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m ago`;
+  }
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  }
+  return new Date(isoTimestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 function isSameCalendarDay(a: Date, b: Date): boolean {
   return (
     a.getFullYear() === b.getFullYear() &&
