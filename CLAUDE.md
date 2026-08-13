@@ -1,5 +1,9 @@
 # Greedy Nose
 
+## Language
+
+Always respond in English in this project, overriding any global default language setting.
+
 A mobile app (iOS + Android) that connects to a European bank account and notifies the user
 the moment a debitor they've flagged as "Bad" charges them. That's the whole product — it is
 deliberately not a general finance/budgeting app.
