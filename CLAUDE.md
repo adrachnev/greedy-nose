@@ -58,7 +58,9 @@ Trusted/Bad auto-flip tied to the amount threshold, the manual-toggle-clears-the
 and the passive-flip-is-Bad-only + "Auto-marked Bad · Xm ago" marker are all implemented — see
 the "Alert thresholds" and following bullets under Product decisions below for the full behavior.
 
-**Known issue, not yet fixed (pick this up next session):** editing the amount field on
+**Known issue — do NOT fix it, it disappears with the R8 rework** (`REQUIREMENTS.md`): the
+toggle no longer touches the rule at all, so the conflict this describes cannot arise. Kept
+here only to explain the behavior still present in the shipped code. Editing the amount field on
 `DebitorEditScreen` without pressing Save, then tapping the Trusted/Bad toggle, does nothing
 visible to the user — the toggle only acts on the last *saved* rule state, so an unsaved edit
 sitting in the text field is silently ignored by the toggle instead of prompting the user or
