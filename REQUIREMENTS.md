@@ -225,6 +225,20 @@ matching screen is coded):
    creditor ID**. Open question: show the creditor ID instead, or alongside?
 4. `01e` offers "Choose a different bank" while v1 is N26-only.
 
+### Do this first — reconcile `ARCHITECTURE.md`
+
+Reviewed against this file on 2026-08-14 and found to diverge in nine places, listed as
+`A1`–`A9` at the top of that document. `A1` (the rule engine evaluates the amount for **bad**
+payees instead of good ones) and `A2` (the consent-expiry push is ruled out) are outright
+contradictions; the rest are stale terminology or design the spec needs and the architecture
+never described.
+
+**The architecture is reconciled before any code is touched** (owner's call, 2026-08-14) — a
+design that contradicts the spec would otherwise get built into both halves of the system
+before anyone notices.
+
+### Then — the `app/` code rework
+
 - **Rename for R0** throughout `app/src/`: `debtor`/`debitor` → `payee`, "Trusted" → "Good", and
   `transaction` → `debit` (`TransactionListScreen`, `TransactionDetailScreen`, `useTransactions`,
   the `transactions` fixture, and the Transactions tab label).
@@ -232,13 +246,11 @@ matching screen is coded):
   `DebitorEditScreen`, `RulesListScreen`): the save-time auto-flip and its toast, the passive
   Bad-only flip, the "Auto-marked Bad · Xm ago" marker and its cleared-on-open logic, and the
   rule-clearing side effect of the manual toggle — plus the tests that pin that behavior.
-- **Verify R3a against Enable Banking** before implementing it: which of SEPA creditor ID,
-  IBAN, and merchant name their transaction payload actually returns per charge type is
-  unconfirmed.
-- **Reconcile `ARCHITECTURE.md`** — reviewed against this file on 2026-08-14 and found to
-  diverge in nine places, listed as `A1`–`A9` at the top of that document. `A1` (the rule engine
-  evaluates the amount for **bad** payees instead of good ones) and `A2` (the consent-expiry
-  push is ruled out) are outright contradictions; the rest are stale terminology or missing
-  design. Do this before any backend work starts.
+
+### Independent of both
+
+- **Verify R3a against Enable Banking**: which of SEPA creditor ID, IBAN, and merchant name
+  their transaction payload actually returns per charge type is unconfirmed. `A6` depends on
+  the answer.
 - `CLAUDE.md`'s "Product decisions" section must be trimmed to point here for anything about
   classification.

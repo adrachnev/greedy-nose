@@ -7,8 +7,10 @@ reconciled with it**.
 ## ⚠ Known divergence from `REQUIREMENTS.md`
 
 Reviewed against the spec on **2026-08-14**; the reconciliation itself is the next session's
-work. Everything not listed here still describes the intended system, but do not implement
-`A1`–`A4` as written — `REQUIREMENTS.md` wins wherever the two disagree.
+work, and it happens **before any code is written** (owner's call — a design that contradicts
+the spec would otherwise get built into both halves of the system before anyone notices).
+Everything not listed here still describes the intended system, but do not implement `A1`–`A4`
+as written — `REQUIREMENTS.md` wins wherever the two disagree.
 
 **Contradictions — the text below is wrong, not merely incomplete:**
 
