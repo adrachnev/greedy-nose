@@ -8,6 +8,15 @@ A mobile app (iOS + Android) that connects to a European bank account and notifi
 the moment a debitor they've flagged as "Bad" charges them. That's the whole product — it is
 deliberately not a general finance/budgeting app.
 
+## Requirements
+
+**`REQUIREMENTS.md` is the single source of truth for what the app does. Read it first.**
+Mocks and implementation must follow it. Where anything in this file or `ARCHITECTURE.md`
+disagrees with it, `REQUIREMENTS.md` wins — in particular, its classification model supersedes
+the "Alert thresholds" and auto-flip bullets under Product decisions below, and its `R0`
+terminology (payee, good/bad) supersedes the debtor/debitor/Trusted wording used throughout
+this file. Settled 2026-08-14, no open points left; the mocks and the code do not match it yet.
+
 ## Status
 
 Mocks in `mocks/` are reviewed and settled. Framework decided: **React Native**. Bare RN app
