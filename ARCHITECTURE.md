@@ -35,11 +35,15 @@ as written — `REQUIREMENTS.md` wins wherever the two disagree.
 - **A5 — Nothing filters incoming money (R2a).** Enable Banking returns credits and debits;
   R2a says credits are never listed, never notify, and never create a payee. That filter has
   to live in the ingestion worker, and without it the first salary payment creates an alerting
-  payee.
-- **A6 — Payee identity is one phrase**, "matches counterparty → debitor". R3a's three-tier key
-  (SEPA creditor ID → IBAN → normalized name), storing the resolved key with the raw strings
-  seen, and R3b's "split rather than merge when uncertain" have no design yet. This is the
-  hardest correctness problem in the system.
+  payee. The field to filter on is `credit_debit_indicator`, whose only values are `CRDT` and
+  `DBIT` — keep `DBIT`.
+- **A6 — Payee identity is one phrase**, "matches counterparty → debitor". R3a's key, storing
+  the resolved key with the raw strings seen, and R3b's "split rather than merge when
+  uncertain" have no design yet. This is the hardest correctness problem in the system, and it
+  got harder: Enable Banking's transaction model has **no SEPA creditor identifier and no
+  mandate ID** (checked 2026-08-14), so R3a's strongest tier is unavailable as documented even
+  though N26 itself publishes `creditorID`/`mandateID`. See the warning box under R3a — that
+  product decision comes first, then this design.
 - **A7 — Classification is derived, never stored (R6).** Not stated anywhere. R7 needs a rule
   edit to re-label existing debits instantly — free if derived at read time, a migration job if
   persisted on the debit.
@@ -264,4 +268,9 @@ cost even serverless, which is why the data store moved to a free-tier Postgres 
   worth confirming before scaling beyond a handful of users.
 - Confirm Enable Banking gives a stable transaction ID that survives a status change
   (e.g. pending → booked), since the duplicate-alert prevention in Transaction identity
-  depends on it.
+  depends on it. Their model exposes **three** candidate identifiers — `entry_reference`,
+  `transaction_id` and `reference_number` — and the public docs do not say which is stable
+  across polls or across `PEND` → `BOOK`. Pick deliberately; R10b rests on this.
+- Whether the SEPA creditor identifier / mandate ID can be reached at all (raw ASPSP payload
+  passthrough, an undocumented field, or not at all). N26 publishes both; Enable Banking's
+  normalized model does not carry them. Blocks the R3a decision and therefore `A6`.

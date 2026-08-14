@@ -56,6 +56,17 @@ the name alone cannot key a rule. Use the strongest identifier the charge carrie
 
 The resolved key is stored on the payee, together with the raw strings seen for it.
 
+> **⚠ Tier 1 may not be obtainable — decide before implementing.** Checked against Enable
+> Banking's docs on 2026-08-14: their normalized `Transaction` model carries `creditor` (name),
+> `creditor_account` (identification + scheme_name), `creditor_agent`, `merchant_category_code`,
+> `remittance_information`, `bank_transaction_code`, `credit_debit_indicator`, `status`,
+> `entry_reference`, `transaction_id`, `reference_number` and the amount fields — but **no SEPA
+> creditor identifier and no mandate ID**. N26's own PSD2 interface does expose `creditorID` and
+> `mandateID` (added 2022-04-25), so the data exists at the bank and does not survive the
+> aggregator's model. Options: ask Enable Banking whether it is reachable, or drop to a two-tier
+> key (IBAN → normalized name) and accept weaker matching for direct debits — which is exactly
+> the charge type this product cares most about.
+
 **R3b — When matching is uncertain, split rather than merge.** Splitting one payee into two
 shows a known payee as unknown → a false alert: annoying but safe. Merging two payees into one
 lets an unknown payee inherit "good" → a missed alert, which breaks R1.
@@ -249,8 +260,8 @@ before anyone notices.
 
 ### Independent of both
 
-- **Verify R3a against Enable Banking**: which of SEPA creditor ID, IBAN, and merchant name
-  their transaction payload actually returns per charge type is unconfirmed. `A6` depends on
-  the answer.
+- ~~**Verify R3a against Enable Banking**~~ — done 2026-08-14, and the answer is bad news: the
+  SEPA creditor ID R3a leans on is absent from their transaction model. See the warning box
+  under R3a; the decision it asks for is still open, and `A6` depends on it.
 - `CLAUDE.md`'s "Product decisions" section must be trimmed to point here for anything about
   classification.
