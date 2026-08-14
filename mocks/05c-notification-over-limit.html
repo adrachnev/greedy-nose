@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Notification — Over Limit</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;padding-top:120px;color:#1c1c1e;">
+      <div style="font-size:70px;font-weight:200;">9:41</div>
+      <div style="font-size:18px;color:#48484a;">Monday, August 4</div>
+    </div>
+
+    <!--
+      R12a's third body — the alert that only a limit can produce.
+
+      REWE is a payee the user deliberately marked Good, so without the €30.00
+      limit this charge would have passed in silence. It is the case the whole
+      threshold feature exists for, and the body has to name the limit: told
+      only "REWE charged you €34.21", the user would wonder why the app is
+      bothering them about a supermarket they already trust.
+
+      Tapping it opens 03b-debit-detail-over-limit.html.
+    -->
+    <div class="notif-banner">
+      <div class="notif-icon">G</div>
+      <div class="notif-text">
+        <div class="notif-title">REWE Markt · €34.21</div>
+        <div class="notif-body">Over your limit of €30.00.</div>
+      </div>
+      <div class="notif-time">now</div>
+    </div>
+  </div>
+
+  <p style="position:absolute;bottom:16px;left:0;right:0;text-align:center;font-size:11px;color:#8e8e93;">A good payee can still alert you. The payee stays Good — only this charge is Bad.</p>
+</body>
+</html>

@@ -157,6 +157,10 @@ throughout (chosen so it maps fairly directly to React Native, the chosen stack)
   payee (no amount field, R14), `05b` the reconnect summary notification (R20), and `01d` now
   shows the disconnected banner **on top of** the debit list rather than replacing it (R19).
   Comments inside the files cite the requirement they implement.
+- A critical pass against the spec on 2026-08-14 added `03b` and `05c`, the good-payee-over-limit
+  debit detail and its notification — the subtle half of `R5` that previously existed only as a
+  list row and two HTML comments. Four known gaps were left open on purpose; they are listed at
+  the bottom of `REQUIREMENTS.md`.
 
 Iterate on mocks before touching architecture/code — that was an explicit ordering decision:
 mocks first, then pick the stack, then implement and test.

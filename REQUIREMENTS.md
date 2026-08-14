@@ -210,7 +210,20 @@ may show on the lock screen), and the onboarding classify flow's details.
 
 *(`mocks/` is done: renamed to payee/Good and transaction/debit, per-debit classification in the
 list, the amount field split across 04b/04d, R12a notification wording, the reconnect summary
-05b, and the disconnected banner folded into 01d.)*
+05b, the disconnected banner folded into 01d, and the good-payee-over-limit case drawn in 03b +
+05c.)*
+
+**Known mock gaps, deliberately left open** (from the 2026-08-14 review — decide before the
+matching screen is coded):
+
+1. R19 covers expired **and** disconnected, but only expired is drawn (`01d`). After the user
+   taps Disconnect there is no mock of the debit list in that state, and Settings still shows an
+   "Active" pill.
+2. R19's "one push when the consent expires by itself" has no mock. That push is what reaches a
+   user who has not opened the app in a week.
+3. `03` shows the payee's **IBAN** for a direct debit, but R3a keys direct debits on the **SEPA
+   creditor ID**. Open question: show the creditor ID instead, or alongside?
+4. `01e` offers "Choose a different bank" while v1 is N26-only.
 
 - **Rename for R0** throughout `app/src/`: `debtor`/`debitor` → `payee`, "Trusted" → "Good", and
   `transaction` → `debit` (`TransactionListScreen`, `TransactionDetailScreen`, `useTransactions`,

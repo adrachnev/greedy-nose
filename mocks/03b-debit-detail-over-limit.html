@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Debit Detail — Over Limit</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
+    <div class="nav-bar">
+      <a class="nav-link" href="02-debit-list.html">‹ Back</a>
+      <h1 style="font-size:17px;">Debit</h1>
+      <span style="width:44px;"></span>
+    </div>
+    <div class="screen">
+      <div class="content">
+
+        <!--
+          The subtle half of R5: a GOOD payee with a bad debit.
+
+          This is the only screen where the two pills disagree — the debit is
+          Bad, the payee below it is Good — and that is exactly the point. The
+          payee stays good, their next €5 charge is fine again, and nothing
+          about this charge moves their status (R8). Only the amount decided
+          this one.
+
+          It is also the R3a card-payment case: no IBAN and no creditor ID
+          exist here, so the rule is keyed on the normalized name, and the raw
+          bank text is shown for it.
+        -->
+
+        <div class="card" style="align-items:center;text-align:center;gap:6px;">
+          <div class="avatar" style="width:56px;height:56px;background:var(--good-bg);color:var(--good);font-size:18px;">RE</div>
+          <div class="tx-name" style="font-size:18px;">REWE Markt</div>
+          <div class="tx-amount" style="font-size:22px;color:var(--bad);">€34.21</div>
+          <div class="tx-date">Card payment · Aug 3, 2026 · 12:41</div>
+        </div>
+
+        <div class="card" style="gap:6px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <div class="tx-date">This debit</div>
+            <span class="pill pill-bad">Bad</span>
+          </div>
+          <div class="tx-name" style="font-size:15px;">Over your limit of €30.00.</div>
+        </div>
+
+        <div class="card">
+          <div class="tx-info"><div class="tx-date">Payee text from the bank</div><div class="tx-name" style="font-size:14px;">REWE SAGT DANKE 4711</div></div>
+          <div class="divider"></div>
+          <div class="tx-info"><div class="tx-date">Reference</div><div class="tx-name" style="font-size:14px;">Card payment · Berlin</div></div>
+        </div>
+
+        <a class="card" href="04b-payee-edit.html" style="flex-direction:row;align-items:center;justify-content:space-between;text-decoration:none;">
+          <div class="tx-info">
+            <div class="tx-date">Payee status</div>
+            <div class="tx-name" style="font-size:15px;">REWE Markt · limit €30.00</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="pill pill-good">Good</span>
+            <span style="color:var(--text-muted);">Manage ›</span>
+          </div>
+        </a>
+
+        <div style="flex:1"></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
