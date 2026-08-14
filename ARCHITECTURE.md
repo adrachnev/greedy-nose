@@ -1,7 +1,59 @@
 # Architecture
 
 Status: decided at a high level; not yet implemented. Written after the mocks settled, per
-the project's mocks-first ordering.
+the project's mocks-first ordering — but **before `REQUIREMENTS.md` existed, and not yet
+reconciled with it**.
+
+## ⚠ Known divergence from `REQUIREMENTS.md`
+
+Reviewed against the spec on **2026-08-14**; the reconciliation itself is the next session's
+work. Everything not listed here still describes the intended system, but do not implement
+`A1`–`A4` as written — `REQUIREMENTS.md` wins wherever the two disagree.
+
+**Contradictions — the text below is wrong, not merely incomplete:**
+
+- **A1 — The rule engine's logic is inverted.** "Backend → Rule engine" and the diagram edge
+  `Rules -- "Bad, thresholds (if set) met" --> Notify` both say: if the payee is **Bad**,
+  evaluate the amount threshold. R5 says the reverse — the amount only applies to a **good**
+  payee, and a bad payee alerts on every charge with the amount ignored. Built as written,
+  every bad payee carrying an old limit would fall silent, which is the one failure R1 exists
+  to prevent.
+- **A2 — The consent-expiry push is explicitly ruled out.** "Reliability: poll health
+  monitoring" routes expired consents to in-app state only, and the diagram sends
+  `Health --> App` without touching FCM. R19 requires a **push to the user** when the consent
+  expires by itself, because a user who does not open the app for days cannot see in-app state.
+- **A3 — Frequency/count thresholds are gone** (amount is the only threshold). Still present in
+  the component table, the "Rule engine" bullet, and its rolling-window rationale.
+- **A4 — Terminology (R0)**: `debitor` → payee, `Trusted`/`Bad` → good/bad, `Transactions`
+  table and "tx history" → debits. Bank-facing uses stay as they are: Enable Banking's
+  *transaction feed* and the bank-issued *transaction ID* keep their names.
+
+**Gaps — the spec requires something this document does not describe:**
+
+- **A5 — Nothing filters incoming money (R2a).** Enable Banking returns credits and debits;
+  R2a says credits are never listed, never notify, and never create a payee. That filter has
+  to live in the ingestion worker, and without it the first salary payment creates an alerting
+  payee.
+- **A6 — Payee identity is one phrase**, "matches counterparty → debitor". R3a's three-tier key
+  (SEPA creditor ID → IBAN → normalized name), storing the resolved key with the raw strings
+  seen, and R3b's "split rather than merge when uncertain" have no design yet. This is the
+  hardest correctness problem in the system.
+- **A7 — Classification is derived, never stored (R6).** Not stated anywhere. R7 needs a rule
+  edit to re-label existing debits instantly — free if derived at read time, a migration job if
+  persisted on the debit.
+- **A8 — Reconnecting after a gap is an unhandled third mode (R20).** The worker has two:
+  first-run bulk pull and steady-state incremental. A reconnect is neither — the gap's charges
+  are unseen IDs, so steady state would fire one push each instead of R20's single summary.
+- **A9 — No data lifecycle for R18**: disconnect keeps rules and history, account deletion
+  wipes both.
+
+**Smaller:** the rule engine must hand the *reason* to the dispatcher so R12a can word the body;
+R16's "compare against the booked amount in the account currency" is unstated; and "Initial sync
+vs steady-state polling" still cites `01c-classify-debitors.html`, renamed to
+`01c-classify-payees.html`.
+
+**Verified aligned:** "Transaction identity" matches R10b exactly. The polling design, health
+monitoring and cost sections are untouched by the spec.
 
 ## Component diagram
 

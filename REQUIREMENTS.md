@@ -235,7 +235,10 @@ matching screen is coded):
 - **Verify R3a against Enable Banking** before implementing it: which of SEPA creditor ID,
   IBAN, and merchant name their transaction payload actually returns per charge type is
   unconfirmed.
-- `ARCHITECTURE.md` still describes count/frequency thresholds and "AND logic" in the Rule
-  Engine (component table + Backend section). Frequency was cut — that text is stale.
+- **Reconcile `ARCHITECTURE.md`** — reviewed against this file on 2026-08-14 and found to
+  diverge in nine places, listed as `A1`–`A9` at the top of that document. `A1` (the rule engine
+  evaluates the amount for **bad** payees instead of good ones) and `A2` (the consent-expiry
+  push is ruled out) are outright contradictions; the rest are stale terminology or missing
+  design. Do this before any backend work starts.
 - `CLAUDE.md`'s "Product decisions" section must be trimmed to point here for anything about
   classification.

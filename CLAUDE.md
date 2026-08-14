@@ -15,7 +15,9 @@ Mocks and implementation must follow it. Where anything in this file or `ARCHITE
 disagrees with it, `REQUIREMENTS.md` wins — in particular, its classification model supersedes
 the "Alert thresholds" and auto-flip bullets under Product decisions below, and its `R0`
 terminology (payee, good/bad) supersedes the debtor/debitor/Trusted wording used throughout
-this file. Settled 2026-08-14, no open points left; the mocks and the code do not match it yet.
+this file. Settled 2026-08-14, no open points left. The mocks now follow it; `app/` does not
+yet. `ARCHITECTURE.md` does not either — it carries a list of its own divergences (`A1`–`A9`)
+at the top, two of which contradict the spec outright, so read that before trusting it.
 
 ## Status
 
