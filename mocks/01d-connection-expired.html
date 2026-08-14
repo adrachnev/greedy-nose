@@ -8,12 +8,12 @@
 <body>
   <div class="phone">
     <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
-    <div class="nav-bar"><h1>Transactions</h1><span></span></div>
+    <div class="nav-bar"><h1>Debits</h1><span></span></div>
     <div class="screen">
       <div class="content">
 
         <!--
-          R19 — the banner sits ON the transaction list rather than replacing
+          R19 — the banner sits ON the debit list rather than replacing
           it, and stays until the connection is restored.
 
           The reason it has to be loud: an expired consent produces exactly the
@@ -23,7 +23,7 @@
           itself, since the user may not open the app for days.
 
           The history below is deliberately still here (R18): disconnecting or
-          expiring keeps rules and transactions, it only stops live access.
+          expiring keeps rules and debits, it only stops live access.
         -->
         <div class="card" style="background:var(--bad-bg);gap:6px;border-left:3px solid var(--bad);">
           <div class="tx-name" style="color:var(--bad);">Bank connection expired</div>
@@ -33,7 +33,7 @@
 
         <div class="section-label">Last seen · Aug 3</div>
 
-        <a class="tx-row" href="03-transaction-detail.html">
+        <a class="tx-row" href="03-debit-detail.html">
           <div class="avatar" style="background:var(--bad-bg);color:var(--bad);">SC</div>
           <div class="tx-info">
             <div class="tx-name">ScamyLoans GmbH</div>
@@ -45,7 +45,7 @@
           </div>
         </a>
 
-        <a class="tx-row" href="03-transaction-detail.html">
+        <a class="tx-row" href="03-debit-detail.html">
           <div class="avatar" style="background:var(--good-bg);color:var(--good);">RE</div>
           <div class="tx-info">
             <div class="tx-name">REWE Markt</div>
@@ -57,7 +57,7 @@
           </div>
         </a>
 
-        <a class="tx-row" href="03-transaction-detail.html">
+        <a class="tx-row" href="03-debit-detail.html">
           <div class="avatar" style="background:var(--good-bg);color:var(--good);">LL</div>
           <div class="tx-info">
             <div class="tx-name">Landlord J. Meyer</div>
@@ -68,13 +68,13 @@
           </div>
         </a>
 
-        <p class="hint" style="text-align:center;">Your rules and history are kept — reconnecting only restores live access. Charges you missed arrive as one summary, not one alert each.</p>
+        <p class="hint" style="text-align:center;">Your rules and history are kept — reconnecting only restores live access. Debits you missed arrive as one summary, not one alert each.</p>
 
         <div style="flex:1"></div>
       </div>
     </div>
     <div class="tab-bar">
-      <a class="tab-item active" aria-label="Transactions" href="02-transaction-list.html"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="14" y2="17"/></svg></a>
+      <a class="tab-item active" aria-label="Debits" href="02-debit-list.html"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="14" y2="17"/></svg></a>
       <a class="tab-item" aria-label="Rules" href="04-payee-rules.html"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/></svg></a>
       <a class="tab-item" aria-label="Settings" href="06-settings.html"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="2.4"/><path d="M18.6 12h2M16.7 16.7l1.4 1.4M12 18.6v2M7.3 16.7l-1.4 1.4M5.4 12h-2M7.3 7.3L5.9 5.9M12 5.4v-2M16.7 7.3l1.4-1.4"/></svg></a>
     </div>

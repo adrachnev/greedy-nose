@@ -145,15 +145,15 @@ throughout (chosen so it maps fairly directly to React Native, the chosen stack)
 - `style.css` — shared design tokens/components (`.card`, `.pill`, `.btn`, `.tab-item`,
   `.modal-overlay`, `.toast`, `.spinner`, dark-mode variants via `prefers-color-scheme`).
 - Screens are numbered by flow position (`01` connect bank → `01b` consent → `01bb` syncing →
-  `01c` onboarding classify → `02` transaction list → `03` transaction detail → `04` rules →
-  `04b` edit rule → `05` notification → `06` settings), with lettered variants for
-  error/empty/confirm states (e.g. `01e` connect error, `02b` empty list, `06b`/`06c` confirm
-  modals).
-- Reworked 2026-08-14 to follow `REQUIREMENTS.md`. The `debitor` files were renamed to `payee`
-  (`01c`, `04`, `04b`, `04c`), and three states were added or repurposed: `04d` edit rule for a
-  **bad** payee (no amount field, R14), `05b` the reconnect summary notification (R20), and
-  `01d` now shows the disconnected banner **on top of** the transaction list rather than
-  replacing it (R19). Comments inside the files cite the requirement they implement.
+  `01c` onboarding classify → `02` debit list → `03` debit detail → `04` rules → `04b` edit rule
+  → `05` notification → `06` settings), with lettered variants for error/empty/confirm states
+  (e.g. `01e` connect error, `02b` empty list, `06b`/`06c` confirm modals).
+- Reworked 2026-08-14 to follow `REQUIREMENTS.md`. Renamed per `R0`: `debitor` → `payee`
+  (`01c`, `04`, `04b`, `04c`) and `transaction` → `debit` (`02`, `02b`, `03`), in filenames,
+  headings and copy alike. Three states were added or repurposed: `04d` edit rule for a **bad**
+  payee (no amount field, R14), `05b` the reconnect summary notification (R20), and `01d` now
+  shows the disconnected banner **on top of** the debit list rather than replacing it (R19).
+  Comments inside the files cite the requirement they implement.
 
 Iterate on mocks before touching architecture/code — that was an explicit ordering decision:
 mocks first, then pick the stack, then implement and test.

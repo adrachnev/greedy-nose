@@ -18,11 +18,18 @@ Settled 2026-08-14. The mocks in `mocks/` were reworked to match on the same day
 |---|---|
 | **payee** | debtor, debitor, creditor |
 | **good** / **bad** | trusted, untrusted, flagged |
-| **debit** | transaction, charge (fine in prose, not in identifiers) |
+| **debit** | transaction |
 
 "Debtor" is plain wrong here — a debtor owes *you* money, while these parties take it. Existing
 identifiers (`setDebtorTrusted`, `useDebtors`, `DebitorEditScreen`, the `debitor` mock files)
 and the "Trusted" UI labels are renamed accordingly.
+
+"Transaction" is dropped because it promises both directions while the app only ever shows
+outgoing money (R2a) — a user hunting for their salary under that heading finds nothing and
+concludes the app is broken. The tab and list are **Debits**, the detail screen is **Debit**
+(settled 2026-08-14). Two exceptions stay:
+- **"charge"** is fine in prose where it reads better — "alerts on every charge".
+- **"transaction ID"** keeps its name in R10b, because that is the bank's own term for it.
 
 ## Purpose
 
@@ -97,7 +104,7 @@ same rule and are edited independently.
 
 ## List
 
-**R9** — The transaction list shows debits, newest first, each marked good or bad.
+**R9** — The debit list shows debits, newest first, each marked good or bad.
 
 ## Notifications
 
@@ -118,8 +125,8 @@ from three days ago still deserves an alert. Two consequences:
 
 **R11** — One notification per bad debit. Grouping stays deferred (see `CLAUDE.md`).
 
-**R12** — Notifications carry no quick actions. Tapping one opens the transaction detail, which
-links to the payee's rule screen.
+**R12** — Notifications carry no quick actions. Tapping one opens the debit detail, which links
+to the payee's rule screen.
 
 **R12a — Wording** (settled 2026-08-14). A debit can be bad for three different reasons, and the
 notification says which:
@@ -153,7 +160,7 @@ limit is in that same currency. No currency picker anywhere (settled 2026-08-14)
 
 **R16** — A charge made in a foreign currency is compared against the **booked amount in the
 account currency** — what actually left the account. If the bank also reports the original
-foreign amount, it may be shown on the transaction detail screen as extra information, but it
+foreign amount, it may be shown on the debit detail screen as extra information, but it
 never affects classification.
 
 **R17** — Amounts are formatted by **device locale** (`Intl.NumberFormat`): `49,00 €` on a
@@ -175,8 +182,8 @@ whole app — decided while reworking the mocks on 2026-08-14.)
 | User deletes the account (`06c`) | wiped | wiped | gone, not undoable |
 
 **R19 — A dead connection is never silent.** No alerts arriving looks exactly like "nothing bad
-happened", which is the one failure that breaks R1. So: a persistent banner on the transaction
-list whenever the connection is expired or disconnected (`01d-connection-expired`), **plus one
+happened", which is the one failure that breaks R1. So: a persistent banner on the debit list
+whenever the connection is expired or disconnected (`01d-connection-expired`), **plus one
 push** when the consent expires by itself — the user may not open the app for days.
 
 **R20 — Reconnecting after a gap sends one summary notification**, e.g. "12 new charges while
@@ -201,11 +208,13 @@ may show on the lock screen), and the onboarding classify flow's details.
 
 ## Follow-ups — bringing the code in line
 
-*(`mocks/` is done: renamed to payee/Good, per-debit classification in the list, the amount
-field split across 04b/04d, R12a notification wording, the reconnect summary 05b, and the
-disconnected banner folded into 01d.)*
+*(`mocks/` is done: renamed to payee/Good and transaction/debit, per-debit classification in the
+list, the amount field split across 04b/04d, R12a notification wording, the reconnect summary
+05b, and the disconnected banner folded into 01d.)*
 
-- **Rename for R0**: `debtor`/`debitor` → `payee`, "Trusted" → "Good", throughout `app/src/`.
+- **Rename for R0** throughout `app/src/`: `debtor`/`debitor` → `payee`, "Trusted" → "Good", and
+  `transaction` → `debit` (`TransactionListScreen`, `TransactionDetailScreen`, `useTransactions`,
+  the `transactions` fixture, and the Transactions tab label).
 - **Code to delete for R8** (`app/src/mocks/data.ts`, `app/src/data/hooks.ts`,
   `DebitorEditScreen`, `RulesListScreen`): the save-time auto-flip and its toast, the passive
   Bad-only flip, the "Auto-marked Bad · Xm ago" marker and its cleared-on-open logic, and the
