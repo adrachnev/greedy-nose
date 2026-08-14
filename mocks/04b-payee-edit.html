@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Edit Payee Rule — Good</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
+    <div class="nav-bar">
+      <a class="nav-link" href="04-payee-rules.html">‹ Rules</a>
+      <h1 style="font-size:17px;">Edit Rule</h1>
+      <span style="width:44px;"></span>
+    </div>
+    <div class="screen">
+      <div class="content">
+
+        <div class="card" style="align-items:center;text-align:center;gap:6px;">
+          <div class="avatar" style="width:56px;height:56px;background:var(--good-bg);color:var(--good);font-size:18px;">RE</div>
+          <div class="tx-name" style="font-size:18px;">REWE Markt</div>
+        </div>
+
+        <!--
+          Good state. The toggle only ever moves when the user moves it (R8) —
+          nothing the app observes flips it. Switching to Bad does not wipe the
+          amount below (R8a); it just hides it (R14), because the amount has no
+          effect while a payee is bad. See 04d-payee-edit-bad.html.
+        -->
+        <div class="toggle-row">
+          <div class="toggle-btn good-active">Good</div>
+          <div class="toggle-btn">Bad</div>
+        </div>
+
+        <div class="section-label">Alert limit (optional)</div>
+        <p class="hint">Charges up to and including this amount are good — you're only alerted above it. Leave blank to accept every charge from this payee. Must be a positive amount.</p>
+
+        <div class="card">
+          <div class="tx-info">
+            <div class="tx-date">Only alert if amount exceeds</div>
+            <div class="tx-name" style="font-size:15px;">€30.00</div>
+          </div>
+        </div>
+
+        <div style="flex:1"></div>
+        <a class="btn btn-primary" href="04-payee-rules.html">Save</a>
+        <a class="btn btn-outline" href="04-payee-rules.html">Clear alert limit</a>
+        <p class="hint" style="text-align:center;">Clears the amount above — every charge from this payee counts as good again. Status (Good) is unchanged.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

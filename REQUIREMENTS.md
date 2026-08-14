@@ -7,8 +7,8 @@ this file, **this file wins**. Mocks and code must follow it.
 Requirements are numbered (`R1`, `R2`, …) so we can refer to them precisely. Open points are
 numbered `O1`, `O2`, … and must be answered before the affected code or mock is touched.
 
-Settled 2026-08-14. The mocks in `mocks/` and the code in `app/` still predate this file and
-do **not** match it yet — see "Follow-ups" at the bottom.
+Settled 2026-08-14. The mocks in `mocks/` were reworked to match on the same day. The code in
+`app/` still predates this file and does **not** match it — see "Follow-ups" at the bottom.
 
 ## Terminology
 
@@ -131,8 +131,7 @@ notification says which:
   - rule is bad → *"You marked this payee as bad."*
   - over the limit → *"Over your limit of «limit»."*
 
-No minus sign on the amount: everything in this app is money going out (R2a), so `−` adds
-nothing. The `05-notification.html` mock still shows the old single-reason wording.
+No minus sign on the amount (R17a).
 
 *Deferred:* hiding amounts on the lock screen — a real privacy question, but it belongs to
 Settings, which is not specified yet.
@@ -158,8 +157,12 @@ foreign amount, it may be shown on the transaction detail screen as extra inform
 never affects classification.
 
 **R17** — Amounts are formatted by **device locale** (`Intl.NumberFormat`): `49,00 €` on a
-German phone, `€49.00` on an English one. The mocks currently hardcode `€49.00` and need
-updating.
+German phone, `€49.00` on an English one. The mocks are written in English and therefore show
+the English rendering.
+
+**R17a** — Amounts never carry a **minus sign**, anywhere in the UI. Every debit is money going
+out (R2a), so the sign distinguishes nothing. (Extends R12a's rule from notifications to the
+whole app — decided while reworking the mocks on 2026-08-14.)
 
 ## Bank connection
 
@@ -196,10 +199,13 @@ settled in the same session.
 Still unspecified, but not blocking: the Settings screen's contents (including whether amounts
 may show on the lock screen), and the onboarding classify flow's details.
 
-## Follow-ups — bringing mocks and code in line
+## Follow-ups — bringing the code in line
 
-- **Rename for R0**: `debtor`/`debitor` → `payee`, "Trusted" → "Good", in `app/src/` and in the
-  `mocks/` filenames and markup.
+*(`mocks/` is done: renamed to payee/Good, per-debit classification in the list, the amount
+field split across 04b/04d, R12a notification wording, the reconnect summary 05b, and the
+disconnected banner folded into 01d.)*
+
+- **Rename for R0**: `debtor`/`debitor` → `payee`, "Trusted" → "Good", throughout `app/src/`.
 - **Code to delete for R8** (`app/src/mocks/data.ts`, `app/src/data/hooks.ts`,
   `DebitorEditScreen`, `RulesListScreen`): the save-time auto-flip and its toast, the passive
   Bad-only flip, the "Auto-marked Bad · Xm ago" marker and its cleared-on-open logic, and the

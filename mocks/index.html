@@ -21,10 +21,13 @@
 <body>
   <div class="intro">
     <h1>Greedy Nose — UI Mocks</h1>
-    <p>Static, framework-agnostic phone mocks for the bank-transaction / bad-debitor-alert app.
+    <p>Static, framework-agnostic phone mocks for the bank-charge / bad-charge alert app.
     Layout uses flexbox throughout so it maps fairly directly to React Native, and serves as a
     precise blueprint if implemented in Flutter or another stack instead.</p>
-    <p>Flow: connect bank → one-time onboarding review of existing debitors → every debitor defaults to Bad until marked Trusted → manage rules (with optional amount/frequency thresholds) → get notified next time a bad debitor charges you.</p>
+    <p>Flow: connect bank → one-time onboarding review of existing payees → every payee defaults to Bad until marked Good → manage rules (a good payee may carry an optional amount limit) → get notified the next time a bad charge arrives.</p>
+    <p><strong>These mocks follow <code>../REQUIREMENTS.md</code>, which is the spec.</strong> Comments in
+    the individual files cite the requirement they implement (R5, R12a, …) wherever the reasoning
+    is not obvious from the screen alone.</p>
   </div>
 
   <div class="frame-label">
@@ -48,8 +51,8 @@
   </div>
 
   <div class="frame-label">
-    <span>1c. Review Debitors (onboarding)</span>
-    <iframe src="01c-classify-debitors.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+    <span>1c. Review Payees (onboarding)</span>
+    <iframe src="01c-classify-payees.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">
@@ -68,13 +71,13 @@
   </div>
 
   <div class="frame-label">
-    <span>3. Transaction Detail — Mark Good/Bad</span>
+    <span>3. Transaction Detail — why this charge is bad (display-only)</span>
     <iframe src="03-transaction-detail.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">
-    <span>4. Debitor Rules (manage all)</span>
-    <iframe src="04-debitor-rules.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+    <span>4. Payee Rules (manage all)</span>
+    <iframe src="04-payee-rules.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">
@@ -84,12 +87,17 @@
 
   <div class="frame-label">
     <span>4c. Rules — Empty</span>
-    <iframe src="04c-debitor-rules-empty.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+    <iframe src="04c-payee-rules-empty.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">
-    <span>4b. Debitor Rule — Edit Thresholds</span>
-    <iframe src="04b-debitor-edit.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+    <span>4b. Payee Rule — Good (amount limit shown)</span>
+    <iframe src="04b-payee-edit.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>4d. Payee Rule — Bad (amount limit hidden)</span>
+    <iframe src="04d-payee-edit-bad.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">
@@ -103,8 +111,13 @@
   </div>
 
   <div class="frame-label">
-    <span>5. Notification — Bad Debitor Charge</span>
+    <span>5. Notification — Bad Charge</span>
     <iframe src="05-notification.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>5b. Notification — Reconnect Summary</span>
+    <iframe src="05b-notification-summary.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
 </body>

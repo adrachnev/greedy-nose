@@ -2,32 +2,42 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Classify Debitors</title>
+<title>Classify Payees</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="phone">
     <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
-    <div class="nav-bar"><h1>Review Debitors</h1><span></span></div>
+    <div class="nav-bar"><h1>Review Payees</h1><span></span></div>
     <div class="screen">
       <div class="content">
-        <p class="hint">We found 5 debitors in your recent history. Every debitor starts as <strong>Bad</strong> until you mark it Trusted — so classify the ones you recognize now to avoid unnecessary alerts.</p>
+        <p class="hint">We found 5 payees in your recent history. Every payee starts as <strong>Bad</strong> until you mark it Good — so classify the ones you recognize now to avoid unnecessary alerts.</p>
+
+        <!--
+          This screen is the only place the "reviewed" distinction is visible
+          (R4b): tapping either button writes a rule, and a payee with a rule
+          counts as reviewed. Leaving one untouched keeps it bad, which is the
+          same classification but not the same thing.
+
+          Nothing here notifies: everything pulled during the first sync is
+          stored as already-seen (R10b), so classifying history is silent.
+        -->
 
         <div style="display:flex;gap:8px;">
-          <div class="btn btn-outline" style="flex:1;padding:10px;font-size:13px;color:var(--good);border-color:var(--good);">Mark all Trusted</div>
+          <div class="btn btn-outline" style="flex:1;padding:10px;font-size:13px;color:var(--good);border-color:var(--good);">Mark all Good</div>
         </div>
-        <p class="hint" style="text-align:center;">Tip: swipe a card <strong>right</strong> for Trusted, <strong>left</strong> to keep Bad — or use the buttons below each one.</p>
+        <p class="hint" style="text-align:center;">Tip: swipe a card <strong>right</strong> for Good, <strong>left</strong> to keep Bad — or use the buttons below each one.</p>
 
         <div class="card" style="gap:12px;">
           <div style="display:flex;align-items:center;gap:10px;">
             <div class="avatar" style="background:var(--good-bg);color:var(--good);">SP</div>
             <div class="tx-info" style="flex:1;">
               <div class="tx-name">Spotify AB</div>
-              <div class="tx-date">−€9.99 · Subscription</div>
+              <div class="tx-date">€9.99 · Subscription</div>
             </div>
           </div>
           <div class="toggle-row">
-            <div class="toggle-btn good-active">Trusted</div>
+            <div class="toggle-btn good-active">Good</div>
             <div class="toggle-btn">Bad</div>
           </div>
         </div>
@@ -37,11 +47,11 @@
             <div class="avatar" style="background:var(--bad-bg);color:var(--bad);">SC</div>
             <div class="tx-info" style="flex:1;">
               <div class="tx-name">ScamyLoans GmbH</div>
-              <div class="tx-date">−€49.00 · Direct debit</div>
+              <div class="tx-date">€49.00 · Direct debit</div>
             </div>
           </div>
           <div class="toggle-row">
-            <div class="toggle-btn">Trusted</div>
+            <div class="toggle-btn">Good</div>
             <div class="toggle-btn bad-active">Bad</div>
           </div>
         </div>
@@ -51,11 +61,11 @@
             <div class="avatar" style="background:var(--good-bg);color:var(--good);">RE</div>
             <div class="tx-info" style="flex:1;">
               <div class="tx-name">REWE Markt</div>
-              <div class="tx-date">−€34.21 · Card payment</div>
+              <div class="tx-date">€34.21 · Card payment</div>
             </div>
           </div>
           <div class="toggle-row">
-            <div class="toggle-btn good-active">Trusted</div>
+            <div class="toggle-btn good-active">Good</div>
             <div class="toggle-btn">Bad</div>
           </div>
         </div>
@@ -65,11 +75,11 @@
             <div class="avatar" style="background:var(--bad-bg);color:var(--bad);">VF</div>
             <div class="tx-info" style="flex:1;">
               <div class="tx-name">Vodafone GmbH</div>
-              <div class="tx-date">−€24.99 · Direct debit</div>
+              <div class="tx-date">€24.99 · Direct debit</div>
             </div>
           </div>
           <div class="toggle-row">
-            <div class="toggle-btn">Trusted</div>
+            <div class="toggle-btn">Good</div>
             <div class="toggle-btn bad-active">Bad</div>
           </div>
         </div>
@@ -79,18 +89,18 @@
             <div class="avatar" style="background:var(--good-bg);color:var(--good);">LL</div>
             <div class="tx-info" style="flex:1;">
               <div class="tx-name">Landlord J. Meyer</div>
-              <div class="tx-date">−€850.00 · Bank transfer</div>
+              <div class="tx-date">€850.00 · Bank transfer</div>
             </div>
           </div>
           <div class="toggle-row">
-            <div class="toggle-btn good-active">Trusted</div>
+            <div class="toggle-btn good-active">Good</div>
             <div class="toggle-btn">Bad</div>
           </div>
         </div>
 
         <div style="flex:1"></div>
         <a class="btn btn-primary" href="02-transaction-list.html">Start Monitoring</a>
-        <p class="hint" style="text-align:center;">Any debitor you didn't review stays Bad and will alert you on its next charge.</p>
+        <p class="hint" style="text-align:center;">Any payee you didn't review stays Bad and will alert you on its next charge.</p>
       </div>
     </div>
   </div>

@@ -13,16 +13,29 @@
       <div style="font-size:18px;color:#48484a;">Monday, August 4</div>
     </div>
 
+    <!--
+      R12a. The payee and the amount own the title, because the OS already
+      prints the app name above it — repeating "Greedy Nose" there would spend
+      the most valuable line on something the user can see from the icon.
+
+      The body says WHY this charge is bad, and there are three possible
+      reasons, one per row of R5:
+        no rule        → "New payee — you haven't seen this one before."
+        payee is bad   → "You marked this payee as bad."   ← shown here
+        over the limit → "Over your limit of €30.00."
+
+      No minus sign on the amount: every debit is money going out (R2a).
+    -->
     <div class="notif-banner">
       <div class="notif-icon">G</div>
       <div class="notif-text">
-        <div class="notif-title">Greedy Nose</div>
-        <div class="notif-body">New charge of −€49.00 from <strong>ScamyLoans GmbH</strong>, a debitor you marked as bad.</div>
+        <div class="notif-title">ScamyLoans GmbH · €49.00</div>
+        <div class="notif-body">You marked this payee as bad.</div>
       </div>
       <div class="notif-time">now</div>
     </div>
   </div>
 
-  <p style="position:absolute;bottom:16px;left:0;right:0;text-align:center;font-size:11px;color:#8e8e93;">Tapping the notification opens the transaction detail, where you can mark the debitor Trusted or Bad.</p>
+  <p style="position:absolute;bottom:16px;left:0;right:0;text-align:center;font-size:11px;color:#8e8e93;">No quick actions on the notification. Tapping it opens the transaction detail, which links to the payee's Edit Rule screen.</p>
 </body>
 </html>
