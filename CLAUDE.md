@@ -16,7 +16,7 @@ disagrees with it, `REQUIREMENTS.md` wins — in particular, its classification 
 the "Alert thresholds" and auto-flip bullets under Product decisions below, and its `R0`
 terminology (payee, good/bad) supersedes the debtor/debitor/Trusted wording used throughout
 this file. Settled 2026-08-14, no open points left. The mocks now follow it; `app/` does not
-yet. `ARCHITECTURE.md` does not either — it carries a list of its own divergences (`A1`–`A9`)
+yet. `ARCHITECTURE.md` does not either — it carries a list of its own divergences (`A1`–`A10`)
 at the top, two of which contradict the spec outright, so read that before trusting it.
 
 ## Status
@@ -73,8 +73,10 @@ save that edit first, discard it with a warning, or something else? Discuss befo
 ## Product decisions (settled)
 
 - **Bank connectivity**: [Enable Banking](https://enablebanking.com) — a PSD2/XS2A-licensed
-  aggregator with a free tier. Chosen specifically to start with zero cost/investment. First
-  (and currently only) bank target: **N26**.
+  aggregator with a free tier. Chosen specifically to start with zero cost/investment. The app
+  is **bank-agnostic** (`R22`): any ASPSP Enable Banking reaches is fair game, and **N26 is only
+  the first one integrated**, with ING-DiBa and DKB likely next. Nothing may hardcode a bank.
+  Connecting several banks at once remains deferred — see below.
 - **Trust model is opt-out, not opt-in**: every debitor defaults to **Bad** the first time
   they're seen. The user marks debitors **Trusted** to silence them — not the other way round.
   This was a deliberate choice over a neutral "unmarked" state, since the goal is to never miss
@@ -128,7 +130,9 @@ save that edit first, discard it with a warning, or something else? Discuss befo
 ## Open / deferred (explicitly not v1)
 
 - App-level lock (Face ID/passcode) before opening the app.
-- Multi-bank / multi-account differentiation in the transaction list.
+- Multi-bank / multi-account differentiation in the debit list. Note this is *simultaneous*
+  connections, not bank support in general — the app must work with any bank (`R22`), it just
+  handles one connected account at a time in v1 (`R22a`).
 - Offline state handling for the main list (only the initial-connect error state exists).
 - Notification grouping/bundling (a "Group multiple alerts" toggle exists in the Settings mock
   but defaults Off — one notification per charge is the current decision).

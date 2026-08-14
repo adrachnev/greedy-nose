@@ -164,10 +164,22 @@ are: switch good ↔ bad, and set or clear the amount.
 there (R5). It appears when the payee is good. A hidden amount is kept, not wiped (R8a) — mark
 the payee good again and the previous limit is back.
 
+## Banks
+
+**R22 — The app is bank-agnostic** (settled 2026-08-14). Any ASPSP reachable through Enable
+Banking is a valid target; **N26 is simply the first one integrated**, chosen for its free tier,
+with ING-DiBa and DKB as likely next. Nothing in the product — copy, data model, or rule logic —
+may assume a particular bank.
+
+**R22a** — v1 connects **one account at a time**. Supporting several banks simultaneously, and
+labelling which bank a debit came from, stays deferred (see `CLAUDE.md`). "Bank-agnostic" means
+the app works with whichever bank you connect, not that it aggregates several at once.
+
 ## Currency
 
-**R15** — Amounts use the **account currency**, EUR for the single N26 account in v1. The rule's
-limit is in that same currency. No currency picker anywhere (settled 2026-08-14).
+**R15** — Amounts use the **account currency**. Every target bank is in the eurozone, so EUR in
+practice. The rule's limit is in that same currency, and there is no currency picker anywhere
+(settled 2026-08-14).
 
 **R16** — A charge made in a foreign currency is compared against the **booked amount in the
 account currency** — what actually left the account. If the bank also reports the original
@@ -234,12 +246,16 @@ matching screen is coded):
    user who has not opened the app in a week.
 3. `03` shows the payee's **IBAN** for a direct debit, but R3a keys direct debits on the **SEPA
    creditor ID**. Open question: show the creditor ID instead, or alongside?
-4. `01e` offers "Choose a different bank" while v1 is N26-only.
+4. **No bank-selection screen exists.** `01-connect-bank` and `01e-connect-error` both assume
+   N26 by name, and `01e`'s "Choose a different bank" link goes to the mock gallery because
+   there is nowhere to send it. R22 makes that link correct in principle — the screen it needs
+   just hasn't been drawn. (Revised 2026-08-14: previously recorded as the opposite problem,
+   back when v1 was N26-only.)
 
 ### Do this first — reconcile `ARCHITECTURE.md`
 
-Reviewed against this file on 2026-08-14 and found to diverge in nine places, listed as
-`A1`–`A9` at the top of that document. `A1` (the rule engine evaluates the amount for **bad**
+Reviewed against this file on 2026-08-14 and found to diverge in ten places, listed as
+`A1`–`A10` at the top of that document. `A1` (the rule engine evaluates the amount for **bad**
 payees instead of good ones) and `A2` (the consent-expiry push is ruled out) are outright
 contradictions; the rest are stale terminology or design the spec needs and the architecture
 never described.

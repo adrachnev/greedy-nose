@@ -10,7 +10,7 @@ Reviewed against the spec on **2026-08-14**; the reconciliation itself is the ne
 work, and it happens **before any code is written** (owner's call — a design that contradicts
 the spec would otherwise get built into both halves of the system before anyone notices).
 Everything not listed here still describes the intended system, but do not implement `A1`–`A4`
-as written — `REQUIREMENTS.md` wins wherever the two disagree.
+or `A10` as written — `REQUIREMENTS.md` wins wherever the two disagree.
 
 **Contradictions — the text below is wrong, not merely incomplete:**
 
@@ -52,6 +52,13 @@ as written — `REQUIREMENTS.md` wins wherever the two disagree.
   are unseen IDs, so steady state would fire one push each instead of R20's single summary.
 - **A9 — No data lifecycle for R18**: disconnect keeps rules and history, account deletion
   wipes both.
+- **A10 — N26 is treated as *the* bank, not the first one** (R22, added 2026-08-14). The
+  component diagram hard-codes an `N26 — ASPSP` node, the table calls it "Source of truth for
+  transactions", and the cost section reasons from "single-user/N26 scope". The app is
+  bank-agnostic — any ASPSP Enable Banking reaches — so the design must not assume one. Two
+  concrete consequences to check when reconciling: the "4x/day background fetch" limit is
+  per-ASPSP and will differ between banks, and `A6`'s payee matching cannot rely on fields only
+  some ASPSPs populate. v1 still connects one account at a time (R22a).
 
 **Smaller:** the rule engine must hand the *reason* to the dispatcher so R12a can word the body;
 R16's "compare against the booked amount in the account currency" is unstated; and "Initial sync
