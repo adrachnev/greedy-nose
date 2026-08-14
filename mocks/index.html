@@ -16,6 +16,17 @@
   .intro h1 { margin-bottom: 4px; }
   .intro p { color: #444; max-width: 640px; }
   .intro ol { color: #333; }
+
+  /* Full-width flex item: forces a line break so each group starts a new row. */
+  .group {
+    width: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    border-top: 1px solid rgba(0,0,0,0.14);
+    padding-top: 24px;
+    margin-bottom: -8px;
+  }
+  .group h2 { margin: 0 0 4px; font-size: 19px; color: #1c1c1e; }
+  .group p { margin: 0; font-size: 14px; color: #555; max-width: 640px; }
 </style>
 </head>
 <body>
@@ -28,6 +39,13 @@
     <p><strong>These mocks follow <code>../REQUIREMENTS.md</code>, which is the spec.</strong> Comments in
     the individual files cite the requirement they implement (R5, R12a, …) wherever the reasoning
     is not obvious from the screen alone.</p>
+    <p>Screens below are grouped in the order the user meets them, not by file number — the
+    numbers stay on the labels so each frame is easy to find on disk.</p>
+  </div>
+
+  <div class="group">
+    <h2>1 · Onboarding</h2>
+    <p>One-time. Ends at “Start Monitoring”, after which nothing from this group is seen again.</p>
   </div>
 
   <div class="frame-label">
@@ -55,6 +73,11 @@
     <iframe src="01c-classify-payees.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
+  <div class="group">
+    <h2>2 · Daily use</h2>
+    <p>What the app looks like when the user opens it themselves.</p>
+  </div>
+
   <div class="frame-label">
     <span>2. Debit List</span>
     <iframe src="02-debit-list.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
@@ -66,23 +89,19 @@
   </div>
 
   <div class="frame-label">
-    <span>1d. Connection Expired (reconnect)</span>
-    <iframe src="01d-connection-expired.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
-  </div>
-
-  <div class="frame-label">
     <span>3. Debit Detail — why this charge is bad (display-only)</span>
     <iframe src="03-debit-detail.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="group">
+    <h2>3 · Rules</h2>
+    <p>The only place good/bad and the amount limit are edited. 4b and 4d are the same screen in
+    its two states — the amount field exists for a good payee and is gone for a bad one (R14).</p>
   </div>
 
   <div class="frame-label">
     <span>4. Payee Rules (manage all)</span>
     <iframe src="04-payee-rules.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
-  </div>
-
-  <div class="frame-label">
-    <span>6. Settings</span>
-    <iframe src="06-settings.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">
@@ -100,6 +119,27 @@
     <iframe src="04d-payee-edit-bad.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
+  <div class="group">
+    <h2>4 · The notification</h2>
+    <p>The product, really — everything above exists so this fires at the right moment and no other.</p>
+  </div>
+
+  <div class="frame-label">
+    <span>5. Notification — Bad Charge</span>
+    <iframe src="05-notification.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="group">
+    <h2>5 · Settings</h2>
+    <p>Both destructive actions are confirmed, and they differ: disconnecting keeps rules and
+    history, deleting the account keeps nothing (R18).</p>
+  </div>
+
+  <div class="frame-label">
+    <span>6. Settings</span>
+    <iframe src="06-settings.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
   <div class="frame-label">
     <span>6b. Confirm Disconnect Bank</span>
     <iframe src="06b-disconnect-confirm.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
@@ -110,9 +150,16 @@
     <iframe src="06c-delete-confirm.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
+  <div class="group">
+    <h2>6 · Losing and restoring the connection</h2>
+    <p>The failure that would break the promise silently: no alerts arriving looks exactly like a
+    quiet month. 1d says so on the list itself, and 5b is the single summary sent once the user
+    reconnects, instead of one push per missed charge (R19, R20).</p>
+  </div>
+
   <div class="frame-label">
-    <span>5. Notification — Bad Charge</span>
-    <iframe src="05-notification.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+    <span>1d. Connection Expired (reconnect)</span>
+    <iframe src="01d-connection-expired.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">

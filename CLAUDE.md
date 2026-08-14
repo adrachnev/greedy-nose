@@ -141,7 +141,10 @@ save that edit first, discard it with a warning, or something else? Discuss befo
 Static HTML/CSS phone mockups, one file per screen, ~375×812 viewport, Flexbox layout
 throughout (chosen so it maps fairly directly to React Native, the chosen stack).
 
-- `index.html` — overview embedding every screen with a labelled flow order; open this first.
+- `index.html` — overview embedding every screen; open this first. Frames are grouped into six
+  phases in the order the user meets them (onboarding → daily use → rules → the notification →
+  settings → losing/restoring the connection), not by file number; the numbers stay on the
+  labels so each frame is still easy to find on disk.
 - `style.css` — shared design tokens/components (`.card`, `.pill`, `.btn`, `.tab-item`,
   `.modal-overlay`, `.toast`, `.spinner`, dark-mode variants via `prefers-color-scheme`).
 - Screens are numbered by flow position (`01` connect bank → `01b` consent → `01bb` syncing →
