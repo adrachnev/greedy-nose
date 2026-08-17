@@ -2,11 +2,11 @@ import React from 'react';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 // Line-style tab-bar icons, ported 1:1 from the inline <svg> markup in
-// mocks/02-transaction-list.html / 04-debitor-rules.html / 06-settings.html.
+// mocks/02-debit-list.html / 04-payee-rules.html / 06-settings.html.
 // stroke="currentColor" in the mocks maps to the `color` prop here — state
 // (active/inactive) is communicated purely via that color, never fill.
 
-export type TabIconName = 'transactions' | 'rules' | 'settings';
+export type TabIconName = 'debits' | 'rules' | 'settings';
 
 const COMMON = {
   viewBox: '0 0 24 24',
@@ -26,7 +26,7 @@ export default function TabIcon({
   size?: number;
 }) {
   switch (name) {
-    case 'transactions':
+    case 'debits':
       return (
         <Svg width={size} height={size} stroke={color} {...COMMON}>
           <Line x1="4" y1="7" x2="20" y2="7" />

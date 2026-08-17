@@ -5,7 +5,7 @@ import { StyleSheet, Text, View } from 'react-native';
  * Slim "MOCK DATA" indicator, __DEV__-only, so a dev/fixture-backed build
  * can never be mistaken for one talking to the real backend. Rendered as
  * the first child inside each main-tab screen's already-safe-area-padded
- * container (see TransactionListScreen / StubScreen) — it does not manage
+ * container (see DebitListScreen / StubScreen) — it does not manage
  * insets itself. Renders nothing in production builds.
  */
 export default function MockDataBadge() {

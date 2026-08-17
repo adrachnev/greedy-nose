@@ -11,65 +11,69 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MockDataBadge from '../components/MockDataBadge';
-import { useAutoFlipNotices, useDebtors, useRules, useTransactions } from '../data/hooks';
-import { AutoFlipNotice, Debtor, Rule } from '../mocks/data';
+import { usePayees, useRuleByPayeeId } from '../data/hooks';
+import { classifyPayee } from '../domain/classification';
+import { Payee, Rule } from '../domain/model';
 import { RulesStackParamList } from '../navigation/types';
 import { dark, light, Theme } from '../theme/colors';
-import { formatCurrencyEUR, formatRelativeTime } from '../utils/format';
+import { formatCurrencyEUR } from '../utils/format';
 
 type Props = NativeStackScreenProps<RulesStackParamList, 'RulesList'>;
 
-/** Mirrors mocks/04-debitor-rules.html's "Alerts on every charge" subtitle,
- * extended to describe whatever thresholds are actually set. */
+/**
+ * The row subtitle from mocks/04-payee-rules.html — what the rule actually
+ * does, worded as R5's three outcomes:
+ *
+ * - bad (or unreviewed, which is the same verdict — R4b): alerts on everything
+ * - good with no limit: alerts on nothing at all (R4a)
+ * - good with a limit: alerts only above it (R5a — the limit itself is good)
+ *
+ * The middle case is the one worth stating plainly. "Good, no limit" is the
+ * *quietest* setting in the app, and describing it as "alerts on every charge"
+ * — as this did — tells the user the exact opposite of what it does.
+ */
 function describeAlertCondition(rule: Rule | undefined): string {
-  const amount = rule?.amountThresholdEUR;
-  if (amount == null) {
+  if (classifyPayee(rule) === 'bad') {
     return 'Alerts on every charge';
   }
-  return `Alerts if over ${formatCurrencyEUR(amount)}`;
+  if (rule?.amountEUR == null) {
+    return 'Never alerts';
+  }
+  return `Alerts above ${formatCurrencyEUR(rule.amountEUR)}`;
 }
 
-function DebtorRow({
+function PayeeRow({
   theme,
-  debtor,
+  payee,
+  isGood,
   subtitle,
   onPress,
 }: {
   theme: Theme;
-  debtor: Debtor;
+  payee: Payee;
+  isGood: boolean;
   subtitle: string;
   onPress: () => void;
 }) {
-  const avatarColor = debtor.trusted ? theme.good : theme.bad;
-  const avatarBg = debtor.trusted ? theme.goodBg : theme.badBg;
-  const pillColor = debtor.trusted ? theme.good : theme.bad;
-  const pillBg = debtor.trusted ? theme.goodBg : theme.badBg;
+  const color = isGood ? theme.good : theme.bad;
+  const bg = isGood ? theme.goodBg : theme.badBg;
 
-  const rowStyle = [styles.txRow, { backgroundColor: theme.surface }];
-  const content = (
-    <>
-      <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
-        <Text style={[styles.avatarText, { color: avatarColor }]}>{debtor.initials}</Text>
+  return (
+    <Pressable onPress={onPress} style={[styles.payeeRow, { backgroundColor: theme.surface }]}>
+      <View style={[styles.avatar, { backgroundColor: bg }]}>
+        <Text style={[styles.avatarText, { color }]}>{payee.initials}</Text>
       </View>
-      <View style={styles.txInfo}>
-        <Text style={[styles.txName, { color: theme.text }]} numberOfLines={1}>
-          {debtor.name}
+      <View style={styles.payeeInfo}>
+        <Text style={[styles.payeeName, { color: theme.text }]} numberOfLines={1}>
+          {payee.name}
         </Text>
-        <Text style={[styles.txDate, { color: theme.textMuted }]} numberOfLines={1}>
+        <Text style={[styles.payeeSubtitle, { color: theme.textMuted }]} numberOfLines={1}>
           {subtitle}
         </Text>
       </View>
-      <View style={[styles.pill, { backgroundColor: pillBg }]}>
-        <Text style={[styles.pillText, { color: pillColor }]}>
-          {debtor.trusted ? 'Trusted' : 'Bad'}
-        </Text>
+      <View style={[styles.pill, { backgroundColor: bg }]}>
+        <Text style={[styles.pillText, { color }]}>{isGood ? 'Good' : 'Bad'}</Text>
       </View>
-    </>
-  );
-
-  return (
-    <Pressable onPress={onPress} style={rowStyle}>
-      {content}
     </Pressable>
   );
 }
@@ -77,52 +81,22 @@ function DebtorRow({
 export default function RulesListScreen({ navigation }: Props) {
   const theme = useColorScheme() === 'dark' ? dark : light;
   const insets = useSafeAreaInsets();
-  const debtors = useDebtors();
-  const transactions = useTransactions();
-  const rules = useRules();
-  const autoFlipNotices = useAutoFlipNotices();
+  const payees = usePayees();
+  const ruleByPayeeId = useRuleByPayeeId();
   const [search, setSearch] = useState('');
-
-  const ruleByDebtorId = useMemo(() => {
-    const map = new Map<string, Rule>();
-    for (const rule of rules) {
-      map.set(rule.debtorId, rule);
-    }
-    return map;
-  }, [rules]);
-
-  const noticeByDebtorId = useMemo(() => {
-    const map = new Map<string, AutoFlipNotice>();
-    for (const notice of autoFlipNotices) {
-      map.set(notice.debtorId, notice);
-    }
-    return map;
-  }, [autoFlipNotices]);
-
-  // PRAGMATIC: the mock's trusted-row subtitle also shows "marked <date>",
-  // which isn't modeled anywhere in the fixture layer (no "trusted since"
-  // timestamp exists on Debtor). Falling back to a transaction count only —
-  // revisit once real debtor data carries a trust-change timestamp.
-  const transactionCountByDebtor = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const t of transactions) {
-      counts.set(t.debtorId, (counts.get(t.debtorId) ?? 0) + 1);
-    }
-    return counts;
-  }, [transactions]);
 
   const isSearching = search.trim().length > 0;
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) {
-      return debtors;
+      return payees;
     }
-    return debtors.filter(d => d.name.toLowerCase().includes(query));
-  }, [debtors, search]);
+    return payees.filter(p => p.name.toLowerCase().includes(query));
+  }, [payees, search]);
 
-  const badDebtors = filtered.filter(d => !d.trusted);
-  const trustedDebtors = filtered.filter(d => d.trusted);
+  const badPayees = filtered.filter(p => classifyPayee(ruleByPayeeId.get(p.id)) === 'bad');
+  const goodPayees = filtered.filter(p => classifyPayee(ruleByPayeeId.get(p.id)) === 'good');
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
@@ -133,15 +107,15 @@ export default function RulesListScreen({ navigation }: Props) {
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={[styles.hint, { color: theme.textMuted }]}>
-          Every debitor is Bad by default and alerts you on any new charge, until you mark it
-          Trusted.
+          Every payee is bad by default and alerts you on any new charge, until you mark them
+          good.
         </Text>
 
         <View style={[styles.searchBar, { backgroundColor: theme.neutralBg }]}>
           <TextInput
             value={search}
             onChangeText={setSearch}
-            placeholder="Search debitors…"
+            placeholder="Search payees…"
             placeholderTextColor={theme.textMuted}
             style={[styles.searchInput, { color: theme.text }]}
             autoCapitalize="none"
@@ -150,54 +124,47 @@ export default function RulesListScreen({ navigation }: Props) {
         </View>
 
         <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
-          Bad ({badDebtors.length})
+          Bad ({badPayees.length})
         </Text>
-        {badDebtors.length === 0 ? (
+        {badPayees.length === 0 ? (
           <Text style={[styles.emptyNote, { color: theme.textMuted }]}>
             {isSearching
-              ? 'No bad debitors match your search.'
-              : "No bad debitors yet — they'll appear here as soon as a transaction comes in."}
+              ? 'No bad payees match your search.'
+              : "No bad payees yet — they'll appear here as soon as a charge comes in."}
           </Text>
         ) : (
-          badDebtors.map(debtor => {
-            const notice = noticeByDebtorId.get(debtor.id);
-            const subtitle = notice
-              ? `Auto-marked Bad · ${formatRelativeTime(notice.timestamp)}`
-              : describeAlertCondition(ruleByDebtorId.get(debtor.id));
-            return (
-              <DebtorRow
-                key={debtor.id}
-                theme={theme}
-                debtor={debtor}
-                subtitle={subtitle}
-                onPress={() => navigation.navigate('DebitorEdit', { debtorId: debtor.id })}
-              />
-            );
-          })
+          badPayees.map(payee => (
+            <PayeeRow
+              key={payee.id}
+              theme={theme}
+              payee={payee}
+              isGood={false}
+              subtitle={describeAlertCondition(ruleByPayeeId.get(payee.id))}
+              onPress={() => navigation.navigate('PayeeEdit', { payeeId: payee.id })}
+            />
+          ))
         )}
 
         <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
-          Trusted ({trustedDebtors.length})
+          Good ({goodPayees.length})
         </Text>
-        {trustedDebtors.length === 0 ? (
+        {goodPayees.length === 0 ? (
           <Text style={[styles.emptyNote, { color: theme.textMuted }]}>
             {isSearching
-              ? 'No trusted debitors match your search.'
-              : 'Debitors you mark Trusted from a transaction show up here.'}
+              ? 'No good payees match your search.'
+              : 'Payees you mark good show up here.'}
           </Text>
         ) : (
-          trustedDebtors.map(debtor => {
-            const count = transactionCountByDebtor.get(debtor.id) ?? 0;
-            return (
-              <DebtorRow
-                key={debtor.id}
-                theme={theme}
-                debtor={debtor}
-                subtitle={`${count} transaction${count === 1 ? '' : 's'}`}
-                onPress={() => navigation.navigate('DebitorEdit', { debtorId: debtor.id })}
-              />
-            );
-          })
+          goodPayees.map(payee => (
+            <PayeeRow
+              key={payee.id}
+              theme={theme}
+              payee={payee}
+              isGood
+              subtitle={describeAlertCondition(ruleByPayeeId.get(payee.id))}
+              onPress={() => navigation.navigate('PayeeEdit', { payeeId: payee.id })}
+            />
+          ))
         )}
       </ScrollView>
     </View>
@@ -251,7 +218,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     padding: 24,
   },
-  txRow: {
+  payeeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -270,17 +237,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 13,
   },
-  txInfo: {
+  payeeInfo: {
     flex: 1,
     flexDirection: 'column',
     gap: 2,
     minWidth: 0,
   },
-  txName: {
+  payeeName: {
     fontSize: 15,
     fontWeight: '600',
   },
-  txDate: {
+  payeeSubtitle: {
     fontSize: 12,
   },
   pill: {

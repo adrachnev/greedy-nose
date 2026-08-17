@@ -297,15 +297,24 @@ document for the map.
 answered — see R3a. Their reply also corrected R10b and added R10c, which no one had asked about.
 All ten divergences are now closed.
 
-### Then — the `app/` code rework
+### ~~Then — the `app/` code rework~~ — done 2026-08-17
 
-- **Rename for R0** throughout `app/src/`: `debtor`/`debitor` → `payee`, "Trusted" → "Good", and
-  `transaction` → `debit` (`TransactionListScreen`, `TransactionDetailScreen`, `useTransactions`,
-  the `transactions` fixture, and the Transactions tab label).
-- **Code to delete for R8** (`app/src/mocks/data.ts`, `app/src/data/hooks.ts`,
-  `DebitorEditScreen`, `RulesListScreen`): the save-time auto-flip and its toast, the passive
+- ~~**Rename for R0**~~ — done: `debtor`/`debitor` → payee, "Trusted" → Good, `transaction` →
+  debit, throughout screens, hooks, fixtures and the tab label.
+- ~~**Code to delete for R8**~~ — done: the save-time auto-flip and its toast, the passive
   Bad-only flip, the "Auto-marked Bad · Xm ago" marker and its cleared-on-open logic, and the
-  rule-clearing side effect of the manual toggle — plus the tests that pin that behavior.
+  rule-clearing side effect of the manual toggle are all gone, along with the tests that pinned
+  them.
+
+Two things the rework changed beyond the checklist above, both required to satisfy R4/R5:
+
+- **Good/bad moved from the payee onto the rule** (`classification`), so "has a rule" is what
+  reviewed means (R4b) and no separate flag exists.
+- **A domain layer** (`app/src/domain/`) now holds the vocabulary and R5's table, separate from
+  the mock fixtures it outlives. Classification is computed at read time and never stored (R6).
+
+Still to port: Settings, the onboarding screens (consent/syncing/classify), and the
+error/empty/disconnected states.
 
 ### Independent of both
 

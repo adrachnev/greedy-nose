@@ -6,7 +6,7 @@
 
 /**
  * Whether the user has already connected a bank and completed the
- * one-time bulk debitor classification. Drives the root navigator's
+ * one-time bulk payee classification. Drives the root navigator's
  * choice between the onboarding stack and the main tabs.
  */
 export function isOnboardingComplete(): boolean {

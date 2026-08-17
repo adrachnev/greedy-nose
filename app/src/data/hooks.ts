@@ -1,87 +1,76 @@
-// Thin data-access seam. Screens consume Debtors/Transactions/Rules only
-// through these hooks — never by importing app/src/mocks/data.ts directly.
-// Today they just return the mock fixtures; swapping in real API calls
-// (via React Query, context, whatever) later only touches this file.
+// Thin data-access seam. Screens consume payees/debits/rules only through
+// these hooks — never by importing app/src/mocks/data.ts directly. Today they
+// just return the mock fixtures; swapping in real API calls (via React Query,
+// context, whatever) later only touches this file.
 
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { Debit, Payee, Rule, RuleDraft } from '../domain/model';
 import {
-  AutoFlipNotice,
-  Debtor,
-  Rule,
-  RuleThresholds,
-  Transaction,
-  acknowledgeAutoFlipNotice,
-  autoFlipNotices,
-  debtors,
+  addDebit,
+  debits,
+  payees,
   rules,
-  setDebtorRule,
-  setDebtorTrusted,
+  savePayeeRule,
   subscribeToDataChanges,
-  transactions,
 } from '../mocks/data';
 
-// Debtors, Rules, and Transactions are all mutable (setDebtorTrusted /
-// setDebtorRule / addTransaction) — subscribe via useSyncExternalStore so
-// screens re-render when any of them changes elsewhere (e.g. navigating
-// back to the list after editing a rule on DebitorEditScreen, or a new
-// transaction arriving via addTransaction).
+// Every collection is read through useSyncExternalStore, so screens re-render
+// when one changes elsewhere — e.g. navigating back to the debit list after
+// editing a rule, which must re-label that payee's debits immediately (R7).
+// Payees happen to be immutable in this fixture layer; they are subscribed the
+// same way anyway, so nothing has to be revisited when the bank feed starts
+// creating them and no screen has to know which collection is which.
 
-export function useDebtors(): Debtor[] {
-  return useSyncExternalStore(subscribeToDataChanges, () => debtors);
+export function usePayees(): Payee[] {
+  return useSyncExternalStore(subscribeToDataChanges, () => payees);
 }
 
-export function useDebtor(debtorId: string): Debtor | undefined {
-  const all = useDebtors();
-  return useMemo(() => all.find(d => d.id === debtorId), [all, debtorId]);
+export function usePayee(payeeId: string): Payee | undefined {
+  const all = usePayees();
+  return useMemo(() => all.find(p => p.id === payeeId), [all, payeeId]);
 }
 
-/** Exposes the Trusted/Bad mutation to screens (e.g. TransactionDetailScreen's toggle). */
-export function useSetDebtorTrusted(): (
-  debtorId: string,
-  trusted: boolean,
-) => { clearedAmountThresholdEUR: number | undefined } {
-  return useCallback((debtorId: string, trusted: boolean) => {
-    return setDebtorTrusted(debtorId, trusted);
-  }, []);
+export function useDebits(): Debit[] {
+  return useSyncExternalStore(subscribeToDataChanges, () => debits);
 }
 
-export function useTransactions(): Transaction[] {
-  return useSyncExternalStore(subscribeToDataChanges, () => transactions);
-}
-
-export function useTransaction(transactionId: string): Transaction | undefined {
-  const all = useTransactions();
-  return useMemo(() => all.find(t => t.id === transactionId), [all, transactionId]);
+export function useDebit(debitId: string): Debit | undefined {
+  const all = useDebits();
+  return useMemo(() => all.find(d => d.id === debitId), [all, debitId]);
 }
 
 export function useRules(): Rule[] {
   return useSyncExternalStore(subscribeToDataChanges, () => rules);
 }
 
-export function useRuleForDebtor(debtorId: string): Rule | undefined {
+export function useRuleForPayee(payeeId: string): Rule | undefined {
   const all = useRules();
-  return useMemo(() => all.find(r => r.debtorId === debtorId), [all, debtorId]);
+  return useMemo(() => all.find(r => r.payeeId === payeeId), [all, payeeId]);
 }
 
-/** Exposes the alert-condition mutation to screens (DebitorEditScreen's Save/Clear). */
-export function useSetDebtorRule(): (
-  debtorId: string,
-  thresholds: RuleThresholds,
-) => { autoFlippedTo: 'Bad' | 'Trusted' | null } {
-  return useCallback((debtorId: string, thresholds: RuleThresholds) => {
-    return setDebtorRule(debtorId, thresholds);
+/**
+ * Rules keyed by payee, for screens that classify a whole list at once (the
+ * debit list, the rules list) and would otherwise do a linear scan per row.
+ */
+export function useRuleByPayeeId(): Map<string, Rule> {
+  const all = useRules();
+  return useMemo(() => new Map(all.map(rule => [rule.payeeId, rule])), [all]);
+}
+
+/**
+ * Exposes the single write path for a rule (PayeeEditScreen's Save and Clear).
+ * Classification and amount go together because one Save commits both — see
+ * savePayeeRule in src/mocks/data.ts.
+ */
+export function useSavePayeeRule(): (payeeId: string, draft: RuleDraft) => void {
+  return useCallback((payeeId: string, draft: RuleDraft) => {
+    savePayeeRule(payeeId, draft);
   }, []);
 }
 
-/** Pending passive auto-flip-to-Bad markers, surfaced on RulesListScreen
- * until the user opens that debtor's Edit screen — see acknowledgeAutoFlipNotice. */
-export function useAutoFlipNotices(): AutoFlipNotice[] {
-  return useSyncExternalStore(subscribeToDataChanges, () => autoFlipNotices);
-}
-
-/** Exposes clearing a debtor's pending auto-flip notice (DebitorEditScreen, on mount). */
-export function useAcknowledgeAutoFlipNotice(): (debtorId: string) => void {
-  return useCallback((debtorId: string) => {
-    acknowledgeAutoFlipNotice(debtorId);
+/** Exposes appending a debit — see addDebit's note on why nothing calls it yet. */
+export function useAddDebit(): (debit: Debit) => void {
+  return useCallback((debit: Debit) => {
+    addDebit(debit);
   }, []);
 }

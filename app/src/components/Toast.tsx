@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 /**
  * Lightweight confirmation toast, matching mocks/style.css's `.toast`
  * (dark pill, bottom-anchored, auto-dismissing). Purely presentational —
- * callers own the show/hide timing (see TransactionDetailScreen for the
+ * callers own the show/hide timing (see PayeeEditScreen for the
  * "show for ~2s after a mutation" pattern). Renders nothing when `message`
  * is falsy so it can be mounted unconditionally at the bottom of a screen.
  */

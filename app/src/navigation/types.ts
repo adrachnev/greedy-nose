@@ -2,22 +2,22 @@ export type OnboardingStackParamList = {
   ConnectBank: undefined;
   ConnectConsent: undefined;
   Syncing: undefined;
-  ClassifyDebitors: undefined;
+  ClassifyPayees: undefined;
 };
 
-export type TransactionsStackParamList = {
-  TransactionList: undefined;
-  TransactionDetail: { transactionId: string };
-  DebitorEdit: { debtorId: string };
+export type DebitsStackParamList = {
+  DebitList: undefined;
+  DebitDetail: { debitId: string };
+  PayeeEdit: { payeeId: string };
 };
 
 export type RulesStackParamList = {
   RulesList: undefined;
-  DebitorEdit: { debtorId: string };
+  PayeeEdit: { payeeId: string };
 };
 
 export type MainTabParamList = {
-  Transactions: undefined; // nested TransactionsStackParamList
+  Debits: undefined; // nested DebitsStackParamList
   Rules: undefined; // nested RulesStackParamList
   Settings: undefined;
 };
