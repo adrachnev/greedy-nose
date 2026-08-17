@@ -127,6 +127,41 @@ same rule and are edited independently.
 
 **R9** — The debit list shows debits, newest first, each marked good or bad.
 
+**R23 — Both list screens are searchable** (settled 2026-08-17). The debit list matches on the
+**payee's name or the debit's amount**; the rules list matches on the payee's name. Matching is
+**substring**, not prefix and not exact: typing `9` finds both `9.99` and `19.90`. The payment
+type is deliberately **not** matched — a word like "card" would return half the list and teach
+the user nothing.
+
+Two consequences worth stating, because both are easy to lose in an implementation:
+
+- The **date grouping survives filtering**. Searching a subscription must show one row per month
+  under its month header, since the rhythm of the charge is the thing worth seeing.
+- A search matching nothing shows **why**, naming the query — an empty screen is
+  indistinguishable from a lost bank connection (`R19` exists for the same reason).
+
+**R23a — Matching is tolerant of how the user types.** A German keyboard produces a comma and
+an umlaut; neither may cost the user a result. `12,99` and `12.99` both find the same charge,
+and `müller`, `muller` and `mueller` all find *Bäckerei Müller*. Case is ignored. Amounts are
+matched against the **unformatted** value, not the rendered string, so `R17`'s locale formatting
+cannot break search.
+
+**R23b — The query is scoped to the visit, not the screen.** It survives list → debit detail →
+Back, so several hits can be worked through without retyping, and it is **cleared when the tab
+is left**, so a tab always hands back the full list. Anything else leaves the user staring at a
+short list with no visible cause.
+
+## Navigation
+
+**R24 — Tapping a tab shows that tab's list** (settled 2026-08-17). Arriving at a tab always
+lands on its list, never on a detail or edit screen left open from a previous visit.
+**Re-tapping the tab you are already on does nothing** — it is not a "go back" gesture.
+
+**R24a** — Leaving a tab mid-edit **discards an unsaved rule draft**, silently. Back already
+discards on that screen (`R4`'s single-commit form), so a tab tap behaving differently would be
+the inconsistency, and a confirm dialog fired by a tab press is not a gesture Android users
+expect.
+
 ## Notifications
 
 **R10** — A **new** incoming debit that is classified bad triggers a notification. Good debits
@@ -266,6 +301,10 @@ list, the amount field split across 04b/04d, R12a notification wording, the reco
 05b, the disconnected banner folded into 01d, and the good-payee-over-limit case drawn in 03b +
 05c.)*
 
+**`R23`/`R24` are new on 2026-08-17 and land in that order**: the search field and the no-match
+state go into `mocks/` first, then the client. Neither is drawn or implemented yet at the time
+of writing.
+
 **Known mock gaps, deliberately left open** (from the 2026-08-14 review — decide before the
 matching screen is coded):
 
@@ -282,6 +321,13 @@ matching screen is coded):
    there is nowhere to send it. R22 makes that link correct in principle — the screen it needs
    just hasn't been drawn. (Revised 2026-08-14: previously recorded as the opposite problem,
    back when v1 was N26-only.)
+
+   **Wider than recorded** (2026-08-17): N26 is hardcoded in **eight** files, not two —
+   `01`, `01b`, `01bb`, `01d`, `01e`, `02b`, `06` and `06b`. So this is not only a missing
+   screen: connect, consent, syncing, the expired banner, the empty list and both settings
+   screens all name one bank in body copy. Whatever the bank-selection screen ends up being,
+   the fix is a *placeholder* everywhere the connected institution is mentioned, and none of
+   those files may keep a literal bank name.
 
 ### ~~Do this first — reconcile `ARCHITECTURE.md`~~ — done 2026-08-17
 

@@ -65,8 +65,40 @@ connection later, which is why the design stores every raw string it sees.
 - The old array-reference discipline is unchanged and still tested by reference identity, not
   just end value: every mutation reassigns a new array so `useSyncExternalStore` sees it.
 
-`npm test` (30 tests, 4 suites), `npx tsc --noEmit` and `npx eslint` all pass. Not yet run on
-the device since the rework — worth a build before trusting the UI details.
+**2026-08-17 — `R23`/`R24` implemented in `app/`: search, and tabs that always land on their
+list.** The mocks got the screens (`02c`, `02d`, `.search-field`); the client got the behaviour:
+
+- **Search is one shared matcher, not two** (`app/src/utils/search.ts`, pure and tested). The
+  debit list matches payee name *or* amount, the rules list name only, both substring and both
+  accent-tolerant (`R23a`). Umlauts are folded with an **explicit table**, not
+  `normalize('NFD')` — Hermes' Unicode surface is a build option, and a search that quietly
+  stops folding on one platform is a bug nobody reports. A name is matched in **both** spellings
+  (`müller` → `muller` *and* `mueller`), in both directions, because the bank's SEPA field says
+  `BAECKEREI MUELLER` while the user types the umlaut.
+- **Amounts are matched unformatted** (`toFixed(2)`), which is what lets `R17` land at the same
+  time without breaking search: `formatCurrencyEUR` now uses a module-cached
+  `Intl.NumberFormat` in the **device** locale (`49,00 €` on a German phone). Dates stay
+  English on purpose — `R17` is about money, and a French month name under the literal `Today`
+  would be worse than consistency.
+- **The query is scoped to the visit** (`R23b`): it survives list → detail → Back, and is
+  cleared on the **tab's** blur, not the screen's — the screen also blurs on the way into a
+  detail screen, and clearing there would break the first half of the requirement.
+- **`R24` is two navigator options, no dialog**: `popToTopOnBlur` on both list tabs, plus a
+  `tabPress` listener that `preventDefault()`s when the tab is already focused. Together they
+  also deliver `R24a` (an unsaved rule draft is discarded silently on tab switch) with no
+  confirm-dialog code at all.
+- **Fixtures were replaced wholesale**: six payees, ~71 debits, a full year of history, still
+  computed relative to *now*. Four `TODO.md` items closed alongside (locale amounts, the memo
+  that froze the Today/Yesterday labels, 16px row spacing, the per-row `usePayee` subscription).
+  The set is built so all three of `R12a`'s bad-debit reasons are reachable **by hand on the
+  device**, not just in unit tests: FitLine Gym has no rule ("New payee…"), ScamyLoans GmbH is
+  explicitly marked bad ("You marked this payee as bad."), and Bäckerei Müller is good with a
+  €30.00 limit that two charges exceed ("Over your limit of…"). A review pass caught the middle
+  one going missing when the set was first rewritten; `data.test.ts` now pins all three.
+
+`npm test` (99 tests, 10 suites), `npx tsc --noEmit` and `npx eslint .` all pass. Not yet run on
+the device since either rework — worth a build before trusting the UI details, and note the
+device is now the only place `Intl` (new in `formatCurrencyEUR`) has never been exercised.
 
 Mocks in `mocks/` are reviewed and settled. Framework: **React Native**, bare RN app in `app/`
 (Android target), toolchain validated end-to-end (build → wireless adb → physical device).
@@ -174,9 +206,16 @@ Android target set up first. Layout:
   fixtures, no I/O — so it is also the cheapest thing to test.
 - `src/data/hooks.ts` — the seam screens read through. Swapping fixtures for a real API should
   touch this file and nothing else.
+- `src/utils/` — pure helpers, all tested: `search.ts` (`R23`/`R23a` matching, umlaut folding),
+  `format.ts` (device-locale amounts per `R17`, English dates, date-section grouping),
+  `parseAmount.ts` (the limit field — note it *validates* a whole amount, where `search.ts`
+  deliberately normalizes a fragment; they are not interchangeable).
+- `src/hooks/` — cross-screen behaviour that is not data: `useCurrentDateKey` (re-renders at
+  local midnight so `Today`/`Yesterday` cannot go stale) and `useTabScopedSearch` (`R23b`).
 - `src/mocks/` — fixture *values* only, temporary (see Open/deferred).
-- `src/screens/` — one component per mock screen; `src/theme/colors.ts` mirrors
-  `mocks/style.css`'s light/dark tokens.
+- `src/screens/` — one component per mock screen; `src/components/` holds the pieces two
+  screens share (`SearchField`, `TabIcon`); `src/theme/colors.ts` mirrors `mocks/style.css`'s
+  light/dark tokens.
 
 Local Windows toolchain notes (only relevant if the build breaks again):
 - Requires JDK 17 (Android Gradle Plugin + a very new bundled JDK 25 from Android Studio

@@ -27,12 +27,14 @@
 
           It is also the R3a card-payment case: no IBAN and no creditor ID
           exist here, so the rule is keyed on the normalized name, and the raw
-          bank text is shown for it.
+          bank text is shown for it. Note the bank spells the umlaut out as
+          "MUELLER" — which is why search has to accept müller, muller and
+          mueller alike (R23a).
         -->
 
         <div class="card" style="align-items:center;text-align:center;gap:6px;">
-          <div class="avatar" style="width:56px;height:56px;background:var(--good-bg);color:var(--good);font-size:18px;">RE</div>
-          <div class="tx-name" style="font-size:18px;">REWE Markt</div>
+          <div class="avatar" style="width:56px;height:56px;background:var(--good-bg);color:var(--good);font-size:18px;">BM</div>
+          <div class="tx-name" style="font-size:18px;">Bäckerei Müller</div>
           <div class="tx-amount" style="font-size:22px;color:var(--bad);">€34.21</div>
           <div class="tx-date">Card payment · Aug 3, 2026 · 12:41</div>
         </div>
@@ -46,7 +48,7 @@
         </div>
 
         <div class="card">
-          <div class="tx-info"><div class="tx-date">Payee text from the bank</div><div class="tx-name" style="font-size:14px;">REWE SAGT DANKE 4711</div></div>
+          <div class="tx-info"><div class="tx-date">Payee text from the bank</div><div class="tx-name" style="font-size:14px;">BAECKEREI MUELLER 4711</div></div>
           <div class="divider"></div>
           <div class="tx-info"><div class="tx-date">Reference</div><div class="tx-name" style="font-size:14px;">Card payment · Berlin</div></div>
         </div>
@@ -54,7 +56,7 @@
         <a class="card" href="04b-payee-edit.html" style="flex-direction:row;align-items:center;justify-content:space-between;text-decoration:none;">
           <div class="tx-info">
             <div class="tx-date">Payee status</div>
-            <div class="tx-name" style="font-size:15px;">REWE Markt · limit €30.00</div>
+            <div class="tx-name" style="font-size:15px;">Bäckerei Müller · limit €30.00</div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
             <span class="pill pill-good">Good</span>

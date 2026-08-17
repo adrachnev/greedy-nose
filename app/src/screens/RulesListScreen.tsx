@@ -1,22 +1,17 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useMemo, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  useColorScheme,
-  View,
-} from 'react-native';
+import React, { useMemo } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MockDataBadge from '../components/MockDataBadge';
+import SearchField from '../components/SearchField';
 import { usePayees, useRuleByPayeeId } from '../data/hooks';
 import { classifyPayee } from '../domain/classification';
 import { Payee, Rule } from '../domain/model';
+import { useTabScopedSearch } from '../hooks/useTabScopedSearch';
 import { RulesStackParamList } from '../navigation/types';
 import { dark, light, Theme } from '../theme/colors';
 import { formatCurrencyEUR } from '../utils/format';
+import { matchesNameSearch } from '../utils/search';
 
 type Props = NativeStackScreenProps<RulesStackParamList, 'RulesList'>;
 
@@ -83,20 +78,32 @@ export default function RulesListScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const payees = usePayees();
   const ruleByPayeeId = useRuleByPayeeId();
-  const [search, setSearch] = useState('');
+  const { search, setSearch } = useTabScopedSearch();
 
   const isSearching = search.trim().length > 0;
 
-  const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) {
-      return payees;
-    }
-    return payees.filter(p => p.name.toLowerCase().includes(query));
-  }, [payees, search]);
+  // Name only (R23) — a limit is not something anyone searches for, and
+  // matching amounts here would silently make "30" mean two different things
+  // across the two lists. The matcher is shared with the debit list, so both
+  // are equally tolerant of umlauts and case (R23a).
+  const filtered = useMemo(
+    () => (isSearching ? payees.filter(p => matchesNameSearch(search, p.name)) : payees),
+    [payees, search, isSearching],
+  );
 
   const badPayees = filtered.filter(p => classifyPayee(ruleByPayeeId.get(p.id)) === 'bad');
   const goodPayees = filtered.filter(p => classifyPayee(ruleByPayeeId.get(p.id)) === 'good');
+
+  // R23: a search that matches nothing says so, and names the query — one
+  // message for the screen, not one per section. Two notes reading "no bad
+  // payees match" and "no good payees match" describe the sections rather than
+  // the search, and between them they never mention what was typed.
+  //
+  // Only while searching: an account with genuinely no payees is a different
+  // state, and its per-section notes below say something more useful.
+  const query = search.trim();
+  const noMatches = isSearching && badPayees.length === 0 && goodPayees.length === 0;
+  const noMatchText = `No payees match “${query}”.`;
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
@@ -105,66 +112,72 @@ export default function RulesListScreen({ navigation }: Props) {
         <Text style={[styles.navTitle, { color: theme.text }]}>Rules</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={[styles.hint, { color: theme.textMuted }]}>
-          Every payee is bad by default and alerts you on any new charge, until you mark them
-          good.
-        </Text>
+      {/* Pinned outside the ScrollView, like the debit list's — which pushes
+          the hint below it, into the scroll area where it belongs: the box is
+          chrome, the hint is content. */}
+      <SearchField value={search} onChangeText={setSearch} placeholder="Search payees…" />
 
-        <View style={[styles.searchBar, { backgroundColor: theme.neutralBg }]}>
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search payees…"
-            placeholderTextColor={theme.textMuted}
-            style={[styles.searchInput, { color: theme.text }]}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-        </View>
-
-        <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
-          Bad ({badPayees.length})
-        </Text>
-        {badPayees.length === 0 ? (
-          <Text style={[styles.emptyNote, { color: theme.textMuted }]}>
-            {isSearching
-              ? 'No bad payees match your search.'
-              : "No bad payees yet — they'll appear here as soon as a charge comes in."}
-          </Text>
+      <ScrollView
+        contentContainerStyle={[styles.content, noMatches && styles.contentCentered]}
+        keyboardShouldPersistTaps="handled"
+      >
+        {noMatches ? (
+          <Text style={[styles.emptyNote, { color: theme.textMuted }]}>{noMatchText}</Text>
         ) : (
-          badPayees.map(payee => (
-            <PayeeRow
-              key={payee.id}
-              theme={theme}
-              payee={payee}
-              isGood={false}
-              subtitle={describeAlertCondition(ruleByPayeeId.get(payee.id))}
-              onPress={() => navigation.navigate('PayeeEdit', { payeeId: payee.id })}
-            />
-          ))
-        )}
+          <>
+            <Text style={[styles.hint, { color: theme.textMuted }]}>
+              Every payee is bad by default and alerts you on any new charge, until you mark them
+              good.
+            </Text>
 
-        <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
-          Good ({goodPayees.length})
-        </Text>
-        {goodPayees.length === 0 ? (
-          <Text style={[styles.emptyNote, { color: theme.textMuted }]}>
-            {isSearching
-              ? 'No good payees match your search.'
-              : 'Payees you mark good show up here.'}
-          </Text>
-        ) : (
-          goodPayees.map(payee => (
-            <PayeeRow
-              key={payee.id}
-              theme={theme}
-              payee={payee}
-              isGood
-              subtitle={describeAlertCondition(ruleByPayeeId.get(payee.id))}
-              onPress={() => navigation.navigate('PayeeEdit', { payeeId: payee.id })}
-            />
-          ))
+            <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
+              Bad ({badPayees.length})
+            </Text>
+            {/* Reachable while searching only when the *other* section has
+                hits — "Bad (0), no bad payees match" next to a good payee the
+                search did find is informative; on its own it is not, which is
+                what the whole-screen message above handles. */}
+            {badPayees.length === 0 ? (
+              <Text style={[styles.emptyNote, { color: theme.textMuted }]}>
+                {isSearching
+                  ? 'No bad payees match your search.'
+                  : "No bad payees yet — they'll appear here as soon as a charge comes in."}
+              </Text>
+            ) : (
+              badPayees.map(payee => (
+                <PayeeRow
+                  key={payee.id}
+                  theme={theme}
+                  payee={payee}
+                  isGood={false}
+                  subtitle={describeAlertCondition(ruleByPayeeId.get(payee.id))}
+                  onPress={() => navigation.navigate('PayeeEdit', { payeeId: payee.id })}
+                />
+              ))
+            )}
+
+            <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
+              Good ({goodPayees.length})
+            </Text>
+            {goodPayees.length === 0 ? (
+              <Text style={[styles.emptyNote, { color: theme.textMuted }]}>
+                {isSearching
+                  ? 'No good payees match your search.'
+                  : 'Payees you mark good show up here.'}
+              </Text>
+            ) : (
+              goodPayees.map(payee => (
+                <PayeeRow
+                  key={payee.id}
+                  theme={theme}
+                  payee={payee}
+                  isGood
+                  subtitle={describeAlertCondition(ruleByPayeeId.get(payee.id))}
+                  onPress={() => navigation.navigate('PayeeEdit', { payeeId: payee.id })}
+                />
+              ))
+            )}
+          </>
         )}
       </ScrollView>
     </View>
@@ -186,23 +199,20 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
-    gap: 8,
+    // Same 12px rhythm as the debit list and mocks/style.css's `.content`;
+    // the row carries no bottom margin, or the two would add up.
+    gap: 12,
+  },
+  // Only applied while the no-match message is the whole body: flexGrow is
+  // what gives a ScrollView's content something to centre inside.
+  contentCentered: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   hint: {
     fontSize: 12,
     lineHeight: 17,
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 4,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
-    minHeight: 40,
   },
   sectionLabel: {
     fontSize: 13,
@@ -210,7 +220,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.3,
     marginTop: 8,
-    marginBottom: 4,
     marginHorizontal: 4,
   },
   emptyNote: {
@@ -224,7 +233,6 @@ const styles = StyleSheet.create({
     gap: 12,
     borderRadius: 12,
     padding: 14,
-    marginBottom: 8,
   },
   avatar: {
     width: 40,

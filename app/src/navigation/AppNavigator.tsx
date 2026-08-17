@@ -11,6 +11,7 @@ import PayeeEditScreen from '../screens/PayeeEditScreen';
 import RulesListScreen from '../screens/RulesListScreen';
 import StubScreen from '../screens/StubScreen';
 import { dark, light } from '../theme/colors';
+import { MAIN_TAB_NAVIGATOR_ID } from './ids';
 import {
   DebitsStackParamList,
   MainTabParamList,
@@ -21,7 +22,9 @@ import {
 const OnboardingStack = createNativeStackNavigator<OnboardingStackParamList>();
 const DebitsStack = createNativeStackNavigator<DebitsStackParamList>();
 const RulesStack = createNativeStackNavigator<RulesStackParamList>();
-const Tab = createBottomTabNavigator<MainTabParamList>();
+// The id type argument is what makes `id` mandatory below: drop the prop and
+// this stops compiling, rather than stopping R23b at runtime.
+const Tab = createBottomTabNavigator<MainTabParamList, typeof MAIN_TAB_NAVIGATOR_ID>();
 
 /**
  * Onboarding flow: connect bank -> consent -> syncing -> bulk-classify
@@ -111,11 +114,57 @@ function MainTabBarIcon({
   return <TabIcon name={TAB_ICON_BY_ROUTE[routeName]} color={color} size={size} />;
 }
 
+/**
+ * R24, second half: **re-tapping the tab you are already on does nothing.**
+ *
+ * Be clear about what this listener is and is not. Bottom-tabs already ignores
+ * a press on the focused tab: `BottomTabBar` guards its navigate with
+ * `if (!focused && !event.defaultPrevented)`, so on today's navigator R24
+ * holds with or without this code. The listener is a
+ * **deliberate redundant guard**: it states the requirement in the app instead
+ * of leaving it resting on a library default, and it gives the requirement a
+ * unit test, which a library default cannot have.
+ *
+ * The migration trap worth writing down: the *unstable native* tab navigator
+ * (`@react-navigation/bottom-tabs/unstable`) hardcodes
+ * `specialEffects.repeatedTabSelection.popToRoot` and emits `tabPress`
+ * **without** `canPreventDefault`. There, a re-tap really does pop the nested
+ * stack, and this listener would **not** stop it — `preventDefault` has
+ * nothing to cancel. Switching navigators means re-solving R24, not moving
+ * this function.
+ *
+ * Structurally typed rather than imported: only `isFocused` and
+ * `preventDefault` are used here, and naming the full react-navigation event
+ * types would couple this file to them for no gain.
+ *
+ * Exported for its test — the behaviour is one `if` away from inverting into
+ * "swallow every tab switch", and nothing else in the suite would notice.
+ */
+export function listTabListeners({ navigation }: { navigation: { isFocused: () => boolean } }) {
+  return {
+    tabPress: (e: { preventDefault: () => void }) => {
+      if (navigation.isFocused()) {
+        e.preventDefault();
+      }
+    },
+  };
+}
+
+/**
+ * R24, first half: arriving at a tab always lands on its list, never on a
+ * detail or edit screen left open from a previous visit. Popping on *blur*
+ * rather than on focus is what also delivers R24a for free — an unsaved rule
+ * draft is discarded silently on the way out, exactly as Back already discards
+ * it (R4's single-commit form), with no dialog code at all.
+ */
+const LIST_TAB_OPTIONS = { popToTopOnBlur: true } as const;
+
 function MainTabs() {
   const theme = useColorScheme() === 'dark' ? dark : light;
 
   return (
     <Tab.Navigator
+      id={MAIN_TAB_NAVIGATOR_ID}
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor: theme.accent,
@@ -134,8 +183,20 @@ function MainTabs() {
         ),
       })}
     >
-      <Tab.Screen name="Debits" component={DebitsNavigator} />
-      <Tab.Screen name="Rules" component={RulesNavigator} />
+      <Tab.Screen
+        name="Debits"
+        component={DebitsNavigator}
+        options={LIST_TAB_OPTIONS}
+        listeners={listTabListeners}
+      />
+      <Tab.Screen
+        name="Rules"
+        component={RulesNavigator}
+        options={LIST_TAB_OPTIONS}
+        listeners={listTabListeners}
+      />
+      {/* Settings has no nested stack, so neither option has anything to do
+          there — there is no stack to pop and nothing to blur away. */}
       <Tab.Screen name="Settings" component={SettingsStub} />
     </Tab.Navigator>
   );

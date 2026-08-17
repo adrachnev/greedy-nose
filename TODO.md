@@ -16,11 +16,6 @@ Two review passes over the R0/R4/R5/R8 rework. The first found a critical invert
 
 ### Worth doing next
 
-- [ ] **R17 — amounts are hardcoded to `en-US`** (`app/src/utils/format.ts:7`). A manual `€`
-      prefix plus `en-US` grouping, where R17 asks for device locale (`49,00 €` on a German
-      phone). Sharpened by this pass: `parseAmount.ts` now *accepts* `45,50`, and the app echoes
-      `€45.50` straight back at the user. Fix both directions together, and note the mocks are
-      deliberately English, so they are not the contract here.
 - [ ] **Bad debit's amount is not red on the detail screen**
       (`app/src/screens/DebitDetailScreen.tsx:66`). `mocks/03` and `03b` both paint it, and
       `DebitListScreen` already does — so today the list and the detail screen disagree about the
@@ -43,21 +38,68 @@ Two review passes over the R0/R4/R5/R8 rework. The first found a critical invert
 - [ ] Good/Bad toggle has no `accessibilityRole` or selected state
       (`app/src/screens/PayeeEditScreen.tsx:162`) — only colour marks the active half, which
       leaves screen-reader and colour-blind users with nothing.
-- [ ] Each debit row subscribes to the store separately via `usePayee`
-      (`app/src/screens/DebitListScreen.tsx:36`), while rules come from one memoized map. Fine at
-      11 fixture rows; revisit with a real paged history.
-- [ ] Sections memo freezes the "Today"/"Yesterday" labels until `debits` changes
-      (`app/src/screens/DebitListScreen.tsx:83`) — a session open across midnight shows stale
-      headers.
-- [ ] Row spacing is 16px (container `gap: 8` + row `marginBottom: 8`) where the mock uses 12
-      (`app/src/screens/DebitListScreen.tsx:135`).
+- [ ] **Debounce the debit-list search once the history is real**
+      (`app/src/screens/DebitListScreen.tsx:121`). Every keystroke filters, sorts and groups the
+      whole list. Deliberately not done now: at ~70 fixture rows it buys nothing measurable and
+      costs a small state machine, and the rows themselves no longer re-render (memoized row +
+      hoisted `renderItem`). Revisit with the paged history from the backend, where the sort is
+      the part that will hurt.
 - [ ] `useAddDebit` has no caller and `addDebit` is only reached from tests
       (`app/src/data/hooks.ts:72`). Intentional for now — it models the arrival of a charge, which
       the real feed will need — but delete it if the backend lands with a different shape.
 
+## From the R23/R24 review — 2026-08-17
+
+Deliberate non-fixes. Both are real, both were understood, and neither is worth code today —
+recorded here so they are decisions rather than things nobody noticed.
+
+- [ ] **A lone thousands separator in search reads as a decimal point**
+      (`app/src/utils/search.ts`, `normalizeAmountQuery`). Typing `1.234` looks for `1.234` and
+      therefore misses a €1,234.00 charge; `1.234,56` works, because a second separator proves
+      the first one grouped. The input is genuinely ambiguous — `1.234` is one thousand in
+      Germany and one-and-a-bit in Britain — and guessing is how a search box starts lying.
+      `parseAmount.ts` already refuses the same ambiguity by design rather than picking a side,
+      so search agreeing with it is at least consistent. Invisible below €1000, which is most
+      charges. Revisit if real balances make four-figure debits common, and if so solve it once
+      for both files, not twice.
+- [ ] **The `Intl.NumberFormat` cache lives as long as the JS context**
+      (`app/src/utils/format.ts:17`). Change the phone's language while the app is warm and
+      amounts keep rendering in the old locale — the one thing R17 promises not to do. The fix
+      would be an `AppState`/locale-change invalidation hook inside what is otherwise a pure,
+      dependency-free util, which is a real cost for a case Android mostly closes on its own: a
+      system language change restarts the activity in practice, and the cache dies with it.
+      Revisit if the device says otherwise — this is on the list of things only a device shows
+      (see Standing, below).
+
+## Investigate first — seen on device 2026-08-17
+
+- [ ] **Two screens disagreed about the good-payee-with-a-limit.** On the device, the Rules tab
+      listed that payee under **Bad** with "Alerts on every charge", while Debit Detail for the
+      same payee showed **Good · limit €30.00**, and the debit list painted the avatar red where
+      the detail screen painted it green. The fixtures said `{ classification: 'good',
+      amountEUR: 30 }`, so the Rules tab was the one that was wrong.
+
+      **Still open, and now re-pointed**: the payee it was seen on (REWE Markt) no longer exists —
+      the 2026-08-17 fixture rework replaced it with **Bäckerei Müller**, which holds the same
+      role (good, €30.00 limit, charges on both sides of it). Re-test there. Nothing about the
+      suspected cause was proven or fixed, so this is a re-target, not a resolution.
+
+      Rule out the boring cause first: this machine has hit stale-Metro state before (full kill +
+      `--reset-cache` + uninstall/reinstall). The app was launched over a Fast-Refreshed bundle,
+      so module state in `src/mocks/data.ts` may have been left over from an earlier build rather
+      than re-initialised.
+
+      If a clean reinstall still shows it, it is a real bug, and the likely area is
+      `useRuleByPayeeId` / `useRules` snapshot identity — the same `useSyncExternalStore` class of
+      failure this codebase already shipped once. Note both screens were verified correct by unit
+      tests, so whatever this is, the tests do not cover it.
+
 ## Standing
 
-- [ ] **Run the reworked app on the device.** Everything since the R0/R4/R5/R8 rework has been
-      verified by tests and typecheck only; no screen has been seen on hardware since.
+- [ ] **Run the reworked app on the device.** Partly done 2026-08-17 — it builds, installs and
+      renders, but see the discrepancy above; no screen is signed off yet. The R23/R24 pass on
+      the same day added things only a device shows: the search field's keyboard behaviour, the
+      44px tap target on the ✕, `Intl` under Hermes (amount formatting is now the platform's job,
+      not ours), and the tab-press/`popToTopOnBlur` gestures.
 - [ ] Port the remaining screens: Settings, the onboarding flow (consent/syncing/classify), and
       the error/empty/disconnected states.

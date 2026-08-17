@@ -9,6 +9,17 @@
   <div class="phone">
     <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
     <div class="nav-bar"><h1>Debits</h1><span></span></div>
+
+    <!--
+      R23 — the search field is pinned under the title, outside .screen, so
+      only the list below it scrolls. It matches the payee's name or the
+      amount, never the payment type ("card" would return half the list).
+      Empty here, so no ✕; the typed state is 02c-debit-search-no-match.html.
+    -->
+    <div class="search-field">
+      <span class="search-text search-text-placeholder">Search debits…</span>
+    </div>
+
     <div class="screen">
       <div class="content">
 
@@ -18,13 +29,24 @@
           alarm rather than a ledger.
 
           The avatar colour is the PAYEE's status, the pill is THIS debit's —
-          they are not the same thing. REWE below is the case that makes the
-          model visible: a good payee (green avatar) with a €30.00 limit, whose
-          €34.21 charge is bad anyway (R5, last row). Its detail screen is
-          03b-debit-detail-over-limit.html.
+          they are not the same thing. Bäckerei Müller below is the case that
+          makes the model visible: a good payee (green avatar) with a €30.00
+          limit, whose €34.21 charge is bad anyway (R5, last row). Its detail
+          screen is 03b-debit-detail-over-limit.html.
 
           No minus signs: every debit is money going out (R2a), so "−" carries
           no information here.
+
+          Grouping: only the two days a user thinks of by name get their own
+          header. Everything older groups by MONTH, because the thing worth
+          seeing in history is the rhythm of a recurring charge, not which
+          Tuesday it landed on (R23). Rows under a month header therefore
+          carry the day as well as the time; Today/Yesterday rows need only
+          the time.
+
+          Today and Yesterday sitting ABOVE an "August 2026" header that covers
+          the same month is deliberate, not a grouping bug — it is what banking
+          apps do, and "August 2026" here means the rest of August.
         -->
 
         <div class="section-label">Today</div>
@@ -56,9 +78,9 @@
         </a>
 
         <a class="tx-row" href="03b-debit-detail-over-limit.html">
-          <div class="avatar" style="background:var(--good-bg);color:var(--good);">RE</div>
+          <div class="avatar" style="background:var(--good-bg);color:var(--good);">BM</div>
           <div class="tx-info">
-            <div class="tx-name">REWE Markt</div>
+            <div class="tx-name">Bäckerei Müller</div>
             <div class="tx-date">Card payment · 12:41</div>
           </div>
           <div class="tx-right">
@@ -67,13 +89,13 @@
           </div>
         </a>
 
-        <div class="section-label">Aug 2</div>
+        <div class="section-label">August 2026</div>
 
         <a class="tx-row" href="03-debit-detail.html">
           <div class="avatar" style="background:var(--bad-bg);color:var(--bad);">VF</div>
           <div class="tx-info">
             <div class="tx-name">Vodafone GmbH</div>
-            <div class="tx-date">Direct debit · 07:30</div>
+            <div class="tx-date">Direct debit · 2 Aug, 07:30</div>
           </div>
           <div class="tx-right">
             <div class="tx-amount" style="color:var(--bad);">€24.99</div>
@@ -85,7 +107,64 @@
           <div class="avatar" style="background:var(--good-bg);color:var(--good);">LL</div>
           <div class="tx-info">
             <div class="tx-name">Landlord J. Meyer</div>
-            <div class="tx-date">Bank transfer · 06:00</div>
+            <div class="tx-date">Bank transfer · 2 Aug, 06:00</div>
+          </div>
+          <div class="tx-right">
+            <div class="tx-amount">€850.00</div>
+          </div>
+        </a>
+
+        <a class="tx-row" href="03-debit-detail.html">
+          <div class="avatar" style="background:var(--good-bg);color:var(--good);">BM</div>
+          <div class="tx-info">
+            <div class="tx-name">Bäckerei Müller</div>
+            <div class="tx-date">Card payment · 1 Aug, 08:20</div>
+          </div>
+          <div class="tx-right">
+            <div class="tx-amount">€6.40</div>
+          </div>
+        </a>
+
+        <!--
+          A second month, so a year of history is visible by scrolling and the
+          month headers earn their keep. Spotify and the rent repeat here at
+          the same amount — that repetition is what a search for one payee is
+          meant to surface, one row per month (R23).
+        -->
+        <div class="section-label">July 2026</div>
+
+        <a class="tx-row" href="03-debit-detail.html">
+          <div class="avatar" style="background:var(--bad-bg);color:var(--bad);">SP</div>
+          <div class="tx-info">
+            <div class="tx-name">Spotify AB</div>
+            <div class="tx-date">Subscription · 3 Jul, 09:14</div>
+          </div>
+          <div class="tx-right">
+            <div class="tx-amount" style="color:var(--bad);">€9.99</div>
+            <span class="pill pill-bad">Bad</span>
+          </div>
+        </a>
+
+        <!--
+          Same payee as the €34.21 charge above, under their €30.00 limit this
+          time — so this one is good and stays silent (R5, R5a).
+        -->
+        <a class="tx-row" href="03-debit-detail.html">
+          <div class="avatar" style="background:var(--good-bg);color:var(--good);">BM</div>
+          <div class="tx-info">
+            <div class="tx-name">Bäckerei Müller</div>
+            <div class="tx-date">Card payment · 2 Jul, 08:05</div>
+          </div>
+          <div class="tx-right">
+            <div class="tx-amount">€4.80</div>
+          </div>
+        </a>
+
+        <a class="tx-row" href="03-debit-detail.html">
+          <div class="avatar" style="background:var(--good-bg);color:var(--good);">LL</div>
+          <div class="tx-info">
+            <div class="tx-name">Landlord J. Meyer</div>
+            <div class="tx-date">Bank transfer · 1 Jul, 06:00</div>
           </div>
           <div class="tx-right">
             <div class="tx-amount">€850.00</div>

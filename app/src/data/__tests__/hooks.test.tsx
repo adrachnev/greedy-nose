@@ -21,7 +21,7 @@ import { Text } from 'react-native';
 import { useRuleForPayee, useSavePayeeRule } from '../hooks';
 import { classifyPayee } from '../../domain/classification';
 
-const PAYEE_ID = 'payee-scamyloans';
+const PAYEE_ID = 'payee-fitline';
 
 // Stands in for the debit list: derives the payee's status from the rule.
 function ListProbe() {
@@ -87,7 +87,7 @@ describe('useRuleForPayee re-render on mutation', () => {
 });
 
 /** Both fields at once, since one Save now commits both. */
-const LIMIT_PAYEE_ID = 'payee-rewe';
+const LIMIT_PAYEE_ID = 'payee-baeckerei';
 
 function RuleProbe() {
   const rule = useRuleForPayee(LIMIT_PAYEE_ID);
@@ -103,7 +103,7 @@ describe('useSavePayeeRule re-render on mutation', () => {
       renderer = ReactTestRenderer.create(<RuleProbe />);
     });
 
-    // payee-rewe ships good with a €30 limit in the fixtures.
+    // payee-baeckerei ships good with a €30 limit in the fixtures.
     expect(textAt(renderer.root, 'rule-status')).toBe('good/over-30');
 
     const saveRule = captureSaveRule();

@@ -9,6 +9,17 @@
   <div class="phone">
     <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
     <div class="nav-bar"><h1>Debits</h1><span></span></div>
+
+    <!--
+      R23 — the search field stays, because this screen is the real debit list
+      with a banner on top of it (R19), not a replacement for it. The history
+      below is kept and still worth searching; R21 makes the same point about
+      rules staying editable while disconnected.
+    -->
+    <div class="search-field">
+      <span class="search-text search-text-placeholder">Search debits…</span>
+    </div>
+
     <div class="screen">
       <div class="content">
 
@@ -46,9 +57,9 @@
         </a>
 
         <a class="tx-row" href="03b-debit-detail-over-limit.html">
-          <div class="avatar" style="background:var(--good-bg);color:var(--good);">RE</div>
+          <div class="avatar" style="background:var(--good-bg);color:var(--good);">BM</div>
           <div class="tx-info">
-            <div class="tx-name">REWE Markt</div>
+            <div class="tx-name">Bäckerei Müller</div>
             <div class="tx-date">Card payment · 12:41</div>
           </div>
           <div class="tx-right">
@@ -57,13 +68,18 @@
           </div>
         </a>
 
-        <div class="section-label">Aug 2</div>
+        <!--
+          Month header, as on 02 (R23). "Last seen · Aug 3" above it is the
+          exception this screen earns: with the feed dead there is no Today or
+          Yesterday to name, and the date the data stops is the point.
+        -->
+        <div class="section-label">August 2026</div>
 
         <a class="tx-row" href="03-debit-detail.html">
           <div class="avatar" style="background:var(--good-bg);color:var(--good);">LL</div>
           <div class="tx-info">
             <div class="tx-name">Landlord J. Meyer</div>
-            <div class="tx-date">Bank transfer · 06:00</div>
+            <div class="tx-date">Bank transfer · 2 Aug, 06:00</div>
           </div>
           <div class="tx-right">
             <div class="tx-amount">€850.00</div>

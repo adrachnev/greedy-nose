@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Debits — Empty</title>
+<title>Debits — No Search Match</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,20 +11,30 @@
     <div class="nav-bar"><h1>Debits</h1><span></span></div>
 
     <!--
-      R23 — the pinned search field is deliberately ABSENT here, and its
-      absence is the decision, not an oversight: there is nothing to search
-      yet. Offering the box over an empty list hands the user a control that
-      cannot change anything, and a search returning nothing from nothing is
-      the one message that would confuse rather than explain.
-
-      It is present on 01d-connection-expired.html, which looks similar but is
-      not the same case — that list has history, it just has no live feed.
+      R23 — the typed state of the pinned search field. The ✕ appears only
+      once there is text; tapping it clears the query and hands back the full
+      list (02-debit-list.html). It is a line-style SVG like the tab-bar
+      icons, not an emoji or an icon font, and there is no magnifier glyph:
+      the placeholder already says what the box is for.
     -->
+    <div class="search-field">
+      <span class="search-text">aldi</span>
+      <a class="search-clear" href="02-debit-list.html" aria-label="Clear search"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></a>
+    </div>
 
     <div class="screen">
-      <div class="content" style="align-items:center;justify-content:center;text-align:center;gap:8px;">
-        <div class="tx-name" style="font-size:16px;">No debits yet</div>
-        <p class="empty-note">Your N26 account is connected. New debits will show up here as soon as they happen.</p>
+
+      <!--
+        R23 — a search that matches nothing has to say so, and name the query.
+        An empty body on its own reads as "no debits", which is the same
+        picture a dead bank connection paints (R19 exists for that reason) —
+        and here it would be a lie, since the list is full, just filtered.
+
+        Deliberately nothing else: no button, no illustration. The field above
+        already holds the only two ways out (edit the query, or tap the ✕).
+      -->
+      <div class="content" style="align-items:center;justify-content:center;text-align:center;">
+        <p class="empty-note">No debits match “aldi”.</p>
       </div>
     </div>
     <div class="tab-bar">

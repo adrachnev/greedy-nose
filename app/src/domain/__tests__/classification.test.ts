@@ -114,9 +114,21 @@ describe('describeBadReason — R12a wording', () => {
     expect(describeBadReason(classifyDebit(debitOf(9.99), bad))).toBe(
       'You marked this payee as bad.',
     );
-    expect(describeBadReason(classifyDebit(debitOf(34.21), goodWithLimit))).toBe(
-      'Over your limit of €30.00.',
-    );
+  });
+
+  /**
+   * The third reason quotes an amount, and R17 renders amounts in the *device*
+   * locale — "€30.00" here, "30,00 €" on a German machine. So this pins the
+   * sentence and the number, and leaves the currency layout to
+   * format.test.ts, which tests it against explicit locales. Asserting the
+   * en-US spelling would make the suite fail for a German developer, on
+   * correct code.
+   */
+  it('words the over-limit reason around whatever the locale renders', () => {
+    const text = describeBadReason(classifyDebit(debitOf(34.21), goodWithLimit))!;
+
+    expect(text).toMatch(/^Over your limit of .+\.$/);
+    expect(text).toMatch(/30[.,]00/);
   });
 
   it('never puts a minus sign on an amount (R17a)', () => {

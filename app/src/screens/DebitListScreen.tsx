@@ -1,16 +1,29 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MockDataBadge from '../components/MockDataBadge';
-import { useDebits, usePayee, useRuleByPayeeId } from '../data/hooks';
+import SearchField from '../components/SearchField';
+import { useDebits, usePayees, useRuleByPayeeId } from '../data/hooks';
 import { classifyDebit, classifyPayee } from '../domain/classification';
-import { Debit, Rule } from '../domain/model';
+import { Debit, Payee, Rule } from '../domain/model';
+import { dateFromDateKey, useCurrentDateKey } from '../hooks/useCurrentDateKey';
+import { useTabScopedSearch } from '../hooks/useTabScopedSearch';
 import { DebitsStackParamList } from '../navigation/types';
 import { dark, light, Theme } from '../theme/colors';
-import { formatCurrencyEUR, formatTime, groupByDateSection } from '../utils/format';
+import {
+  DateSection,
+  formatCurrencyEUR,
+  formatDayShort,
+  formatTime,
+  groupByDateSection,
+} from '../utils/format';
+import { matchesDebitSearch } from '../utils/search';
 
 type Props = NativeStackScreenProps<DebitsStackParamList, 'DebitList'>;
+
+/** Module-level, so the list never sees a new function for it. */
+const keyExtractor = (debit: Debit) => debit.id;
 
 /**
  * Two verdicts share this row, and they are not the same thing (R5):
@@ -20,31 +33,50 @@ type Props = NativeStackScreenProps<DebitsStackParamList, 'DebitList'>;
  *
  * They differ exactly when a good payee exceeds their limit, which is the
  * subtle half of R5 and the reason the row is drawn this way. See
- * mocks/02-debit-list.html's REWE row.
+ * mocks/02-debit-list.html's Bäckerei Müller rows.
+ *
+ * The payee is passed in rather than looked up here: the list needs every
+ * payee's name anyway to filter on it, so a per-row store subscription would
+ * be a second source for something the screen already has.
+ *
+ * Memoized, and that only works because every prop is referentially stable:
+ * the theme is a module constant, the payee and rule come out of memoized
+ * maps, and `onPress` takes the debit id rather than closing over it — an
+ * inline `() => navigate(id)` would be a new function per render and would
+ * defeat the memo on every keystroke, which is exactly the cost removing the
+ * per-row subscription was meant to avoid.
  */
-function DebitRow({
+function DebitRowView({
   theme,
   debit,
+  payee,
   rule,
+  showDay,
   onPress,
 }: {
   theme: Theme;
   debit: Debit;
+  payee: Payee;
   rule: Rule | undefined;
-  onPress: () => void;
+  /** Rows under a month header carry the day; Today/Yesterday rows do not. */
+  showDay: boolean;
+  onPress: (debitId: string) => void;
 }) {
-  const payee = usePayee(debit.payeeId);
-  if (!payee) {
-    return null;
-  }
   const payeeIsGood = classifyPayee(rule) === 'good';
   const debitIsBad = classifyDebit(debit, rule).classification === 'bad';
 
   const avatarColor = payeeIsGood ? theme.good : theme.bad;
   const avatarBg = payeeIsGood ? theme.goodBg : theme.badBg;
 
+  const when = showDay
+    ? `${formatDayShort(debit.timestamp)}, ${formatTime(debit.timestamp)}`
+    : formatTime(debit.timestamp);
+
   return (
-    <Pressable onPress={onPress} style={[styles.debitRow, { backgroundColor: theme.surface }]}>
+    <Pressable
+      onPress={() => onPress(debit.id)}
+      style={[styles.debitRow, { backgroundColor: theme.surface }]}
+    >
       <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
         <Text style={[styles.avatarText, { color: avatarColor }]}>{payee.initials}</Text>
       </View>
@@ -53,7 +85,7 @@ function DebitRow({
           {payee.name}
         </Text>
         <Text style={[styles.debitDate, { color: theme.textMuted }]}>
-          {debit.paymentType} · {formatTime(debit.timestamp)}
+          {debit.paymentType} · {when}
         </Text>
       </View>
       <View style={styles.debitRight}>
@@ -70,24 +102,105 @@ function DebitRow({
   );
 }
 
+/**
+ * The name the screen uses. Split from the function above only so the two do
+ * not shadow each other — `React.memo(function DebitRow…)` reads better but
+ * declares the name twice.
+ */
+const DebitRow = React.memo(DebitRowView);
+
 export default function DebitListScreen({ navigation }: Props) {
   const theme = useColorScheme() === 'dark' ? dark : light;
   const insets = useSafeAreaInsets();
   const debits = useDebits();
+  const payees = usePayees();
   const ruleByPayeeId = useRuleByPayeeId();
+  const { search, setSearch } = useTabScopedSearch();
+  const dateKey = useCurrentDateKey();
 
-  // Rebuilt only when the debits themselves change: grouping sorts the whole
-  // list and constructs a Date per item, and doing that inline handed
-  // SectionList a brand-new `sections` array on every render (a rule edit, a
-  // theme change), so it could never bail out of re-rendering rows.
-  const sections = useMemo(
-    () =>
-      groupByDateSection(debits, d => d.timestamp).map(section => ({
-        title: section.label,
-        data: section.data,
-      })),
-    [debits],
+  const payeeById = useMemo(() => new Map(payees.map(p => [p.id, p])), [payees]);
+
+  // Filter, then group — never the other way round, because R23 requires the
+  // date grouping to survive filtering: searching one subscription must still
+  // show one row per month under its month header, since the rhythm of the
+  // charge is the thing worth seeing.
+  //
+  // Memoized because grouping sorts the whole list and builds a Date per item.
+  // `dateKey` is a real dependency, not a tripwire: grouping is relative to the
+  // current *day*, so this recomputes at midnight and the Today/Yesterday
+  // labels cannot go stale in a long-lived session.
+  const sections = useMemo(() => {
+    const matching = debits.filter(debit => {
+      const payee = payeeById.get(debit.payeeId);
+      return payee != null && matchesDebitSearch(search, payee.name, debit.amountEUR);
+    });
+    return groupByDateSection(matching, d => d.timestamp, dateFromDateKey(dateKey));
+  }, [debits, payeeById, search, dateKey]);
+
+  const query = search.trim();
+  // R23: a search that matches nothing has to say so, and name the query. An
+  // empty body on its own reads as "no debits", which is the picture a dead
+  // bank connection paints (R19) — and here it would be a lie, since the list
+  // is full, just filtered. Built as a string rather than inline JSX so the
+  // typographic quotes stay out of the markup.
+  const noMatchText = `No debits match “${query}”.`;
+
+  const openDebit = useCallback(
+    (debitId: string) => navigation.navigate('DebitDetail', { debitId }),
+    [navigation],
   );
+
+  // Hoisted out of the JSX, and deliberately not dependent on `search`: a
+  // fresh renderItem on every keystroke re-renders every visible row, which
+  // would give back most of what dropping the per-row subscription bought.
+  const renderItem = useCallback<
+    NonNullable<React.ComponentProps<typeof SectionList<Debit, DateSection<Debit>>>['renderItem']>
+  >(
+    ({ item, section }) => {
+      const payee = payeeById.get(item.payeeId);
+      if (!payee) {
+        return null;
+      }
+      return (
+        <DebitRow
+          theme={theme}
+          debit={item}
+          payee={payee}
+          rule={ruleByPayeeId.get(item.payeeId)}
+          showDay={section.kind === 'month'}
+          onPress={openDebit}
+        />
+      );
+    },
+    [theme, payeeById, ruleByPayeeId, openDebit],
+  );
+
+  const renderSectionHeader = useCallback(
+    ({ section }: { section: DateSection<Debit> }) => (
+      <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>{section.label}</Text>
+    ),
+    [theme],
+  );
+
+  /**
+   * The no-match message rides on the list rather than replacing it, which is
+   * what keeps the scroll offset: swapping the SectionList for a plain View
+   * unmounts it, so deleting one character out of a transiently-empty query
+   * threw the reader back to the top of a year of history.
+   *
+   * Renders nothing when there is no query — an account with genuinely no
+   * debits is a different state (mocks/02b), and it is not ported yet.
+   */
+  const renderEmpty = useCallback(() => {
+    if (query === '') {
+      return null;
+    }
+    return (
+      <View style={styles.emptyBody}>
+        <Text style={[styles.emptyNote, { color: theme.textMuted }]}>{noMatchText}</Text>
+      </View>
+    );
+  }, [query, noMatchText, theme]);
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
@@ -96,22 +209,17 @@ export default function DebitListScreen({ navigation }: Props) {
         <Text style={[styles.navTitle, { color: theme.text }]}>Debits</Text>
       </View>
 
+      <SearchField value={search} onChangeText={setSearch} placeholder="Search debits…" />
+
       <SectionList
         contentContainerStyle={styles.content}
         sections={sections}
-        keyExtractor={item => item.id}
+        keyExtractor={keyExtractor}
         stickySectionHeadersEnabled={false}
-        renderSectionHeader={({ section }) => (
-          <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>{section.title}</Text>
-        )}
-        renderItem={({ item }) => (
-          <DebitRow
-            theme={theme}
-            debit={item}
-            rule={ruleByPayeeId.get(item.payeeId)}
-            onPress={() => navigation.navigate('DebitDetail', { debitId: item.id })}
-          />
-        )}
+        keyboardShouldPersistTaps="handled"
+        renderSectionHeader={renderSectionHeader}
+        renderItem={renderItem}
+        ListEmptyComponent={renderEmpty}
       />
     </View>
   );
@@ -132,7 +240,21 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
-    gap: 8,
+    // 12px between rows, as in mocks/style.css's `.content` — the row itself
+    // carries no bottom margin, or the two would add up.
+    gap: 12,
+    // Lets ListEmptyComponent centre itself in the viewport; no effect once
+    // the list has rows.
+    flexGrow: 1,
+  },
+  emptyBody: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyNote: {
+    fontSize: 13,
+    textAlign: 'center',
   },
   sectionLabel: {
     fontSize: 13,
@@ -140,7 +262,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.3,
     marginTop: 8,
-    marginBottom: 4,
     marginHorizontal: 4,
   },
   debitRow: {
@@ -149,7 +270,6 @@ const styles = StyleSheet.create({
     gap: 12,
     borderRadius: 12,
     padding: 14,
-    marginBottom: 8,
   },
   avatar: {
     width: 40,

@@ -75,7 +75,12 @@
 
   <div class="group">
     <h2>2 · Daily use</h2>
-    <p>What the app looks like when the user opens it themselves.</p>
+    <p>What the app looks like when the user opens it themselves. The search box is pinned under
+    the title on both list screens, so only the list scrolls (R23). 2d is the one that carries the
+    rule worth getting right — the date grouping survives the filter, so a recurring payee still
+    reads as one charge per month — and 2c is the state a query matching nothing has to reach,
+    since a silently empty list is indistinguishable from a lost connection. 2b has no search box
+    on purpose: with no debits there is nothing to narrow down.</p>
   </div>
 
   <div class="frame-label">
@@ -86,6 +91,16 @@
   <div class="frame-label">
     <span>2b. Debit List — Empty</span>
     <iframe src="02b-debit-list-empty.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>2c. Debit Search — No Match</span>
+    <iframe src="02c-debit-search-no-match.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>2d. Debit Search — Results (grouping kept)</span>
+    <iframe src="02d-debit-search-results.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">

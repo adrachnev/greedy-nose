@@ -101,6 +101,74 @@ body {
   text-decoration: none;
 }
 
+/* Pinned search box (R23). Deliberately a sibling of .screen, not a child
+   of .content, so it never scrolls away: the query has to stay visible,
+   otherwise a filtered list is indistinguishable from an empty one. */
+.search-field {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 16px 12px;
+  padding: 10px 14px;
+  min-height: 44px;
+  border-radius: 14px;
+  background: var(--neutral-bg);
+  /* The fill alone is nearly the same grey as the screen behind it, and the
+     box no longer has white cards around it to frame it — so it needs an
+     edge to read as a field you tap. Works in both schemes: the border token
+     is darker than the fill in light mode and lighter in dark. */
+  border: 1px solid var(--border);
+}
+
+.search-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Nothing typed yet — same line, placeholder grey, and no ✕ beside it. Named
+   in full rather than as a bare .empty, which would collide with .empty-note
+   and with any later use of that very generic word. */
+.search-text-placeholder {
+  color: var(--text-muted);
+}
+
+/* Only rendered while the field has text. The glyph stays 18px and the box
+   around it 24px, so the field's height never changes; the *tap* target is
+   grown to 44px by the invisible overlay below, which is why this is not
+   simply a 44px box. The RN port wants hitSlop on an 18px icon for the same
+   reason — a 44px View here would make the search field 64px tall. */
+.search-clear {
+  position: relative;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.search-clear::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.search-clear svg {
+  display: block;
+}
+
 .screen {
   flex: 1;
   overflow-y: auto;
