@@ -1,0 +1,3 @@
+# Hook scratch state — per-machine, never shared.
+.diff-baseline
+last-subagent-stop.json

@@ -105,10 +105,30 @@ the tag's reasoning, not just the presence of the tag.
 
 ## Review output format
 
-For each comment:
-1. Category (MUST FIX / SHOULD FIX / CONSIDER)
-2. Short rationale (why it matters — maintainability, bug risk, clarity)
-3. A concrete suggestion or code example, where helpful
+Report findings as a **markdown table**, ordered by importance — most
+important first, never grouped by file or by the order you happened to
+find them in:
 
-End with a brief overall verdict: is the PR mergeable, mergeable with
-minor changes, or does it need substantial rework?
+| Prio | Severity | Where | What is wrong | Why it matters |
+|---|---|---|---|---|
+| 1 | ⚠️ **MUST FIX** | `file.ts:42` | One short sentence, plain words. | One short sentence. |
+| 2 | SHOULD FIX | `other.ts:10` | … | … |
+
+Rules for the table:
+
+- **Every MUST FIX outranks every SHOULD FIX, which outranks every
+  CONSIDER.** Within a category, most severe first.
+- MUST FIX rows are **bold** and carry a leading ⚠️, so a critical
+  finding is visible at a glance in a long table.
+- One short sentence per cell, in simple language. No code blocks, no
+  multi-line cells — the table has to stay readable in a terminal.
+- If nothing is wrong, say so in one line instead of printing an empty
+  table.
+
+Below the table, and only for MUST FIX findings, add a short block per
+finding with the concrete failure scenario (which input or user action
+produces the wrong result) and a suggested fix or code example. Anything
+that isn't a MUST FIX gets its table row and nothing more.
+
+End with a one-line verdict: mergeable, mergeable with minor changes, or
+needs substantial rework.
