@@ -98,19 +98,22 @@ Read `ARCHITECTURE.md` in full before starting — it is the authoritative desig
   Dispatcher, Key Vault, data store).
 - Polling design: 6h background poll per consent (ASPSP 4x/day cap), plus on-demand fetch with
   PSU headers when the app is open.
-- First-run vs steady-state ingestion (initial history feeds onboarding classify, not the Rule
-  Engine).
-- Transaction identity (keyed by bank transaction ID, updated in place, no re-alert on status
-  change alone).
+- The three ingestion modes: first-run (history feeds onboarding classify, never the Rule
+  Engine), steady state, and reconnect-after-a-gap (one summary push, R20).
+- The two matching keys, which are separate problems and must not share a key: **payee identity**
+  (best-effort, normalized creditor account → normalized name; there is no SEPA creditor ID) and
+  **debit identity** (`(account, entry_reference)`, booked only — `transaction_id` may change
+  between fetches and must not be used).
 - Poll health monitoring (per-consent LastAttemptAt/LastSuccessAt/LastError, daily staleness
   check branching on expired-consent vs operator-alertable failure).
 - Consent lifecycle (~90-day PSD2 expiry, `01d-connection-expired.html` in-app state).
 - Cost constraints — everything is chosen to stay at zero cost to start (Functions consumption
   plan, free-tier Postgres, Enable Banking's free Restricted Production tier).
 
-Also check the "Open questions" section — several assumptions (N26's specific background-poll
-limit, Enable Banking's rate limits, transaction ID stability across status changes) are not yet
-verified; don't silently build around them as if confirmed.
+Also check the "Open questions" section — several assumptions (per-bank background-poll limits,
+Enable Banking's rate limits) are not yet verified; don't silently build around them as if
+confirmed. Both matching keys are answers from documentation and one support reply, not from
+observed data — see "Refining this from real data" before hardening either one.
 
 Do not make client/UI decisions — that's the `coder-mobile` agent's scope. Treat the mock screens in
 `mocks/` as the UI contract the API needs to serve, not something to change.

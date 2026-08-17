@@ -29,7 +29,8 @@ outgoing money (R2a) — a user hunting for their salary under that heading find
 concludes the app is broken. The tab and list are **Debits**, the detail screen is **Debit**
 (settled 2026-08-14). Two exceptions stay:
 - **"charge"** is fine in prose where it reads better — "alerts on every charge".
-- **"transaction ID"** keeps its name in R10b, because that is the bank's own term for it.
+- **Bank field names** keep their own spelling wherever R10b/R10c name one — `entry_reference`,
+  `transaction_id` — because those are the aggregator's identifiers, not our vocabulary.
 
 ## Purpose
 
@@ -47,25 +48,34 @@ creates a payee. Accepted side effect: a refund from a bad payee is invisible in
 
 **R3 — Payee.** Whoever took the money. Payees come from the bank feed, not from the user.
 
-**R3a — Payee identity** (settled 2026-08-14, was `O5`). The bank text differs per charge, so
-the name alone cannot key a rule. Use the strongest identifier the charge carries, in order:
+**R3a — Payee identity** (settled 2026-08-14 as `O5`; **revised 2026-08-17** after Enable Banking
+answered). The bank text differs per charge, so the name alone cannot key a rule. Use the
+strongest identifier the charge carries, in order:
 
-1. **SEPA creditor ID** (direct debits)
-2. **IBAN** (transfers)
-3. **Normalized name** (card payments — uppercase, strip digits and extra whitespace)
+1. **Normalized creditor account identification** — the IBAN, where the charge carries one
+2. **Normalized name** (uppercase, strip digits and extra whitespace), plus the **creditor
+   agent** where it helps separate two payees that would otherwise collide
 
 The resolved key is stored on the payee, together with the raw strings seen for it.
 
-> **⚠ Tier 1 may not be obtainable — decide before implementing.** Checked against Enable
-> Banking's docs on 2026-08-14: their normalized `Transaction` model carries `creditor` (name),
-> `creditor_account` (identification + scheme_name), `creditor_agent`, `merchant_category_code`,
-> `remittance_information`, `bank_transaction_code`, `credit_debit_indicator`, `status`,
-> `entry_reference`, `transaction_id`, `reference_number` and the amount fields — but **no SEPA
-> creditor identifier and no mandate ID**. N26's own PSD2 interface does expose `creditorID` and
-> `mandateID` (added 2022-04-25), so the data exists at the bank and does not survive the
-> aggregator's model. Options: ask Enable Banking whether it is reachable, or drop to a two-tier
-> key (IBAN → normalized name) and accept weaker matching for direct debits — which is exactly
-> the charge type this product cares most about.
+**The SEPA creditor ID is not available and the key is therefore best-effort.** Asked Enable
+Banking support directly on 2026-08-14; answered 2026-08-17. Their normalized `Transaction` model
+has **no SEPA creditor identifier and no mandate ID**, and they could not confirm any passthrough,
+enablement option or roadmap item that would expose one. Their own recommendation is the two-tier
+key above, explicitly as best-effort grouping. N26's PSD2 interface does publish `creditorID` and
+`mandateID`, so the data exists at the bank and dies in the aggregator's model — noted in case
+that ever changes.
+
+Two consequences of losing the exact key:
+
+- **R3b stops being a nicety and becomes the safety net.** With a fuzzy key, ambiguous cases are
+  the normal case, not the exception.
+- Direct debits — the charge type this product cares most about — get the weakest matching. This
+  is accepted, not solved.
+
+Also from the same answer: `reference_number` is meant for credit-transfer references and must
+**not** be used as a payee key. Payee grouping and debit de-duplication (R10b) are separate
+problems with separate keys; do not let one leak into the other.
 
 **R3b — When matching is uncertain, split rather than merge.** Splitting one payee into two
 shows a known payee as unknown → a false alert: annoying but safe. Merging two payees into one
@@ -127,12 +137,32 @@ later because the user edited a rule is re-labelled in the list but never notifi
 2026-08-14, was `O3`). Otherwise one rule edit could fire a burst of notifications for charges
 the user is looking at right then.
 
-**R10b** — A debit is **new** when the app has never seen its **bank transaction ID** before —
-not when its date is recent (settled 2026-08-14, was `O4`). Banks deliver late, and a charge
-from three days ago still deserves an alert. Two consequences:
+**R10b** — A debit is **new** when the app has never seen its identifier before — not when its
+date is recent (settled 2026-08-14, was `O4`). Banks deliver late, and a charge from three days
+ago still deserves an alert.
+
+**The identifier is `(connected account, entry_reference)`** (**revised 2026-08-17**, was "the
+bank transaction ID"). Per Enable Banking support: `entry_reference` is documented as unique and
+immutable for the same account, and matches across authentication sessions. It is **not** globally
+unique, hence the account scope. `transaction_id` must **not** be used — it exists to fetch
+transaction details, is not guaranteed to identify a transaction uniquely, and **may change
+between fetches**.
+
+**R10c — Only booked debits notify** (settled 2026-08-17). There is **no identifier that survives
+pending → booked** across banks: for most ASPSPs `entry_reference` only exists once the charge is
+booked. So pending charges may appear in the list as provisional, but the alert fires when the
+charge books. The cost is latency — typically under a day, which the "same-day notification is
+fine" decision already accepted. The alternative, alerting on pending, would double-alert on every
+bank that re-keys a charge at booking, and a false "you were charged twice" is worse than an alert
+arriving a few hours later.
+
+Consequences:
 - Everything pulled during the first sync (onboarding) is stored as already-seen and never
   notifies.
-- A charge moving from pending to booked keeps its ID, so it notifies once, not twice.
+- Some banks omit entry references or hand out duplicates. **When the identifier is unreliable,
+  risk the duplicate alert, never the missed one** — the mirror of R3b, in the opposite direction:
+  for identity, merging is the dangerous move; for de-duplication, it is treating two charges as
+  one.
 
 **R11** — One notification per bad debit. Grouping stays deferred (see `CLAUDE.md`).
 
@@ -244,25 +274,28 @@ matching screen is coded):
    "Active" pill.
 2. R19's "one push when the consent expires by itself" has no mock. That push is what reaches a
    user who has not opened the app in a week.
-3. `03` shows the payee's **IBAN** for a direct debit, but R3a keys direct debits on the **SEPA
-   creditor ID**. Open question: show the creditor ID instead, or alongside?
+3. ~~`03` shows the payee's **IBAN** for a direct debit, but R3a keys on the SEPA creditor ID~~ —
+   resolved 2026-08-17: there is no creditor ID, and the IBAN *is* R3a's tier 1. The mock was
+   right by accident; nothing to change.
 4. **No bank-selection screen exists.** `01-connect-bank` and `01e-connect-error` both assume
    N26 by name, and `01e`'s "Choose a different bank" link goes to the mock gallery because
    there is nowhere to send it. R22 makes that link correct in principle — the screen it needs
    just hasn't been drawn. (Revised 2026-08-14: previously recorded as the opposite problem,
    back when v1 was N26-only.)
 
-### Do this first — reconcile `ARCHITECTURE.md`
+### ~~Do this first — reconcile `ARCHITECTURE.md`~~ — done 2026-08-17
 
-Reviewed against this file on 2026-08-14 and found to diverge in ten places, listed as
-`A1`–`A10` at the top of that document. `A1` (the rule engine evaluates the amount for **bad**
-payees instead of good ones) and `A2` (the consent-expiry push is ruled out) are outright
-contradictions; the rest are stale terminology or design the spec needs and the architecture
-never described.
+Reviewed against this file on 2026-08-14 and found to diverge in ten places (`A1`–`A10`).
+Reconciled on 2026-08-17: both contradictions are fixed (`A1`, the rule engine evaluating the
+amount for **bad** payees, now follows R5's table; `A2`, the ruled-out consent-expiry push, is
+back per R19), the stale terminology is renamed to R0, and the six missing designs are written —
+the `DBIT` filter, derived classification, the reconnect ingestion mode, R18's data lifecycle and
+the bank-agnostic consequences. See "Reconciliation with `REQUIREMENTS.md`" at the top of that
+document for the map.
 
-**The architecture is reconciled before any code is touched** (owner's call, 2026-08-14) — a
-design that contradicts the spec would otherwise get built into both halves of the system
-before anyone notices.
+`A6` (payee identity) was left open that morning and closed the same day, once Enable Banking
+answered — see R3a. Their reply also corrected R10b and added R10c, which no one had asked about.
+All ten divergences are now closed.
 
 ### Then — the `app/` code rework
 
@@ -276,8 +309,22 @@ before anyone notices.
 
 ### Independent of both
 
-- ~~**Verify R3a against Enable Banking**~~ — done 2026-08-14, and the answer is bad news: the
-  SEPA creditor ID R3a leans on is absent from their transaction model. See the warning box
-  under R3a; the decision it asks for is still open, and `A6` depends on it.
+- ~~**Verify R3a against Enable Banking**~~ — closed 2026-08-17. Asked their support directly;
+  the SEPA creditor ID is absent and unreachable, so R3a is now a two-tier best-effort key and
+  `A6` is unblocked. The same answer changed R10b's identifier and added R10c (booked-only
+  alerting) — a bigger correction than the question that prompted it.
 - `CLAUDE.md`'s "Product decisions" section must be trimmed to point here for anything about
   classification.
+
+### Refining these from real data
+
+R3a and R10b/R10c are written from documentation and one support answer, not from charges this
+app has actually pulled. **The details get revisited once we have real data from a live
+connection** (owner's call, 2026-08-17) — specifically: how often the creditor account is
+missing, whether normalized names collide in practice, and which banks omit or duplicate
+`entry_reference`.
+
+Until then, these are working answers, deliberately conservative in the direction R1 demands:
+split rather than merge for identity, duplicate rather than miss for de-duplication. Both cost
+the user a false alert at worst. Do not tune the fuzzy matching further on guesswork — collect the
+raw strings (R3a stores them for exactly this reason) and tune against those.

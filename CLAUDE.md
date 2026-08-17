@@ -15,11 +15,29 @@ Mocks and implementation must follow it. Where anything in this file or `ARCHITE
 disagrees with it, `REQUIREMENTS.md` wins — in particular, its classification model supersedes
 the "Alert thresholds" and auto-flip bullets under Product decisions below, and its `R0`
 terminology (payee, good/bad) supersedes the debtor/debitor/Trusted wording used throughout
-this file. Settled 2026-08-14, no open points left. The mocks now follow it; `app/` does not
-yet. `ARCHITECTURE.md` does not either — it carries a list of its own divergences (`A1`–`A10`)
-at the top, two of which contradict the spec outright, so read that before trusting it.
+this file. Settled 2026-08-14; `R3a`, `R10b` and the new `R10c` were revised 2026-08-17 on
+Enable Banking's answer (see below). The mocks follow it, and `ARCHITECTURE.md` was fully
+reconciled with it on 2026-08-17 — all ten `A1`–`A10` divergences closed. **`app/` still does
+not** — that rework is the next piece of work.
 
 ## Status
+
+**2026-08-17 — `ARCHITECTURE.md` is reconciled with the spec.** Both contradictions are gone
+(`A1` the inverted rule engine, `A2` the missing consent-expiry push), terminology follows `R0`,
+and the six designs the spec needed are written: the `DBIT` credit filter, derived-not-stored
+classification, a third "reconnect" ingestion mode for `R20`, `R18`'s data lifecycle, and the
+bank-agnostic consequences (per-ASPSP poll cadence, no bank hardcoded).
+
+**Same day — Enable Banking answered the two API questions, and one answer bit.** `A6` is closed:
+no SEPA creditor ID exists and none is reachable, so `R3a` is now a two-tier best-effort key
+(normalized creditor account/IBAN → normalized name + creditor agent). The unasked-for correction
+is bigger: **the de-duplication key was wrong**. `transaction_id` may change between fetches and
+must not be used; the key is `(connected account, entry_reference)`, and since no identifier
+reliably survives pending → booked, **only booked debits notify** (new `R10c`). Both keys are
+built from docs plus one support answer — they get a tuning pass against real data from a live
+connection later, which is why the design stores every raw string it sees.
+
+The code rework in `app/` is unblocked and is what comes next.
 
 Mocks in `mocks/` are reviewed and settled. Framework decided: **React Native**. Bare RN app
 scaffolded in `app/` (Android target). Toolchain validated end-to-end: build → wireless adb
