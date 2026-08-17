@@ -1,0 +1,14 @@
+# Secrets — never commit. The Enable Banking application's private RSA key lives as
+# <application-id>.pem; the filename itself is the application ID (TRACER-BULLET.md, step 0).
+*.pem
+*.key
+.env
+.env.*
+
+# .NET build output (backend/, from TRACER-BULLET.md step 1)
+bin/
+obj/
+
+# Raw bank responses saved by GET /raw (TRACER-BULLET.md step 3). Evidence for the R3a/R10b
+# tuning pass — and real account data from step 6 on, so it stays local.
+raw/

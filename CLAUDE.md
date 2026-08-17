@@ -24,6 +24,23 @@ not** — that rework is the next piece of work.
 
 ## Status
 
+**2026-08-17 — the tracer bullet to real bank data is under way. `TRACER-BULLET.md` is the live
+document; read its "Progress" section first.** The plan, settled the same day: an end-to-end slice
+(sandbox ASPSP → local ASP.NET Core minimal API → the device's debit list), sandbox first and the
+real N26 account after, with no DB, push, polling or Azure in the first shot.
+
+**`backend/GreedyNose.Api` now exists** — a bare minimal API (net10.0) holding the Enable Banking
+client, the RS256 JWT signer, an in-memory consent store and the endpoints for steps 1–3, in step
+order. **Step 1 is verified**: our own signed JWT gets 686 German ASPSPs back from
+`GET /aspsps`. Step 2 redirects to the sandbox consent page correctly but **nobody has clicked
+through it yet**, so step 3 (`/raw`) has never run. That click is the next action.
+
+Credentials: sandbox application `007a8a74-7a48-4213-82e1-d017d44b81b0`, private key at the repo
+root as `<application-id>.pem` and **gitignored** by a new root `.gitignore` — it is the whole
+credential (Enable Banking has no token endpoint), so it stays server-side forever and never goes
+near `app/`. Config lives in `dotnet user-secrets`, not `appsettings.json`. .NET SDK 10.0.400 was
+installed on this machine this session.
+
 **2026-08-17 — `ARCHITECTURE.md` is reconciled with the spec.** Both contradictions are gone
 (`A1` the inverted rule engine, `A2` the missing consent-expiry push), terminology follows `R0`,
 and the six designs the spec needed are written: the `DBIT` credit filter, derived-not-stored
