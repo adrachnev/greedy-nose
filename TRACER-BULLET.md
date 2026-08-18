@@ -39,14 +39,26 @@ One account, hardcoded. Everything the bullet does not need is deliberately abse
 
 ### Picking this up next session
 
+**Steps 0–4 are done. The next action is step 5.**
+
 1. Start the backend:
    `dotnet run --project backend/GreedyNose.Api/GreedyNose.Api.csproj --launch-profile http`
-   (listens on `http://localhost:5199`; `/health` shows whether a consent is live)
-2. Open `http://localhost:5199/connect` in a browser and click through **Mock ASPSP** — no
-   credentials needed for that one.
-3. The callback page lists the account UID; follow its link to `/raw`.
-4. `GET /debits` is step 4's output — `Payee`/`Debit` as `app/src/domain/model.ts` declares them.
-5. Then step 5: point `app/src/data/hooks.ts` at it.
+   (listens on `http://localhost:5199`. Note the SDK is not on the PATH of shells opened before
+   it was installed — see Environment notes.)
+2. `curl http://localhost:5199/health` — it should report `"connected": true` **without a browser
+   click**, because the consent is restored from disk. If it says `false`, the consent expired or
+   the file is gone: open `http://localhost:5199/connect` and click through **Mock ASPSP**, which
+   needs no credentials.
+3. `GET /debits` is step 4's output — `Payee`/`Debit` exactly as `app/src/domain/model.ts`
+   declares them. 92 debits and 45 payees from the current sandbox data.
+4. **Step 5**: point `app/src/data/hooks.ts` at it and run the app on the device.
+   `adb reverse tcp:5199 tcp:5199` is what lets the phone reach the laptop. Keep the fixtures
+   reachable behind a flag until the real feed is trusted.
+
+Two things step 5 will meet immediately, both in `TODO.md`: 91 of 92 debits now have an **empty
+`reference`** (correct — the field used to echo the payee name), and `DebitDetailScreen` was built
+against fixtures where every debit had one. And `/debits` returns a single page, so the device
+sees roughly three months of history, not a year.
 
 The Mock ASPSP's accounts and transactions are whatever you put in the **mock ASPSP tab** of the
 control panel — hand-entered, or a real account export imported as JSON. The 2026-08-18 dump is an
