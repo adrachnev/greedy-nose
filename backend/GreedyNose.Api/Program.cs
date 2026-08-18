@@ -1,9 +1,10 @@
+using System.Globalization;
 using System.Text.Json;
 using GreedyNose.Api.EnableBanking;
 
 // Tracer bullet (TRACER-BULLET.md): the thinnest path from Enable Banking to the device.
-// Steps live here in order — 1 authenticate, 2 consent round trip, 3 raw transactions. There is
-// no storage, no user, no domain mapping yet; each arrives with the step that needs it.
+// Steps live here in order — 1 authenticate, 2 consent round trip, 3 raw transactions, 4 the
+// domain mapping. There is still no storage and no user; each arrives with the step that needs it.
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,7 +14,10 @@ var options = builder.Configuration.GetSection(EnableBankingOptions.SectionName)
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<EnableBankingSigner>();
-builder.Services.AddSingleton<ConsentStore>();
+builder.Services.AddSingleton(sp => new ConsentStore(
+    Path.Combine(sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath, options.ConsentFilePath),
+    options.ConsentValidity,
+    sp.GetRequiredService<ILogger<ConsentStore>>()));
 builder.Services.AddHttpClient<EnableBankingClient>(client =>
 {
     client.BaseAddress = new Uri(options.BaseUrl);
@@ -26,6 +30,9 @@ var app = builder.Build();
 // setup mistake, and finding it in a 500 later costs more than finding it here.
 app.Services.GetRequiredService<EnableBankingSigner>();
 
+// Pick up a consent left by an earlier run, so restarting the backend does not cost a click.
+app.Services.GetRequiredService<ConsentStore>().Restore(TimeProvider.System.GetUtcNow());
+
 app.MapGet("/health", (ConsentStore consent) => Results.Ok(new
 {
     status = "ok",
@@ -35,6 +42,7 @@ app.MapGet("/health", (ConsentStore consent) => Results.Ok(new
     aspsp = consent.AspspName,
     account = consent.PrimaryAccount,
     connectedAt = consent.ConnectedAt,
+    expiresAt = consent.ExpiresAt,
 }));
 
 // --- Step 1: the first authenticated call -----------------------------------------------------
@@ -78,10 +86,10 @@ app.MapGet("/connect", async (
         return Results.Content(result.Body, "application/json", statusCode: result.StatusCode);
     }
 
-    var url = JsonDocument.Parse(result.Body).RootElement.GetProperty("url").GetString();
+    var url = Text(JsonDocument.Parse(result.Body).RootElement, "url");
 
     return url is null
-        ? Results.Problem("Enable Banking returned no authorization URL.")
+        ? Results.Content(result.Body, "application/json", statusCode: 502)
         : Results.Redirect(url);
 });
 
@@ -118,10 +126,17 @@ app.MapGet("/callback", async (
     }
 
     var root = JsonDocument.Parse(result.Body).RootElement;
-    var sessionId = root.GetProperty("session_id").GetString() ?? "";
+    var sessionId = Text(root, "session_id");
+    if (sessionId is null)
+    {
+        // A 200 without a session id means the shape changed under us. Show what they sent rather
+        // than throwing: their body is the only thing that explains it.
+        return Html($"<h1>No session id in the response</h1><pre>{result.Body}</pre>");
+    }
+
     var accounts = ReadAccounts(root);
 
-    consent.Complete(sessionId, accounts, clock.GetUtcNow());
+    consent.Complete(sessionId, accounts, clock.GetUtcNow(), ReadValidUntil(root));
 
     var rows = string.Concat(accounts.Select(a =>
         $"<tr><td><code>{a.Uid}</code></td><td>{a.Iban}</td><td>{a.Name}</td><td>{a.Currency}</td></tr>"));
@@ -158,7 +173,7 @@ app.MapGet("/raw", async (
     }
 
     var query = new List<string>();
-    if (dateFrom is not null) query.Add($"date_from={dateFrom}");
+    if (dateFrom is not null) query.Add($"date_from={Uri.EscapeDataString(dateFrom)}");
     if (continuationKey is not null) query.Add($"continuation_key={Uri.EscapeDataString(continuationKey)}");
     var suffix = query.Count > 0 ? "?" + string.Join("&", query) : "";
 
@@ -171,6 +186,44 @@ app.MapGet("/raw", async (
     app.Logger.LogInformation("Raw transactions written to {File}", file);
 
     return Results.Content(result.Body, "application/json", statusCode: result.StatusCode);
+});
+
+// --- Step 4: the domain mapping ---------------------------------------------------------------
+
+// What the app actually consumes: Payee and Debit exactly as app/src/domain/model.ts declares
+// them. No classification travels — R6 makes that the client's job, derived from the current rule,
+// which is what lets a rule edit re-label existing debits without the backend hearing about it.
+app.MapGet("/debits", async (EnableBankingClient eb, ConsentStore consent, CancellationToken ct) =>
+{
+    var account = consent.PrimaryAccount;
+    if (account is null)
+    {
+        return Results.Problem("No connected account. Visit /connect first.", statusCode: 409);
+    }
+
+    var result = await eb.GetAsync($"/accounts/{account.Uid}/transactions", ct);
+    if (!result.IsSuccess)
+    {
+        return Results.Content(result.Body, "application/json", statusCode: result.StatusCode);
+    }
+
+    var response = JsonSerializer.Deserialize<EbTransactionsResponse>(result.Body, EnableBankingClient.Json);
+    if (response is null)
+    {
+        return Results.Problem("Enable Banking returned a body we could not read.");
+    }
+
+    // Account.Key, never Account.Uid — the uid changes every session, and debit identity must not.
+    var mapped = TransactionMapper.Map(response, account.Key);
+
+    // Loudly, one line each: a charge the mapper could not represent is invisible to the user, and
+    // an invisible charge is the failure R1 exists to prevent. Step 7 wants these counts.
+    foreach (var skipped in mapped.Skipped)
+    {
+        app.Logger.LogWarning("Skipped a debit the mapper could not represent — {Detail}", skipped);
+    }
+
+    return Results.Ok(mapped.Payload);
 });
 
 app.Run();
@@ -190,7 +243,30 @@ static List<ConnectedAccount> ReadAccounts(JsonElement root)
         Uid: Text(a, "uid") ?? "",
         Iban: a.TryGetProperty("account_id", out var id) ? Text(id, "iban") : null,
         Name: Text(a, "name"),
-        Currency: Text(a, "currency")))];
+        Currency: Text(a, "currency"),
+        // Enable Banking's own cross-session account identifier. See ConnectedAccount.Key for why
+        // it is the fallback and not the primary — it hashes the IBAN we already have.
+        IdentificationHash: Text(a, "identification_hash")))];
+}
+
+/// <summary>
+/// The consent lifetime the bank actually granted, which is not necessarily the one we asked for:
+/// ASPSPs cap it at their own maximum_consent_validity.
+/// </summary>
+static DateTimeOffset? ReadValidUntil(JsonElement root)
+{
+    if (!root.TryGetProperty("access", out var access))
+    {
+        return null;
+    }
+
+    return DateTimeOffset.TryParse(
+        Text(access, "valid_until"),
+        CultureInfo.InvariantCulture,
+        DateTimeStyles.AdjustToUniversal,
+        out var validUntil)
+        ? validUntil
+        : null;
 }
 
 static string? Text(JsonElement element, string property) =>

@@ -51,4 +51,11 @@ public sealed class EnableBankingOptions
     /// after step 6 it is the owner's own. See TRACER-BULLET.md step 3.
     /// </summary>
     public string RawDumpDirectory { get; set; } = "raw";
+
+    /// <summary>
+    /// Where the live consent is remembered across restarts, relative to the content root. Holds
+    /// a session id that reads a real bank account, so it is gitignored like the key and the raw
+    /// dumps — it is a credential, not a cache.
+    /// </summary>
+    public string ConsentFilePath { get; set; } = "consent.local.json";
 }

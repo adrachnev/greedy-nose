@@ -30,10 +30,44 @@ document; read its "Progress" section first.** The plan, settled the same day: a
 real N26 account after, with no DB, push, polling or Azure in the first shot.
 
 **`backend/GreedyNose.Api` now exists** — a bare minimal API (net10.0) holding the Enable Banking
-client, the RS256 JWT signer, an in-memory consent store and the endpoints for steps 1–3, in step
-order. **Step 1 is verified**: our own signed JWT gets 686 German ASPSPs back from
-`GET /aspsps`. Step 2 redirects to the sandbox consent page correctly but **nobody has clicked
-through it yet**, so step 3 (`/raw`) has never run. That click is the next action.
+client, the RS256 JWT signer, a file-backed consent store, the domain mapper and the endpoints for
+steps 1–4, in step order.
+
+**2026-08-18 — steps 2, 3 and 4 are done and verified against a live connection.** The Mock ASPSP
+consent completed in a browser; `/raw` returned 100 real transactions (kept in `raw/`, gitignored);
+`/debits` maps them to 92 debits and 45 payees in exactly the shape `app/src/domain/model.ts`
+declares. **Step 5 — pointing `app/src/data/hooks.ts` at the backend — is the next action.**
+
+**Real data broke three assumptions**, all recorded with evidence in `TRACER-BULLET.md`'s Findings:
+
+- **`entry_reference` was null on all 100 rows**, so `R10b`'s de-duplication key did not exist at
+  all. The mapper falls back to a composite of `(account, booking date, amount, payee key,
+  ordinal)`, documented as a stopgap, not a design.
+- **A creditor IBAN was present on 1 of 92 debits** and a creditor agent on none, so `R3a`'s
+  tier 1 is dead for card payments and the normalized name carries almost everything.
+- **The account `uid` changes on every consent** (seen three times, same IBAN). Keying debits on
+  it would have re-alerted the entire history on every reconnect — the storm `R20` exists to
+  prevent. `ConnectedAccount.Key` is the IBAN for this reason.
+
+`credit_debit_indicator` is confirmed **`DBIT`**/`CRDT`: `ARCHITECTURE.md` was right and the API
+reference's `DBTR` was wrong. Two honest gaps remain in the mapping, both logged for step 7:
+`Subscription` is unreachable from bank data (no code means "recurring"), and aggregator prefixes
+(`PAYPAL *…`, `SumUp *…`) key as the aggregator rather than the shop behind it — the merge
+direction `R3b` warns against.
+
+**The consent now survives restarts** (`consent.local.json`, gitignored — it holds a session id
+that reads a real account). Step 2 had chosen memory-only; that was revised on 2026-08-18 once it
+became clear the restart cost was paid per code change, not per session. It is still not the
+database — one consent, no users, no history.
+
+**Same day — reviewed against Enable Banking's own C# sample.** The **JWT is a clean bill**:
+header, claims, algorithm, padding and encoding all match `cs_example`, so authentication is not
+the place to look when step 6 misbehaves. Nine of thirteen findings were fixed immediately; the
+one that mattered is that **currency was read and thrown away** while the DTO field is `amountEUR`,
+so a foreign-currency charge would have been limit-checked as euros — a false or missed alert
+under `R5`, invisible in a 100/100 EUR dump. Non-EUR charges are now skipped **and logged**. The
+four deferred findings are in `TODO.md`; the one that blocks step 6 is that `valid_until` asks for
+a flat 90 days and never consults the ASPSP's `maximum_consent_validity`.
 
 Credentials: sandbox application `007a8a74-7a48-4213-82e1-d017d44b81b0`, private key at the repo
 root as `<application-id>.pem` and **gitignored** by a new root `.gitignore` — it is the whole

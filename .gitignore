@@ -12,3 +12,11 @@ obj/
 # Raw bank responses saved by GET /raw (TRACER-BULLET.md step 3). Evidence for the R3a/R10b
 # tuning pass — and real account data from step 6 on, so it stays local.
 raw/
+
+# The live consent remembered across restarts (backend/GreedyNose.Api/consent.local.json). It
+# holds a session id that reads a real bank account — a credential, not a cache.
+consent.local.json
+
+# Account exports used to seed the Mock ASPSP (TRACER-BULLET.md, step 3). N26.json is a real
+# account's full transaction history — the same class of data as raw/, just arriving by hand.
+N26.json

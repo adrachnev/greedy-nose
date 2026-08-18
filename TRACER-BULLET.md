@@ -31,9 +31,11 @@ One account, hardcoded. Everything the bullet does not need is deliberately abse
 |---|---|
 | 0 Register the application | **done** — sandbox app `007a8a74-7a48-4213-82e1-d017d44b81b0`, key at the repo root, gitignored. Restricted Production: **status unknown, check the console** |
 | 1 JWT + first call | **done, verified** — `GET /aspsps?country=DE` returned 686 banks through our own JWT |
-| 2 Consent round trip | **built, half-verified** — `/connect` redirects to the sandbox consent page; the browser click-through has **not** happened yet |
-| 3 Raw transactions | **built, never run** — needs a live session from step 2 |
-| 4–7 | not started |
+| 2 Consent round trip | **done, verified 2026-08-18** — the Mock ASPSP consent completed in a browser and `/callback` showed the account UID |
+| 3 Raw transactions | **done, verified 2026-08-18** — 100 transactions, 2026-05-13 … 2026-08-18, in `raw/transactions-20260818-122928.json`. See Findings |
+| 4 Map to the domain | **done, verified 2026-08-18** — `GET /debits` returns 92 debits and 45 payees from the 100-row dump: 92 unique ids, no orphan payees, no zero or negative amounts, the 8 credits gone. Reviewed against Enable Banking's own C# sample the same day |
+| 5 Point the app at the backend | **next** — `app/src/data/hooks.ts`, plus `adb reverse tcp:5199 tcp:5199` |
+| 6–7 | not started; 6 waits on Restricted Production |
 
 ### Picking this up next session
 
@@ -43,18 +45,33 @@ One account, hardcoded. Everything the bullet does not need is deliberately abse
 2. Open `http://localhost:5199/connect` in a browser and click through **Mock ASPSP** — no
    credentials needed for that one.
 3. The callback page lists the account UID; follow its link to `/raw`.
-4. Then step 4: map what comes back onto `Payee`/`Debit`.
+4. `GET /debits` is step 4's output — `Payee`/`Debit` as `app/src/domain/model.ts` declares them.
+5. Then step 5: point `app/src/data/hooks.ts` at it.
 
-The consent lives **in memory** (step 2's deliberate choice), so restarting the backend means
-clicking `/connect` again. Cheap in sandbox; the database that fixes it is out of scope here.
+The Mock ASPSP's accounts and transactions are whatever you put in the **mock ASPSP tab** of the
+control panel — hand-entered, or a real account export imported as JSON. The 2026-08-18 dump is an
+import of real German account data, which is why its findings are worth more than invented rows.
+
+The consent **survives restarts** since 2026-08-18: it is written to `consent.local.json` beside
+the backend (gitignored — it holds a session id that reads a real account). Step 2 had chosen
+memory-only on the argument that a restart costs one cheap sandbox consent; that stopped being
+true once every mapping tweak in steps 4–7 meant clicking through the consent page again, and the
+session had never actually died — only our memory of its id. Delete the file to force a fresh
+consent. Still not the database: one consent, no users, no history.
 
 ### What exists in `backend/GreedyNose.Api`
 
 `Program.cs` holds the endpoints in step order — `/health`, `/aspsps` (step 1), `/connect` +
-`/callback` (step 2), `/raw` (step 3). Everything Enable Banking-specific sits in
-`EnableBanking/`: `EnableBankingOptions` (config), `EnableBankingSigner` (the RS256 JWT, key
+`/callback` (step 2), `/raw` (step 3), `/debits` (step 4). Everything Enable Banking-specific sits
+in `EnableBanking/`: `EnableBankingOptions` (config), `EnableBankingSigner` (the RS256 JWT, key
 loaded once at startup), `EnableBankingClient` (raw passthrough, snake_case policy), `ConsentStore`
-(the one in-memory consent), `AuthContracts` (request bodies).
+(the one consent, plus its file), `AuthContracts` (request bodies), `TransactionContracts` (the
+bank's transaction shape and the app's `Payee`/`Debit` DTOs) and `TransactionMapper`.
+
+`TransactionMapper` is the only piece with real rules in it, and it is pure and static so it can
+be replayed against the dumps in `raw/` without a bank — which is what step 7 will want. Every
+requirement it implements is cited at the method that implements it, including the two places
+where real data forced a departure from the spec.
 
 Configuration is in **user secrets**, not `appsettings.json`: `EnableBanking:ApplicationId` and
 `EnableBanking:PrivateKeyPath`. Re-create them with
@@ -78,8 +95,114 @@ Configuration is in **user secrets**, not `appsettings.json`: `EnableBanking:App
   (username/password/OTP). Mock ASPSP has none — it needs no login at all.
 - ASPSPs advertise `maximum_consent_validity` (15552000s = 180 days for Mock ASPSP), which the
   requested `valid_until` must respect. The backend currently asks for 90 days.
-- Still unresolved: the `CRDT`/`DBIT`/`DBTR` naming question in step 4 — only the raw dump settles
-  it.
+
+### What the first real dump said — 2026-08-18
+
+100 transactions (92 `DBIT`, 8 `CRDT`), 44 distinct payee names, 2026-05-13 … 2026-08-18. Real
+German account data imported into Mock ASPSP, so the shapes are a bank's, not a fixture's. **Read
+every null below with one caveat**: this data went through Enable Banking's export/import round
+trip, which may itself drop fields. Step 6 against the real bank is what turns these into facts.
+
+**Settled:**
+
+- **`credit_debit_indicator` is `DBIT`/`CRDT`.** `ARCHITECTURE.md` was right and the API
+  reference's `DBTR` was wrong — this question is closed, and step 4 codes `DBIT`.
+- Amounts arrive **positive**, as strings (`"20.00"`), with the direction carried only by the
+  indicator. `R17a` fits the wire format rather than fighting it.
+- Every row was `status: "BOOK"`. `R10c`'s booked-vs-pending split had nothing to act on here, so
+  it remains untested.
+
+**Three guesses that real data broke:**
+
+- **The account `uid` is not stable.** Consenting three times to the same account returned three
+  different uids — `e6b83c96…`, `280cfc98…`, `4a96fa90…` — for the same IBAN. It identifies the
+  account *within a session*, not the account, and the API reference says so outright: the uid
+  "is valid only until the session to which the account belongs is in the AUTHORIZED status".
+  **This was findable in the docs before it was found by accident** — the danger is that it reads
+  exactly like a stable key. Had R10b's "connected account" been the uid, every reconnect would
+  have re-keyed the whole history and alerted on all of it — the storm `R20` exists to prevent,
+  fired by the identifier meant to prevent it. `ConnectedAccount.Key` is the IBAN for this reason.
+
+  Enable Banking's own answer to the same problem is `identification_hash`, documented for
+  "matching accounts between multiple sessions". Base64-decoding its prefix shows it hashes
+  exactly `(account.account_id.iban, account.currency)` — so **the IBAN key is their identity**,
+  minus 130 characters of opacity in every debit id. The hash is kept as the fallback because it
+  is the only one of the two that exists for an account with no IBAN.
+
+- **`entry_reference` was null on all 100 rows.** So was `transaction_id`. `R10b`'s identifier
+  `(connected account, entry_reference)` **did not exist in this data at all**. Step 4 therefore
+  falls back to a composite of `(account, booking date, amount, payee key, ordinal)` when
+  `entry_reference` is absent — decided 2026-08-18, and documented as a stopgap in
+  `TransactionMapper.ResolveDebitId`, including the assumption it rests on (stable intra-day
+  ordering between fetches). **This is the single most important thing for step 6 to re-check.**
+- **A creditor IBAN was present on 1 of 92 debits**, and `creditor_agent` on none. `R3a`'s tier 1
+  is essentially unavailable for card payments (84 rows), so the **normalized name is the real
+  key** and the two-tier design leans almost entirely on its weaker tier. Tier 1 stays — transfers
+  and direct debits do carry it — but it is not the common path the requirement implies.
+
+**Observations worth keeping for step 7:**
+
+- **Payee names are SEPA-truncated to ~22 characters** (`Landeshauptstadt Stutt`,
+  `BENZ WEIN- UND GETRÄNK`). Stable per bank, so it does not break the key — but it is what the
+  user will read, and no full name is recoverable.
+- **One name arrived corrupted**: `Papas D?ner`, a literal `?` where `ö` belongs, in an otherwise
+  correct UTF-8 payload (`ORTERER GETRÄNKE-MÄRKT` came through intact). The bank mangled it, not
+  us. Another row reads `MUeLLER STUTTGART` — exactly the `ue` spelling `R23a`'s umlaut folding
+  was built for, now confirmed as a real thing banks send.
+- **Aggregators prefix the real merchant**: `PAYPAL *C24MIETWAG BR8`, `SumUp  *By Doner`,
+  `Zettle_*Waldklettergar`, `ANTHROPIC* CLAUDE SUB`. Under `R3a` these key as PayPal-the-payee
+  rather than the shop behind it, which merges unrelated merchants — the one direction `R3b`
+  says to avoid. Not solved here; `R3a`'s normalization was implemented exactly as written.
+- R3a's "strip digits" does its job — `Tegut Filiale 3134` and `KAUFLAND OSTFILDERN 51` lose their
+  branch numbers and group correctly — but leaves punctuation stranded (`MUeLLER STUTTGART 2-2` →
+  `MUELLER STUTTGART -`). Deterministic and harmless; noted rather than fixed, because widening
+  the normalization is a spec change.
+- **Two debits carried no creditor name, no IBAN and no remittance text** (outgoing transfers,
+  `ICDT`). They map to a single shared **"Unknown payee"** — decided 2026-08-18 over dropping them
+  (hiding a charge is the failure `R1` exists to prevent) and over one payee each (which floods
+  the Rules list with un-reviewable one-offs).
+- **`bank_transaction_code` is the only payment-type signal**, and it does not cover the app's
+  vocabulary: `CCRD`/`MCRD` (89 rows) → card, `ICDT`/`RCDT` → transfer, `DDBT` → direct debit, and
+  **`Subscription` is unreachable** — no bank code means "recurring", so a monthly Netflix charge
+  is indistinguishable from any other card payment. Unknown codes currently fall back to
+  `Card payment`, a guess dressed as a fact; the app's `PaymentType` union has no member for "the
+  bank did not say".
+- **Booking is a date, not a moment.** `transaction_date` was null on every row, so timestamps are
+  midnight UTC off `booking_date`. Times of day are not recoverable from this feed.
+- `merchant_category_code`, `reference_number` and `balance_after_transaction` were null
+  throughout; `remittance_information` was non-empty on 4 of 100.
+- **The page was 100 transactions with a `continuation_key`**, not the "fixed batches of 10" the
+  sandbox notes claim. Pagination exists and works; step 4 currently reads the first page only.
+
+### Reviewed against Enable Banking's own C# sample — 2026-08-18
+
+Compared `backend/GreedyNose.Api` against
+[`cs_example`](https://github.com/enablebanking/enablebanking-api-samples/tree/master/cs_example).
+
+**The JWT is a clean bill.** Header (`typ`, `alg`, `kid`), claims (`iss`, `aud`, `iat`, `exp`),
+RS256 with PKCS#1 v1.5 over SHA-256, unpadded base64url — all identical to the sample, nothing
+missing and nothing extra. Ours additionally loads the key once instead of per token and injects
+the clock, so the token is testable. `POST /auth` and `POST /sessions` match too, and we verify the
+`state` on the callback, which the sample generates but never checks. **When step 6 misbehaves,
+authentication is not the place to look.**
+
+Thirteen findings came back; **nine were fixed the same day**. The one that mattered:
+
+- **Currency was read and thrown away.** The DTO field is `amountEUR` and the app's limit is in
+  euros, so a CHF 109 charge would have shipped as `109`, rendered `109,00 €`, and been
+  limit-checked against a euro limit — under `R5` either a false alert or a missed one, with
+  nothing on screen to explain it. Invisible in a 100/100 EUR dump and invisible until step 6.
+  Non-EUR charges are now skipped **and logged**, because a silently dropped charge is the one
+  failure this product cannot have. Step 7 counts how often it fires before choosing the real fix:
+  a currency on `Debit`, or a conversion.
+
+The other eight: unparseable amounts defaulting to `0m` (a charge no limit could ever catch),
+unreadable dates rendering as "Invalid Date", consent expiry judged against the validity we
+requested rather than the one the bank granted, the missing `identification_hash` fallback,
+`reference` echoing the payee name on 88 of 92 debits, `date_from` unescaped, `GetProperty`
+throwing on an unexpected 200 body, and a doc comment naming the wrong weakness in the fallback
+debit id. The four deferred ones — pagination, `maximum_consent_validity`, `date_from`, and the
+payee key inside the debit id — are in `TODO.md` with reasons.
 
 ## Steps
 
@@ -115,9 +238,12 @@ things to be broken, and debugging them is far cheaper before a consent flow sit
 
 - `GET /connect` → `POST /auth` (`aspsp`, `access`, `redirect_url`, `state`, `psu_type`) →
   redirect the browser to the returned authorization URL.
-- `GET /callback?code=…` → `POST /sessions` → hold `session_id` and the account UID in a static
-  field. Deliberately in memory: persistence is a later step's job, and a restart costs one
-  sandbox consent.
+- `GET /callback?code=…` → `POST /sessions` → hold `session_id` and the account. ~~Deliberately in
+  memory: persistence is a later step's job, and a restart costs one sandbox consent.~~ Revised
+  2026-08-18 — the restart cost turned out to be paid once per code change, not once per session,
+  so the consent is now written to a gitignored local file. See "Picking this up next session".
+- **The account `uid` from `/sessions` is per-session, not per-account** — see Findings. Anything
+  that must be stable keys on `ConnectedAccount.Key` (the IBAN) instead.
 
 **Done when:** the Mock ASPSP consent completes in a browser and the callback page shows the
 account UID.
@@ -147,9 +273,14 @@ Enable Banking transaction → `Payee` / `Debit`, following the spec exactly:
 
 **Done when:** `GET /debits` returns JSON that already matches `app/src/domain/model.ts`.
 
-**Check against real data here:** the API reference lists `credit_debit_indicator` values as
-`CRDT`/`DBTR`, while `ARCHITECTURE.md` says `DBIT`. Step 3's raw dump settles it; whichever is
-right, correct the losing document rather than coding around the disagreement.
+~~**Check against real data here:** the API reference lists `credit_debit_indicator` values as
+`CRDT`/`DBTR`, while `ARCHITECTURE.md` says `DBIT`.~~ Settled 2026-08-18 by the raw dump: the
+values are **`DBIT`/`CRDT`**, `ARCHITECTURE.md` was right, and the API reference's `DBTR` is
+wrong. No code works around the disagreement.
+
+The dump broke two other assumptions on contact — `entry_reference` was absent entirely, and the
+creditor IBAN nearly so. Both are recorded under Findings with what step 4 does instead, and both
+are the first things step 6 must re-check.
 
 ### 5. Point the app at the backend
 

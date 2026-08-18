@@ -94,6 +94,58 @@ recorded here so they are decisions rather than things nobody noticed.
       failure this codebase already shipped once. Note both screens were verified correct by unit
       tests, so whatever this is, the tests do not cover it.
 
+## From the backend review against Enable Banking's own C# sample — 2026-08-18
+
+Reviewed `backend/GreedyNose.Api` against
+`https://github.com/enablebanking/enablebanking-api-samples/tree/master/cs_example`. **The JWT is
+a clean bill** — header, claims, algorithm, padding and encoding all match the sample, and the key
+is loaded once and the clock injected, which the sample does not do. Nothing about our
+authentication should be suspected when step 6 misbehaves.
+
+Thirteen findings came back. **Nine were fixed on the spot**: the currency assumption, silent `0m`
+amounts, unreadable dates, the granted-vs-requested consent expiry, the `identification_hash`
+fallback, the reference echoing the payee name, unescaped `date_from`, `GetProperty` throwing on
+an unexpected 200 body, and a doc comment that named the wrong weakness in the fallback debit id.
+The four below are left open on purpose.
+
+### Blocks step 6, not step 5
+
+- [ ] **`valid_until` is a fixed 90 days and never consults `maximum_consent_validity`**
+      (`backend/GreedyNose.Api/Program.cs`, `/connect`). Mock ASPSP allows 180 days so it has never
+      bitten, but a production ASPSP with a shorter cap rejects `POST /auth` outright and step 6
+      stops at the consent screen. The value is already in `GET /aspsps` per ASPSP; the fix is to
+      read it before authorizing, which also needs a decision about caching that list.
+
+### Needed before pagination is turned on
+
+- [ ] **`/debits` reads one page and ignores `continuation_key`**
+      (`backend/GreedyNose.Api/Program.cs`). `/raw` accepts it, `/debits` does not, so history
+      silently stops at whatever one page holds — 100 transactions in the 2026-08-18 dump, about
+      three months. Fine for step 5's list; wrong for onboarding, which is supposed to see the
+      whole history before deciding what counts as new.
+- [ ] **The ordinal in the fallback debit id collides across pages**
+      (`EnableBanking/TransactionMapper.cs`, `ResolveDebitId`). It counts occurrences within one
+      response, so a same-day group split by a page boundary restarts at `#0`. Harmless today
+      because there is exactly one page — and precisely why it must be solved *with* pagination,
+      not after. Documented at the method.
+- [ ] **`/debits` sends no `date_from`**, so the window is whatever each ASPSP defaults to. Under
+      `R22` that means different banks return different amounts of history for no reason the user
+      can see.
+
+### Worth a decision, no urgency
+
+- [ ] **The payee key is part of the fallback debit id** (`ResolveDebitId`). One spelling change at
+      the bank re-keys the payee *and* every debit under it at once, which R10b reads as an
+      entirely new history. Only reachable while `entry_reference` is missing — step 6 decides
+      whether that is ever the case in production.
+- [ ] **91 of 92 debits now have an empty `reference`.** That is correct — the field was echoing
+      the payee name, and `remittance_information` genuinely is populated on ~4% of rows — but
+      `DebitDetailScreen` was built against fixtures where every debit had one. Check it renders
+      nothing rather than an empty labelled row when step 5 lands.
+- [ ] **The granted-expiry path is coded but unverified.** `ConsentStore.ExpiresAt` reads
+      `access.valid_until` from the session response; the consent currently on disk predates the
+      field, so `/health` reports `expiresAt: null`. The next fresh consent exercises it.
+
 ## Standing
 
 - [ ] **Run the reworked app on the device.** Partly done 2026-08-17 — it builds, installs and
