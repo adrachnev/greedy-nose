@@ -1,5 +1,5 @@
 import { NavigationProp, ParamListBase, RouteProp } from '@react-navigation/native';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -10,11 +10,12 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import MockDataBadge from '../components/MockDataBadge';
+import DataSourceBadge from '../components/DataSourceBadge';
 import Toast from '../components/Toast';
 import { usePayee, useRuleForPayee, useSavePayeeRule } from '../data/hooks';
 import { classifyPayee } from '../domain/classification';
 import { Classification } from '../domain/model';
+import { unknownPayee } from '../domain/payees';
 import { dark, light } from '../theme/colors';
 import { parseAmountEUR } from '../utils/parseAmount';
 
@@ -48,9 +49,21 @@ type Props = {
 export default function PayeeEditScreen({ route, navigation }: Props) {
   const theme = useColorScheme() === 'dark' ? dark : light;
   const insets = useSafeAreaInsets();
-  const payee = usePayee(route.params.payeeId);
+  const knownPayee = usePayee(route.params.payeeId);
   const rule = useRuleForPayee(route.params.payeeId);
   const savePayeeRule = useSavePayeeRule();
+
+  // A payee the app has no record of is still rule-able, and that is not a
+  // concession: a rule is keyed on the payee *id* (R4), the store of payees is
+  // a separate thing, and classification is derived from the rule at read time
+  // (R6). So saving here classifies that id's debits exactly as it would for
+  // any other payee. This screen used to answer "Payee not found." instead,
+  // which turned the debit detail's Manage link into a dead end for precisely
+  // the charges that most need reviewing — the ones nobody can name.
+  const payee = useMemo(
+    () => knownPayee ?? unknownPayee(route.params.payeeId),
+    [knownPayee, route.params.payeeId],
+  );
 
   const [draftClassification, setDraftClassification] = useState<Classification>(
     classifyPayee(rule),
@@ -88,9 +101,6 @@ export default function PayeeEditScreen({ route, navigation }: Props) {
    * rather than wiped (R8a), and comes back the next time they are good.
    */
   function handleSave() {
-    if (!payee) {
-      return;
-    }
     if (!isGood) {
       savePayeeRule(payee.id, { classification: 'bad', amountEUR: rule?.amountEUR });
       navigation.goBack();
@@ -109,22 +119,8 @@ export default function PayeeEditScreen({ route, navigation }: Props) {
   /** Drops the limit and keeps the payee good — "no limit", not "alert on
    * everything" (R4a). Only reachable while the draft is good. */
   function handleClear() {
-    if (!payee) {
-      return;
-    }
     savePayeeRule(payee.id, { classification: 'good', amountEUR: undefined });
     navigation.goBack();
-  }
-
-  if (!payee) {
-    return (
-      <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
-        <MockDataBadge />
-        <Text style={[styles.hint, styles.notFoundText, { color: theme.textMuted }]}>
-          Payee not found.
-        </Text>
-      </View>
-    );
   }
 
   const avatarColor = isGood ? theme.good : theme.bad;
@@ -132,7 +128,7 @@ export default function PayeeEditScreen({ route, navigation }: Props) {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
-      <MockDataBadge />
+      <DataSourceBadge />
       <View style={styles.navBar}>
         <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
           <Text style={[styles.navLink, { color: theme.accent }]}>‹ Back</Text>
@@ -325,9 +321,6 @@ const styles = StyleSheet.create({
   hint: {
     fontSize: 12,
     lineHeight: 17,
-  },
-  notFoundText: {
-    padding: 16,
   },
   centerText: {
     textAlign: 'center',

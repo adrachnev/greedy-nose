@@ -12,6 +12,7 @@ import {
   formatDayShort,
   groupByDateSection,
   formatTime,
+  joinMeta,
 } from '../format';
 
 describe('formatCurrencyEUR — R17', () => {
@@ -123,5 +124,32 @@ describe('groupByDateSection', () => {
 
   it('groups an empty list into no sections at all', () => {
     expect(groupByDateSection([], at, now)).toEqual([]);
+  });
+});
+
+/**
+ * The separator has to leave with its part. Every debit from a real bank so
+ * far carries no time (Debit.hasTime), so "Card payment · " with nothing after
+ * it is the *common* rendering if this is got wrong — and a trailing middot
+ * reads as a value the app failed to load.
+ */
+describe('joinMeta', () => {
+  it('joins the parts that are there with a middot', () => {
+    expect(joinMeta('Card payment', '3 Jul, 09:14')).toBe('Card payment · 3 Jul, 09:14');
+  });
+
+  it('drops a part the bank did not give, separator included', () => {
+    // `false` is what a screen passes for `hasTime && formatTime(...)`.
+    expect(joinMeta('Card payment', 'Aug 18, 2026', false)).toBe('Card payment · Aug 18, 2026');
+    expect(joinMeta('Card payment', '')).toBe('Card payment');
+    expect(joinMeta('Card payment', null, undefined)).toBe('Card payment');
+  });
+
+  it('drops a missing part from the middle without doubling the separator', () => {
+    expect(joinMeta('Card payment', undefined, '09:14')).toBe('Card payment · 09:14');
+  });
+
+  it('returns an empty string when there is nothing to say', () => {
+    expect(joinMeta(false, null, undefined, '')).toBe('');
   });
 });

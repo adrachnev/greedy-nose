@@ -440,13 +440,21 @@ cost even serverless, which is why the data store moved to a free-tier Postgres 
 
 ## Refining this from real data
 
-R3a's payee key and R10b's de-dup key are built from documentation and one support answer — not
-from charges this app has pulled. **Both get revisited against real data from a live connection**
-(owner's call, 2026-08-17), specifically: how often the creditor account is missing, whether
-normalized names collide in practice, and which banks omit or duplicate `entry_reference`.
+**Settled 2026-09-16 against a real N26 account** — full evidence in `TRACER-BULLET.md`, "What
+real N26 data said." R3a's payee key and R10b's de-dup key held up under evidence rather than
+guesswork:
 
-This is why the design stores every raw string seen for a payee and records why a debit was
-treated as new: the tuning pass needs evidence, and the alternative is guessing twice. Until then
-both keys stay deliberately conservative in the direction R1 demands — split rather than merge for
-payees, duplicate rather than miss for debits — so the worst outcome of being wrong is a false
-alert, never a silent one.
+- R10b's composite fallback (`account, day, amount, payee, ordinal`) is not a stopgap for banks
+  that omit `entry_reference`: on this account, 63 of 91 real debits still needed it even though
+  the field exists and is populated on the other 28. Any ASPSP integration should expect to use
+  both keys, per row, indefinitely — not treat the fallback as something later data retires.
+- The account-holder's-own-IBAN trap (a credit row's `creditor_account` equal to the connected
+  account's own IBAN) reproduces on live data exactly as the curated test fixture modeled it —
+  confirms R2a's filter belongs before payee resolution, at the earliest point in the pipeline.
+- `ConnectedAccount.Key` being the IBAN rather than the session `uid` is now validated across an
+  environment change (sandbox → production), not only a consent renewal within one environment —
+  the `uid` changed again, the IBAN did not.
+
+Still unobserved from any account, sandbox or production: a non-EUR charge and a pending
+transaction. R10c's booked-vs-pending split and the currency-skip path remain built from the
+requirement's wording, not from evidence, and should stay conservative until one actually arrives.

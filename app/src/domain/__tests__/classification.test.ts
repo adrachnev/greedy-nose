@@ -17,6 +17,10 @@ function debitOf(amountEUR: number): Debit {
     payeeId: 'payee-test',
     amountEUR,
     timestamp: new Date().toISOString(),
+    // Irrelevant to R5 — classification never reads the clock — but the type
+    // requires an answer, and `true` keeps the fixture reading like a charge
+    // the bank timestamped.
+    hasTime: true,
     paymentType: 'Direct debit',
     reference: 'test',
   };

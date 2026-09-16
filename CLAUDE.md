@@ -8,6 +8,42 @@ A mobile app (iOS + Android) that connects to a European bank account and notifi
 the moment a debitor they've flagged as "Bad" charges them. That's the whole product — it is
 deliberately not a general finance/budgeting app.
 
+## How we work — plan, delegate, review
+
+**Settled 2026-08-19. This is the process, not a suggestion.** Every piece of work above the
+trivial floor below runs through three steps, in order:
+
+1. **Plan.** The main session writes the plan — it already carries the context a fresh `Plan`
+   agent would have to re-derive — and presents it in **plan mode**. Nothing starts before the
+   user approves it. A plan is a repo document (like `TRACER-BULLET.md`) only when the work
+   spans sessions; otherwise plan mode is the whole artefact.
+2. **Delegate.** Code is written by **`coder-mobile`** (anything under `app/`) or
+   **`coder-backend`** (anything under `backend/`), never by the main session. Work spanning
+   both settles the seam between them in the plan first — the DTO/domain contract — then both
+   agents run in parallel against it instead of one guessing at the other.
+3. **Review.** `coder-reviewer` reviews what the coder agent produced. This half is already
+   automated: `.claude/hooks/review-after-coder.sh` fires on `SubagentStop` and requests the
+   review whenever a coder agent finishes.
+
+**Findings go back to the same coder agent** via `SendMessage`, not to a fresh one and not to
+the main session — the original agent still holds the context that produced the code. The main
+session verifies `npx tsc --noEmit`, `npx eslint .` and `npx jest` afterwards. A second review
+pass only if the fix itself clears the trivial floor.
+
+**The trivial floor** is the review hook's own threshold: **10 changed lines**. At or below it,
+and for docs-only changes, the main session edits directly — spinning up an agent costs more
+than it saves, and the review hook would skip it anyway. `CLAUDE.md`, `REQUIREMENTS.md`,
+`ARCHITECTURE.md`, `TRACER-BULLET.md` and `TODO.md` are documentation, not code.
+
+**What the main session still owns**, because no subagent can do it: the device toolchain —
+`adb` pairing and reverse tunnels, Gradle builds, launching the app, reading logcat, running
+the backend. That is operational work, and it is not a loophole for writing code.
+
+**Why this is written down:** the automation only covers step 3, and its trigger is a coder
+agent *stopping*. When the main session writes code itself, no agent stops, so no review is
+ever requested — one skipped step silently removes two, with nothing on screen to say so.
+That is exactly what happened during tracer-bullet step 5 on 2026-08-19.
+
 ## Requirements
 
 **`REQUIREMENTS.md` is the single source of truth for what the app does. Read it first.**
@@ -23,6 +59,105 @@ reconciled with it on 2026-08-17 — all ten `A1`–`A10` divergences closed. **
 not** — that rework is the next piece of work.
 
 ## Status
+
+**2026-09-16 — tracer-bullet steps 6 and 7 are done at the backend, verified against the real N26
+account (91 debits, 52 payees) through the Production application; device confirmation of step 6
+is the one thing still open.** It's blocked by N26 itself, not by code: Enable Banking rate-limits
+background fetches (`ASPSP_RATE_LIMIT_EXCEEDED`, ~4/day per their own FAQ), and a burst of calls
+while wiring up USB access used up the day's quota — their guidance is to wait ~6h before
+retrying, no workaround exists. Full findings in `TRACER-BULLET.md`. For unrelated testing in the
+meantime, the backend was switched back to the **Sandbox** application (Mock ASPSP):
+`dotnet user-secrets` currently hold the sandbox `ApplicationId`/`PrivateKeyPath`, and the real N26
+consent was moved aside as `consent.local.json.n26-bak` (not deleted) under
+`backend/GreedyNose.Api/`. Switching back to Production needs both application ids restored (see
+`TRACER-BULLET.md`'s Findings) **and** the `RedirectUrl` secret set back to
+`https://localhost:5199/callback` — the two applications are registered with different redirect
+URIs in Enable Banking's console (Sandbox: plain `http://`; Production: `https://`), discovered the
+hard way this session when the wrong one produced a `WRONG_ASPSP_PROVIDED` / `REDIRECT_URI_NOT_ALLOWED`
+error depending on which secret was stale.
+
+**Same day — rules now persist (`app/src/data/rulesStore.ts`, AsyncStorage).** The single
+piece of in-memory-only state flagged in `TODO.md` since step 5 — mark a payee good, reload the JS
+context, the rule is gone — is fixed: rules hydrate from `AsyncStorage` on the first `subscribe()`
+(mirroring `backendFeed.ts`'s lazy-load pattern), seed from the fixture set on a fresh install only
+in fixture mode (empty in backend mode, which is correct per `R4b`), and persist through a write
+queue so one failed native write can't silently swallow every write after it. Two `coder-reviewer`
+passes: the first found one MUST FIX (an unhandled promise rejection in the write queue could
+permanently wedge all future writes after a single transient failure) and one SHOULD FIX (no
+regression test for it) — both fixed by `coder-mobile` and re-verified mergeable. Confirmed
+on-device: mark a payee, force-close the app, reopen — the rule survives.
+
+**The tracer bullet reached the device on 2026-08-19: every layer is wired end to end, and the
+app shows bank data fetched through our own backend. `TRACER-BULLET.md` is the live document;
+read its "Progress" section first.** Started 2026-08-17. The account behind it is still the
+**sandbox** Mock ASPSP (holding an import of real German account data, which is why its findings
+are worth something) — firing the same code at the real N26 account is step 6, and it waits on
+Restricted Production approval. The plan, settled the same day: an end-to-end slice
+(sandbox ASPSP → local ASP.NET Core minimal API → the device's debit list), sandbox first and the
+real N26 account after, with no DB, push, polling or Azure in the first shot.
+
+**`backend/GreedyNose.Api` now exists** — a bare minimal API (net10.0) holding the Enable Banking
+client, the RS256 JWT signer, a file-backed consent store, the domain mapper and the endpoints for
+steps 1–4, in step order.
+
+**2026-08-18 — steps 2, 3 and 4 are done and verified against a live connection.** The Mock ASPSP
+consent completed in a browser; `/raw` returned 100 real transactions (kept in `raw/`, gitignored);
+`/debits` maps them to 92 debits and 45 payees in exactly the shape `app/src/domain/model.ts`
+declares.
+
+**2026-08-19 — step 5 is done and verified on the device: the app runs on real bank data.** The
+Debits tab lists the sandbox charges through `adb reverse tcp:5199 tcp:5199`. The seam held —
+no screen learned where its data comes from. New under `app/src/data/`: `config.ts` (the
+`USE_BACKEND` flag, so fixtures stay one line away) and `backendFeed.ts` (fetch, validation and
+the `useSyncExternalStore` store); `hooks.ts` binds the source **once at module level**, and
+rules stay local under both flags because `R6` means the backend sends no classification.
+`MockDataBadge` became `DataSourceBadge` — once the feed is real, an empty list could mean the
+backend is down, `adb reverse` is missing, the consent expired, or the account is genuinely
+empty, and the device is the worst place to guess. Full detail in `TRACER-BULLET.md`'s
+"Step 5 as built". **Steps 0–5 are done; step 6 waits on Restricted Production approval.**
+
+Three things step 5 exposed, all in `TODO.md`: **rules are in-memory only** and die with the JS
+context (the one piece of state the user creates by hand, and the only unpersisted one — hidden
+while rules and payees shared a fixture file); booking timestamps are **midnight UTC**, which
+groups correctly only in a timezone ahead of UTC; and **45 payees with no rule** make the
+unclassified state real for the first time, which is the onboarding bulk review's whole purpose.
+
+**Real data broke three assumptions**, all recorded with evidence in `TRACER-BULLET.md`'s Findings:
+
+- **`entry_reference` was null on all 100 rows**, so `R10b`'s de-duplication key did not exist at
+  all. The mapper falls back to a composite of `(account, booking date, amount, payee key,
+  ordinal)`, documented as a stopgap, not a design.
+- **A creditor IBAN was present on 1 of 92 debits** and a creditor agent on none, so `R3a`'s
+  tier 1 is dead for card payments and the normalized name carries almost everything.
+- **The account `uid` changes on every consent** (seen three times, same IBAN). Keying debits on
+  it would have re-alerted the entire history on every reconnect — the storm `R20` exists to
+  prevent. `ConnectedAccount.Key` is the IBAN for this reason.
+
+`credit_debit_indicator` is confirmed **`DBIT`**/`CRDT`: `ARCHITECTURE.md` was right and the API
+reference's `DBTR` was wrong. Two honest gaps remain in the mapping, both logged for step 7:
+`Subscription` is unreachable from bank data (no code means "recurring"), and aggregator prefixes
+(`PAYPAL *…`, `SumUp *…`) key as the aggregator rather than the shop behind it — the merge
+direction `R3b` warns against.
+
+**The consent now survives restarts** (`consent.local.json`, gitignored — it holds a session id
+that reads a real account). Step 2 had chosen memory-only; that was revised on 2026-08-18 once it
+became clear the restart cost was paid per code change, not per session. It is still not the
+database — one consent, no users, no history.
+
+**Same day — reviewed against Enable Banking's own C# sample.** The **JWT is a clean bill**:
+header, claims, algorithm, padding and encoding all match `cs_example`, so authentication is not
+the place to look when step 6 misbehaves. Nine of thirteen findings were fixed immediately; the
+one that mattered is that **currency was read and thrown away** while the DTO field is `amountEUR`,
+so a foreign-currency charge would have been limit-checked as euros — a false or missed alert
+under `R5`, invisible in a 100/100 EUR dump. Non-EUR charges are now skipped **and logged**. The
+four deferred findings are in `TODO.md`; the one that blocks step 6 is that `valid_until` asks for
+a flat 90 days and never consults the ASPSP's `maximum_consent_validity`.
+
+Credentials: sandbox application `007a8a74-7a48-4213-82e1-d017d44b81b0`, private key at the repo
+root as `<application-id>.pem` and **gitignored** by a new root `.gitignore` — it is the whole
+credential (Enable Banking has no token endpoint), so it stays server-side forever and never goes
+near `app/`. Config lives in `dotnet user-secrets`, not `appsettings.json`. .NET SDK 10.0.400 was
+installed on this machine this session.
 
 **2026-08-17 — `ARCHITECTURE.md` is reconciled with the spec.** Both contradictions are gone
 (`A1` the inverted rule engine, `A2` the missing consent-expiry push), terminology follows `R0`,

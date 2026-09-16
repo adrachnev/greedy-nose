@@ -1,0 +1,24 @@
+# Secrets — never commit. The Enable Banking application's private RSA key lives as
+# <application-id>.pem; the filename itself is the application ID (TRACER-BULLET.md, step 0).
+*.pem
+*.key
+.env
+.env.*
+
+# .NET build output (backend/, from TRACER-BULLET.md step 1)
+bin/
+obj/
+
+# Raw bank responses saved by GET /raw (TRACER-BULLET.md step 3). Evidence for the R3a/R10b
+# tuning pass — and real account data from step 6 on, so it stays local.
+raw/
+
+# The live consent remembered across restarts (backend/GreedyNose.Api/consent.local.json). It
+# holds a session id that reads a real bank account — a credential, not a cache. The glob also
+# covers consent.local.json.n26-bak, a backup made while swapping to sandbox credentials
+# (2026-09-16) — same class of data, just not the live file.
+consent.local.json*
+
+# Account exports used to seed the Mock ASPSP (TRACER-BULLET.md, step 3). N26.json is a real
+# account's full transaction history — the same class of data as raw/, just arriving by hand.
+N26.json

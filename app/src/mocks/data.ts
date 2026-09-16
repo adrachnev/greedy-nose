@@ -12,9 +12,9 @@
 // subscriptions on purpose — a recurring charge at the same amount every month
 // is what a search for one payee is meant to surface, one row per month — and
 // the other three exist to make each of R12a's three bad-debit reasons
-// reachable by hand (see the note above `rules`).
+// reachable by hand (see the note above `FIXTURE_SEED_RULES`).
 
-import { Debit, Payee, Rule, RuleDraft } from '../domain/model';
+import { Debit, Payee, Rule } from '../domain/model';
 
 // --- Payees ---------------------------------------------------------------
 // The trust model is opt-out: a payee is bad until the user says otherwise,
@@ -52,7 +52,8 @@ export const payees: Payee[] = [
     iban: 'DE02 1009 0000 5573 9829 01',
   },
   {
-    // Deliberately absent from `rules` below: the never-reviewed payee, which
+    // Deliberately absent from `FIXTURE_SEED_RULES` below: the never-reviewed
+    // payee, which
     // is R5's first row (no rule -> bad) and the only source of R12a's "New
     // payee — you haven't seen this one before." Without one in the fixtures
     // that branch is unreachable on device, so the case most likely to be got
@@ -90,6 +91,13 @@ export const payees: Payee[] = [
 // Note: no fixture uses the 'Bank transfer' payment type any more (the rent
 // payment went with the old fixture set). The union member stays — it is bank
 // vocabulary, not fixture vocabulary, and the real feed will produce it.
+//
+// Every fixture debit carries `hasTime: true`, once per generator rather than
+// once per row. That is a statement, not a formality: these times are chosen
+// (a bakery at 08:20, a gym direct debit at 07:03), where the real feed's rows
+// are booking *dates* and set it to false. Keeping the fixtures on the `true`
+// side of that flag is what keeps the "3 Jul, 09:14" rendering exercised at
+// all — the live sandbox account cannot reach it.
 
 function relativeTimestamp(daysAgo: number, hours: number, minutes: number): string {
   const d = new Date();
@@ -137,6 +145,7 @@ const netflixDebits: Debit[] = monthlyRun(12, 4, 6, 12).map((timestamp, index) =
   payeeId: 'payee-netflix',
   amountEUR: 12.99,
   timestamp,
+  hasTime: true,
   paymentType: 'Subscription',
   reference: 'Netflix Standard plan',
 }));
@@ -151,6 +160,7 @@ const spotifyDebits: Debit[] = monthlyRun(12, 9, 9, 14).map((timestamp, index) =
   payeeId: 'payee-spotify',
   amountEUR: index < SPOTIFY_MONTHS_AT_NEW_PRICE ? 10.99 : 9.99,
   timestamp,
+  hasTime: true,
   paymentType: 'Subscription',
   reference:
     index === SPOTIFY_MONTHS_AT_NEW_PRICE - 1
@@ -163,6 +173,7 @@ const vodafoneDebits: Debit[] = monthlyRun(12, 2, 7, 30).map((timestamp, index) 
   payeeId: 'payee-vodafone',
   amountEUR: 39.99,
   timestamp,
+  hasTime: true,
   paymentType: 'Direct debit',
   reference: 'Mobile plan monthly fee',
 }));
@@ -214,6 +225,7 @@ const bakeryDebits: Debit[] = BAKERY_CHARGES.map(
     payeeId: 'payee-baeckerei',
     amountEUR,
     timestamp: relativeTimestamp(daysAgo, hours, minutes),
+    hasTime: true,
     paymentType: 'Card payment',
     // The bank's transliterated spelling, on purpose: it is what R23a's fold
     // has to cope with in production.
@@ -243,6 +255,7 @@ const scamyloansDebits: Debit[] = SCAMYLOANS_CHARGES.map(
     payeeId: 'payee-scamyloans',
     amountEUR,
     timestamp: relativeTimestamp(daysAgo, hours, minutes),
+    hasTime: true,
     paymentType: 'Direct debit',
     reference: `Invoice #${99213 + index} loan installment`,
   }),
@@ -256,18 +269,22 @@ const fitlineDebits: Debit[] = [
     payeeId: 'payee-fitline',
     amountEUR: 39.9,
     timestamp: relativeTimestamp(0, 7, 3),
+    hasTime: true,
     paymentType: 'Direct debit',
     reference: 'Membership monthly fee',
   },
 ];
 
-// `let`, not `const` — addDebit() below reassigns this to a new array (rather
-// than `push`) so useSyncExternalStore subscribers in hooks.ts see a changed
-// snapshot reference and re-render. Same reasoning for `rules` below.
+// `const`: nothing writes to this array (`addDebit` was removed on
+// 2026-08-19 — see rulesStore.ts's own history note for where the one
+// remaining mutable fixture, rules, went). Should a fixture ever need to grow
+// a debit again, it grows the way rulesStore.ts's `rules` does — reassign to
+// a *new* array so useSyncExternalStore sees a changed reference, never
+// `push`.
 //
 // Not sorted here: groupByDateSection sorts newest-first itself, so fixture
 // order is a readability choice rather than a contract.
-export let debits: Debit[] = [
+export const debits: Debit[] = [
   ...fitlineDebits,
   ...scamyloansDebits,
   ...bakeryDebits,
@@ -288,8 +305,15 @@ export let debits: Debit[] = [
 //
 // Drop any one of the three and a wording branch becomes unreachable on the
 // device while still passing its unit test.
+//
+// This is a *seed*, not the live store: src/data/rulesStore.ts is what rules
+// actually live in now (persisted, restart-proof, and shared across both
+// USE_BACKEND values per R6). This constant is what rulesStore.ts writes on a
+// genuinely first launch in fixture mode — kept here rather than inlined
+// there because it is fixture *data* (this file's whole job), and
+// rulesStore.ts should carry no fixture knowledge beyond this one import.
 
-export let rules: Rule[] = [
+export const FIXTURE_SEED_RULES: Rule[] = [
   { payeeId: 'payee-netflix', classification: 'good' },
   { payeeId: 'payee-spotify', classification: 'good' },
   { payeeId: 'payee-vodafone', classification: 'good' },
@@ -297,70 +321,19 @@ export let rules: Rule[] = [
   { payeeId: 'payee-scamyloans', classification: 'bad' },
 ];
 
-// --- Mutations ------------------------------------------------------------
-// Every write reassigns the module-level array to a *new* array rather than
-// mutating an element in place, so useSyncExternalStore's getSnapshot()
-// returns a changed reference and subscribers actually re-render. Mutating in
-// place silently broke exactly that once already; the tests assert on
-// reference identity, not just on the end value, so it cannot regress quietly.
-//
-// A real backend will replace this with an actual mutation call + refetch/
-// cache invalidation (React Query et al.) — this listener set is a
-// deliberately minimal stand-in, not a state-management pattern to grow.
+// --- Change notification ----------------------------------------------------
+// `payees` and `debits` above are frozen consts — nothing in this file
+// mutates either any more. `addDebit` was removed on 2026-08-19 (it appended
+// to the fixture store, a dead code path once USE_BACKEND is on); the other
+// mutator, `savePayeeRule`, has now moved wholesale to src/data/rulesStore.ts,
+// which is why this file no longer needs a listener set of its own. So this
+// is a true no-op: fixture payees/debits provably never change within a
+// session, and hooks.ts still calls it (for usePayees/useDebits/
+// useDataSource under fixture mode) only because every source behind that
+// seam has to expose the same subscribe-shape.
 
 type Listener = () => void;
-const listeners = new Set<Listener>();
 
-export function subscribeToDataChanges(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-function notifyDataChanged(): void {
-  listeners.forEach(listener => listener());
-}
-
-/**
- * Upserts a payee's whole rule — classification and amount together, in one
- * reassignment and one notification. PayeeEditScreen is a form with a single
- * commit point (Save), so a per-field setter would only let a save land half
- * applied and make subscribers re-render twice for one user action.
- *
- * This is the *only* thing that moves a payee's classification: nothing the
- * app does on its own ever flips it (R8). Creating a rule where there was none
- * is what "reviewed" means (R4b), and rules are never deleted (R13) — marking
- * a payee bad already expresses everything a delete would.
- *
- * `amountEUR: undefined` means no limit — every charge from that payee is good
- * (R4a). The caller decides what to pass while a payee is bad; the amount is
- * kept rather than wiped there (R8a/R14), it simply has no effect (R5).
- */
-export function savePayeeRule(payeeId: string, draft: RuleDraft): void {
-  const existing = rules.find(r => r.payeeId === payeeId);
-  if (
-    existing &&
-    existing.classification === draft.classification &&
-    existing.amountEUR === draft.amountEUR
-  ) {
-    return;
-  }
-  const next: Rule = { payeeId, classification: draft.classification };
-  if (draft.amountEUR != null) {
-    next.amountEUR = draft.amountEUR;
-  }
-  rules = existing ? rules.map(r => (r.payeeId === payeeId ? next : r)) : [...rules, next];
-  notifyDataChanged();
-}
-
-/**
- * Appends a debit (new array reference, not `push` — see above). Unused by
- * any screen today: there is no live feed and no "simulate an incoming
- * charge" UI. It exists so the arrival of a debit is modelled at all, and
- * because the classification it triggers is derived at read time (R6), this
- * is now the whole of it — an arriving charge changes no payee's
- * classification and never can (R8).
- */
-export function addDebit(debit: Debit): void {
-  debits = [...debits, debit];
-  notifyDataChanged();
+export function subscribeToDataChanges(_listener: Listener): () => void {
+  return () => {};
 }
