@@ -123,6 +123,23 @@ describe('USE_BACKEND = true', () => {
     expect(textAt('feed')).toBe('ready/0/4');
     expect(fetchMock).toHaveBeenCalledWith('http://backend.test/debits', expect.anything());
   });
+
+  it('serves an empty local rule store on first launch — no demo data pretending to be real (R6)', async () => {
+    const { hooks } = loadWith(true);
+    let rules!: ReturnType<typeof hooks.useRules>;
+    function Capture() {
+      rules = hooks.useRules();
+      return null;
+    }
+    // rulesStore.ts seeds [] rather than the fixture mix in backend mode: the
+    // fixture payee ids (`payee-netflix`) don't exist under a real account
+    // (`name:LIDL CONNECT`), so seeding them would be inert demo data at best.
+    await act(async () => {
+      ReactTestRenderer.create(<Capture />);
+    });
+
+    expect(rules).toEqual([]);
+  });
 });
 
 describe('USE_BACKEND = false', () => {
@@ -163,17 +180,19 @@ describe('USE_BACKEND = false', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('still serves rules from the local store — the backend sends no classification (R6)', () => {
+  it('still serves rules from the local store, seeded with the fixture mix — the backend sends no classification (R6)', async () => {
     const { hooks, fixtures } = loadWith(false);
     let rules!: ReturnType<typeof hooks.useRules>;
     function Capture() {
       rules = hooks.useRules();
       return null;
     }
-    act(() => {
+    // Hydration off the (mocked) AsyncStorage is async — see rulesStore.ts —
+    // so the render has to be awaited before rules reflects the seed.
+    await act(async () => {
       ReactTestRenderer.create(<Capture />);
     });
 
-    expect(rules).toBe(fixtures.rules);
+    expect(rules).toEqual(fixtures.FIXTURE_SEED_RULES);
   });
 });

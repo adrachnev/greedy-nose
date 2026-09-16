@@ -35,7 +35,8 @@ One account, hardcoded. Everything the bullet does not need is deliberately abse
 | 3 Raw transactions | **done, verified 2026-08-18** — 100 transactions, 2026-05-13 … 2026-08-18, in `raw/transactions-20260818-122928.json`. See Findings |
 | 4 Map to the domain | **done, verified 2026-08-18** — `GET /debits` returns 92 debits and 45 payees from the 100-row dump: 92 unique ids, no orphan payees, no zero or negative amounts, the 8 credits gone. Reviewed against Enable Banking's own C# sample the same day |
 | 5 Point the app at the backend | **done, verified on the device 2026-08-19** — the Debits tab lists the real sandbox charges. See "Step 5 as built" |
-| 6–7 | not started; 6 waits on Restricted Production |
+| 6 Re-fire at the real bank | **backend done, verified 2026-09-16** — real N26 account connected through the Production application; 91 debits and 52 payees from ~3 months of history via `/debits`. By this step's own "done when," it isn't finished until the device shows it — that's still open |
+| 7 Record what real data taught us | **done, verified 2026-09-16** — see "What real N26 data said" below, and the updated "Refining from real data" sections in `REQUIREMENTS.md`/`ARCHITECTURE.md` |
 
 ### Step 5 as built — 2026-08-19
 
@@ -123,7 +124,8 @@ A test now asserts no payee carries the account's own IBAN.
 
 ### Picking this up next session
 
-**Steps 0–5 are done. The next action is step 6, which waits on Restricted Production.**
+**Steps 0–7 are done at the backend. The next action is pointing the device at the real N26 feed
+— it has only ever shown Mock ASPSP or fixtures.**
 
 1. Start the backend:
    `dotnet run --project backend/GreedyNose.Api/GreedyNose.Api.csproj --launch-profile http`
@@ -197,10 +199,18 @@ Configuration is in **user secrets**, not `appsettings.json`: `EnableBanking:App
 - **N26 does not appear in the sandbox ASPSP list** (no match for "n26" among 686 German entries),
   so step 6 cannot be rehearsed against it — it needs Restricted Production. DKB is present but
   flagged `beta`. Nothing here contradicts `R22`; it only means the sandbox cannot prove step 6.
+  **Confirmed once the Production app went active (2026-09-16):** N26 is there, `beta: false`,
+  `maximum_consent_validity: 15552000` (180 days) — see "What real N26 data said" below.
 - **`GET /aspsps` carries the sandbox test credentials** for each bank in a `sandbox.users` object
   (username/password/OTP). Mock ASPSP has none — it needs no login at all.
 - ASPSPs advertise `maximum_consent_validity` (15552000s = 180 days for Mock ASPSP), which the
   requested `valid_until` must respect. The backend currently asks for 90 days.
+- **Production N26 rate-limits background fetches too, hit 2026-09-16.** Three `/debits` calls in
+  quick succession during step 6's device work (`/health`, then two probes) returned
+  `429 ASPSP_RATE_LIMIT_EXCEEDED`. Enable Banking's FAQ: most ASPSPs cap background fetches (PSU
+  not online) at **4/day**, no workaround, retry after **6 hours**. The sandbox caveat below
+  undersold this — it isn't only a sandbox quirk, and step 6's device confirmation was blocked by
+  the clock, not the code.
 
 ### What the first real dump said — 2026-08-18
 
@@ -279,6 +289,68 @@ trip, which may itself drop fields. Step 6 against the real bank is what turns t
   throughout; `remittance_information` was non-empty on 4 of 100.
 - **The page was 100 transactions with a `continuation_key`**, not the "fixed batches of 10" the
   sandbox notes claim. Pagination exists and works; step 4 currently reads the first page only.
+
+### What real N26 data said — 2026-09-16
+
+Real N26 account, real consent, the Production application active. One page, 100 transactions
+(91 `DBIT`, 9 `CRDT`), booking dates 2026-06-18 … 2026-09-15. Mapped to **91 debits, 52 payees, 0
+skipped** — every row survived validation this time, unlike the first sandbox dump.
+
+**The most important open question from step 4 is answered: `entry_reference` exists on real
+data, but per-row, not as a bank-wide flag.** 28 of 91 debits carry one; the other 63 fall back to
+the composite key exactly as `ResolveDebitId` was built to do (decided 2026-08-18, documented at
+the method as "step 7 records the answer" — this is that answer). It correlates with transaction
+type more than with recency: `ICDT` (bank transfers) never carries one (0 of 8), `CCRD` (card
+payments) carries one on roughly a third of rows (26 of 85), and the split does not fall on a
+clean date boundary — a 2026-08-26 charge has one, a 2026-09-08 charge does not. **The fallback
+composite key is not a stopgap for a bank that omits the field; it is the permanent path for a
+meaningful share of any one bank's own charges**, which changes how much weight `R10b` should put
+on it going forward — this is not a temporary crutch step 6 was expected to retire.
+
+**The account-holder's-own-IBAN trap, caught in the curated test fixture, reproduces on live
+data.** All 9 `CRDT` rows carry `creditor_account.iban` equal to the connected account's own IBAN
+(`DE26...0153`) — confirms why `R2a`'s DBIT filter has to run before payee resolution, not as
+cosmetic cleanup afterward.
+
+**The "Unknown payee" placeholder (added in the step 5 review round) now groups three real
+transfers with real money behind them** — €1,000 (2026-09-08), €45 (2026-07-12), €10
+(2026-06-25) — each arriving with no creditor name, IBAN, or remittance text, all typed "Bank
+transfer." This was a two-row synthetic edge case in the sandbox dump; here it is three real
+outgoing transfers from three months of one account that the bank simply never labeled.
+
+**One data-quality issue is confirmed as the bank's own, not an artifact of the sandbox's
+export/import round trip.** `Papas D?ner` — the same mangled `?` where an `ö` belongs — reappears
+verbatim straight from N26's live API. The caveat under the first dump's findings ("this data went
+through an export/import round trip, which may itself drop fields") is retired for this case:
+N26 sends it broken.
+
+**Recurring subscriptions remain genuinely unreachable, now demonstrated on the owner's own real
+subscriptions rather than a hypothetical.** The account's real Netflix charge (€13.99, 2026-08-01
+and again 2026-09-01) and its Anthropic Claude subscription (€21.42, 2026-08-04 and again
+2026-09-09) both arrive as plain `CCRD` card payments — nothing on the wire distinguishes a
+monthly subscription from a one-off card swipe of the same amount.
+
+**Aggregator-prefix merging reproduces identically**: `PAYPAL *VODAFONE`, `PAYPAL *C24MIETWAG
+BR8`, `Zettle_*Waldklettergar` all appear again, keying as the aggregator rather than the merchant
+behind them, same as the sandbox dump — confirms this is a real gap, not an artifact of that
+account's data having been imported into Mock ASPSP.
+
+**Still unobserved, real bank or not:** every transaction is `EUR` (100 of 100) and every one is
+`status: BOOK` (100 of 100, 0 `PDNG`). The non-EUR skip-and-log path added after the C# sample
+review and `R10c`'s booked-vs-pending split remain completely untested by any data this project
+has pulled, sandbox or production.
+
+**The account `uid` changed for a third time** (`c2261887-...` this session; two other values seen
+across earlier sandbox consents) for the same IBAN — this time across an environment change
+(sandbox → production), not just a consent renewal, which is the strongest evidence yet for
+keying `ConnectedAccount.Key` on the IBAN rather than the uid. **`identification_hash` is
+populated for the first time** (`null` under Mock ASPSP; a real base64 hash under N26) — the first
+live confirmation that the fallback described in the first dump's findings actually works once an
+ASPSP populates it.
+
+`/debits` still reads one page only; this account's history goes back at least to 2026-06-18 from
+a single unpaginated fetch, so real usage will hit the `continuation_key` gap in `TODO.md` well
+before a year of history is ever needed.
 
 ### Reviewed against Enable Banking's own C# sample — 2026-08-18
 

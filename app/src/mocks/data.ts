@@ -12,9 +12,9 @@
 // subscriptions on purpose — a recurring charge at the same amount every month
 // is what a search for one payee is meant to surface, one row per month — and
 // the other three exist to make each of R12a's three bad-debit reasons
-// reachable by hand (see the note above `rules`).
+// reachable by hand (see the note above `FIXTURE_SEED_RULES`).
 
-import { Debit, Payee, Rule, RuleDraft } from '../domain/model';
+import { Debit, Payee, Rule } from '../domain/model';
 
 // --- Payees ---------------------------------------------------------------
 // The trust model is opt-out: a payee is bad until the user says otherwise,
@@ -52,7 +52,8 @@ export const payees: Payee[] = [
     iban: 'DE02 1009 0000 5573 9829 01',
   },
   {
-    // Deliberately absent from `rules` below: the never-reviewed payee, which
+    // Deliberately absent from `FIXTURE_SEED_RULES` below: the never-reviewed
+    // payee, which
     // is R5's first row (no rule -> bad) and the only source of R12a's "New
     // payee — you haven't seen this one before." Without one in the fixtures
     // that branch is unreachable on device, so the case most likely to be got
@@ -274,11 +275,12 @@ const fitlineDebits: Debit[] = [
   },
 ];
 
-// `const`, where `rules` below is still `let`: nothing writes to this array
-// any more (the why is at `addDebit`'s former home, below savePayeeRule).
-// Should a fixture ever need to grow a debit again, it grows the way `rules`
-// does — reassign to a *new* array so useSyncExternalStore sees a changed
-// reference, never `push`.
+// `const`: nothing writes to this array (`addDebit` was removed on
+// 2026-08-19 — see rulesStore.ts's own history note for where the one
+// remaining mutable fixture, rules, went). Should a fixture ever need to grow
+// a debit again, it grows the way rulesStore.ts's `rules` does — reassign to
+// a *new* array so useSyncExternalStore sees a changed reference, never
+// `push`.
 //
 // Not sorted here: groupByDateSection sorts newest-first itself, so fixture
 // order is a readability choice rather than a contract.
@@ -303,8 +305,15 @@ export const debits: Debit[] = [
 //
 // Drop any one of the three and a wording branch becomes unreachable on the
 // device while still passing its unit test.
+//
+// This is a *seed*, not the live store: src/data/rulesStore.ts is what rules
+// actually live in now (persisted, restart-proof, and shared across both
+// USE_BACKEND values per R6). This constant is what rulesStore.ts writes on a
+// genuinely first launch in fixture mode — kept here rather than inlined
+// there because it is fixture *data* (this file's whole job), and
+// rulesStore.ts should carry no fixture knowledge beyond this one import.
 
-export let rules: Rule[] = [
+export const FIXTURE_SEED_RULES: Rule[] = [
   { payeeId: 'payee-netflix', classification: 'good' },
   { payeeId: 'payee-spotify', classification: 'good' },
   { payeeId: 'payee-vodafone', classification: 'good' },
@@ -312,65 +321,19 @@ export let rules: Rule[] = [
   { payeeId: 'payee-scamyloans', classification: 'bad' },
 ];
 
-// --- Mutations ------------------------------------------------------------
-// Every write reassigns the module-level array to a *new* array rather than
-// mutating an element in place, so useSyncExternalStore's getSnapshot()
-// returns a changed reference and subscribers actually re-render. Mutating in
-// place silently broke exactly that once already; the tests assert on
-// reference identity, not just on the end value, so it cannot regress quietly.
-//
-// A real backend will replace this with an actual mutation call + refetch/
-// cache invalidation (React Query et al.) — this listener set is a
-// deliberately minimal stand-in, not a state-management pattern to grow.
+// --- Change notification ----------------------------------------------------
+// `payees` and `debits` above are frozen consts — nothing in this file
+// mutates either any more. `addDebit` was removed on 2026-08-19 (it appended
+// to the fixture store, a dead code path once USE_BACKEND is on); the other
+// mutator, `savePayeeRule`, has now moved wholesale to src/data/rulesStore.ts,
+// which is why this file no longer needs a listener set of its own. So this
+// is a true no-op: fixture payees/debits provably never change within a
+// session, and hooks.ts still calls it (for usePayees/useDebits/
+// useDataSource under fixture mode) only because every source behind that
+// seam has to expose the same subscribe-shape.
 
 type Listener = () => void;
-const listeners = new Set<Listener>();
 
-export function subscribeToDataChanges(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+export function subscribeToDataChanges(_listener: Listener): () => void {
+  return () => {};
 }
-
-function notifyDataChanged(): void {
-  listeners.forEach(listener => listener());
-}
-
-/**
- * Upserts a payee's whole rule — classification and amount together, in one
- * reassignment and one notification. PayeeEditScreen is a form with a single
- * commit point (Save), so a per-field setter would only let a save land half
- * applied and make subscribers re-render twice for one user action.
- *
- * This is the *only* thing that moves a payee's classification: nothing the
- * app does on its own ever flips it (R8). Creating a rule where there was none
- * is what "reviewed" means (R4b), and rules are never deleted (R13) — marking
- * a payee bad already expresses everything a delete would.
- *
- * `amountEUR: undefined` means no limit — every charge from that payee is good
- * (R4a). The caller decides what to pass while a payee is bad; the amount is
- * kept rather than wiped there (R8a/R14), it simply has no effect (R5).
- */
-export function savePayeeRule(payeeId: string, draft: RuleDraft): void {
-  const existing = rules.find(r => r.payeeId === payeeId);
-  if (
-    existing &&
-    existing.classification === draft.classification &&
-    existing.amountEUR === draft.amountEUR
-  ) {
-    return;
-  }
-  const next: Rule = { payeeId, classification: draft.classification };
-  if (draft.amountEUR != null) {
-    next.amountEUR = draft.amountEUR;
-  }
-  rules = existing ? rules.map(r => (r.payeeId === payeeId ? next : r)) : [...rules, next];
-  notifyDataChanged();
-}
-
-// `addDebit` lived here until 2026-08-19 and is deliberately gone. It appended
-// to the *fixture* store, so under USE_BACKEND it would have been a silent
-// no-op named after the thing that adds a charge; `useAddDebit` was removed in
-// step 5 and this was its other half. A debit arrives through
-// src/data/backendFeed.ts's refresh() now, and nothing else writes to `debits`.
-// The array-reference discipline it used to demonstrate is still pinned by
-// savePayeeRule's tests.

@@ -10,13 +10,7 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { Debit, Payee, Rule, RuleDraft } from '../domain/model';
-import {
-  debits as fixtureDebits,
-  payees as fixturePayees,
-  rules,
-  savePayeeRule,
-  subscribeToDataChanges,
-} from '../mocks/data';
+import { debits as fixtureDebits, payees as fixturePayees, subscribeToDataChanges } from '../mocks/data';
 import {
   FeedState,
   getDebits,
@@ -26,6 +20,7 @@ import {
   subscribe as subscribeToFeed,
 } from './backendFeed';
 import { USE_BACKEND } from './config';
+import { getRules, saveRule, subscribe as subscribeToRules } from './rulesStore';
 
 // Every collection is read through useSyncExternalStore, so screens re-render
 // when one changes elsewhere — e.g. navigating back to the debit list after
@@ -60,7 +55,7 @@ export function useDebit(debitId: string): Debit | undefined {
 }
 
 export function useRules(): Rule[] {
-  return useSyncExternalStore(subscribeToDataChanges, () => rules);
+  return useSyncExternalStore(subscribeToRules, getRules);
 }
 
 export function useRuleForPayee(payeeId: string): Rule | undefined {
@@ -80,11 +75,11 @@ export function useRuleByPayeeId(): Map<string, Rule> {
 /**
  * Exposes the single write path for a rule (PayeeEditScreen's Save and Clear).
  * Classification and amount go together because one Save commits both — see
- * savePayeeRule in src/mocks/data.ts.
+ * saveRule in src/data/rulesStore.ts.
  */
 export function useSavePayeeRule(): (payeeId: string, draft: RuleDraft) => void {
   return useCallback((payeeId: string, draft: RuleDraft) => {
-    savePayeeRule(payeeId, draft);
+    saveRule(payeeId, draft);
   }, []);
 }
 

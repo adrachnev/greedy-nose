@@ -1,10 +1,8 @@
 /**
- * Regression coverage for the array-reference bug this fixture layer hit
- * once: an earlier mutation changed an object in place without producing a
- * new array, so useSyncExternalStore's getSnapshot() in src/data/hooks.ts
- * returned an unchanged reference and subscribers never re-rendered. These
- * tests assert on the *reference* changing, not just the end value, since
- * that is the exact thing that broke.
+ * The fixture set is scaffolding, but its *properties* are not: each one
+ * keeps a branch of the spec reachable by hand on the device, and every one
+ * of them has been lost once already by someone tidying the data. This suite
+ * pins them.
  *
  * The auto-flip suites that used to live here are gone with R8: nothing the
  * app does on its own moves a payee's classification any more, so there is no
@@ -13,20 +11,24 @@
  * src/domain/__tests__/classification.test.ts.
  *
  * The `addDebit` suite went the same way on 2026-08-19, with the function it
- * covered (the why is recorded at its former home in ../data.ts). Nothing is
- * lost: savePayeeRule's tests below still pin the array-reference discipline
- * that suite also happened to cover.
+ * covered (the why is recorded at its former home in ../data.ts). The
+ * `savePayeeRule` suite that used to live here — the array-reference
+ * discipline that regression pinned — moved wholesale to
+ * src/data/__tests__/rulesStore.test.ts alongside the function itself.
  */
 
-// The fixture module holds mutable module-level state (`rules`, `debits`), so
-// each test gets a fresh copy via jest.resetModules() + a fresh require().
+// jest.resetModules() + a fresh require() isn't load-bearing any more now
+// that nothing in this module mutates (payees/debits are frozen consts,
+// FIXTURE_SEED_RULES is a plain seed value) — kept anyway so this file stays
+// agnostic to that fact and isn't the place a future mutable export gets its
+// state leaked across tests by accident.
 function loadDataModule() {
   jest.resetModules();
   return require('../data') as typeof import('../data');
 }
 
-// The payee deliberately left out of the `rules` fixture: never reviewed, and
-// therefore bad (R4b). Saving a rule for them is what "reviewing" means.
+// The payee deliberately left out of `FIXTURE_SEED_RULES`: never reviewed,
+// and therefore bad (R4b). Saving a rule for them is what "reviewing" means.
 const UNREVIEWED_PAYEE_ID = 'payee-fitline';
 
 /**
@@ -40,7 +42,7 @@ describe('fixtures', () => {
     const dataModule = loadDataModule();
 
     expect(dataModule.payees.find(p => p.id === UNREVIEWED_PAYEE_ID)).toBeDefined();
-    expect(dataModule.rules.find(r => r.payeeId === UNREVIEWED_PAYEE_ID)).toBeUndefined();
+    expect(dataModule.FIXTURE_SEED_RULES.find(r => r.payeeId === UNREVIEWED_PAYEE_ID)).toBeUndefined();
     expect(dataModule.debits.some(d => d.payeeId === UNREVIEWED_PAYEE_ID)).toBe(true);
   });
 
@@ -54,11 +56,11 @@ describe('fixtures', () => {
   it('ships both kinds of bad payee — one explicitly marked, one never reviewed', () => {
     const dataModule = loadDataModule();
 
-    const explicitlyBad = dataModule.rules.filter(r => r.classification === 'bad');
+    const explicitlyBad = dataModule.FIXTURE_SEED_RULES.filter(r => r.classification === 'bad');
     expect(explicitlyBad.length).toBeGreaterThan(0);
     expect(dataModule.debits.some(d => d.payeeId === explicitlyBad[0].payeeId)).toBe(true);
 
-    const ruled = new Set(dataModule.rules.map(r => r.payeeId));
+    const ruled = new Set(dataModule.FIXTURE_SEED_RULES.map(r => r.payeeId));
     expect(dataModule.payees.some(p => !ruled.has(p.id))).toBe(true);
   });
 
@@ -71,7 +73,7 @@ describe('fixtures', () => {
   it('ships a good payee with a limit and at least one charge above it', () => {
     const dataModule = loadDataModule();
 
-    const limited = dataModule.rules.filter(
+    const limited = dataModule.FIXTURE_SEED_RULES.filter(
       r => r.classification === 'good' && r.amountEUR != null,
     );
     expect(limited.length).toBeGreaterThan(0);
@@ -125,91 +127,5 @@ describe('fixtures', () => {
     const dataModule = loadDataModule();
 
     expect(dataModule.debits.every(d => d.hasTime)).toBe(true);
-  });
-});
-
-describe('savePayeeRule', () => {
-  it('writes classification and amount together, producing a new `rules` array reference (the exact regression: in-place mutation kept the same reference)', () => {
-    const dataModule = loadDataModule();
-    const before = dataModule.rules;
-
-    dataModule.savePayeeRule('payee-netflix', { classification: 'good', amountEUR: 25 });
-
-    expect(dataModule.rules).not.toBe(before);
-    expect(dataModule.rules.find(r => r.payeeId === 'payee-netflix')).toEqual({
-      payeeId: 'payee-netflix',
-      classification: 'good',
-      amountEUR: 25,
-    });
-  });
-
-  it('creates a rule for a payee that has none — saving one is what "reviewed" means (R4b)', () => {
-    const dataModule = loadDataModule();
-    const before = dataModule.rules;
-
-    dataModule.savePayeeRule(UNREVIEWED_PAYEE_ID, { classification: 'good' });
-
-    expect(dataModule.rules).not.toBe(before);
-    expect(dataModule.rules.find(r => r.payeeId === UNREVIEWED_PAYEE_ID)).toEqual({
-      payeeId: UNREVIEWED_PAYEE_ID,
-      classification: 'good',
-    });
-  });
-
-  it('clears the amount when passed undefined — no limit means every charge is good (R4a)', () => {
-    const dataModule = loadDataModule();
-    // payee-baeckerei is good with a €30 limit in the fixtures.
-    expect(dataModule.rules.find(r => r.payeeId === 'payee-baeckerei')!.amountEUR).toBe(30);
-
-    dataModule.savePayeeRule('payee-baeckerei', { classification: 'good', amountEUR: undefined });
-
-    expect(dataModule.rules.find(r => r.payeeId === 'payee-baeckerei')!.amountEUR).toBeUndefined();
-  });
-
-  it('keeps an amount handed to it alongside a bad classification — hidden, not wiped (R8a/R14)', () => {
-    const dataModule = loadDataModule();
-
-    dataModule.savePayeeRule('payee-baeckerei', { classification: 'bad', amountEUR: 30 });
-    const stored = dataModule.rules.find(r => r.payeeId === 'payee-baeckerei')!;
-    expect(stored).toEqual({ payeeId: 'payee-baeckerei', classification: 'bad', amountEUR: 30 });
-
-    // …and it comes straight back when the payee is marked good again.
-    dataModule.savePayeeRule('payee-baeckerei', { classification: 'good', amountEUR: 30 });
-    expect(dataModule.rules.find(r => r.payeeId === 'payee-baeckerei')).toEqual({
-      payeeId: 'payee-baeckerei',
-      classification: 'good',
-      amountEUR: 30,
-    });
-  });
-
-  it('notifies subscribers exactly once per save, however many fields changed', () => {
-    const { savePayeeRule, subscribeToDataChanges } = loadDataModule();
-    const listener = jest.fn();
-    subscribeToDataChanges(listener);
-
-    savePayeeRule('payee-netflix', { classification: 'good', amountEUR: 25 });
-
-    expect(listener).toHaveBeenCalledTimes(1);
-  });
-
-  it('is a no-op (no reassignment, no notification) when the rule is unchanged', () => {
-    const dataModule = loadDataModule();
-    const listener = jest.fn();
-    dataModule.subscribeToDataChanges(listener);
-    const before = dataModule.rules;
-
-    dataModule.savePayeeRule('payee-baeckerei', { classification: 'good', amountEUR: 30 });
-
-    expect(dataModule.rules).toBe(before);
-    expect(listener).not.toHaveBeenCalled();
-  });
-
-  it('leaves every other payee’s rule untouched', () => {
-    const dataModule = loadDataModule();
-    const otherBefore = dataModule.rules.find(r => r.payeeId === 'payee-netflix')!;
-
-    dataModule.savePayeeRule('payee-baeckerei', { classification: 'bad' });
-
-    expect(dataModule.rules.find(r => r.payeeId === 'payee-netflix')).toBe(otherBefore);
   });
 });

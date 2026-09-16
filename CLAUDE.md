@@ -60,6 +60,33 @@ not** — that rework is the next piece of work.
 
 ## Status
 
+**2026-09-16 — tracer-bullet steps 6 and 7 are done at the backend, verified against the real N26
+account (91 debits, 52 payees) through the Production application; device confirmation of step 6
+is the one thing still open.** It's blocked by N26 itself, not by code: Enable Banking rate-limits
+background fetches (`ASPSP_RATE_LIMIT_EXCEEDED`, ~4/day per their own FAQ), and a burst of calls
+while wiring up USB access used up the day's quota — their guidance is to wait ~6h before
+retrying, no workaround exists. Full findings in `TRACER-BULLET.md`. For unrelated testing in the
+meantime, the backend was switched back to the **Sandbox** application (Mock ASPSP):
+`dotnet user-secrets` currently hold the sandbox `ApplicationId`/`PrivateKeyPath`, and the real N26
+consent was moved aside as `consent.local.json.n26-bak` (not deleted) under
+`backend/GreedyNose.Api/`. Switching back to Production needs both application ids restored (see
+`TRACER-BULLET.md`'s Findings) **and** the `RedirectUrl` secret set back to
+`https://localhost:5199/callback` — the two applications are registered with different redirect
+URIs in Enable Banking's console (Sandbox: plain `http://`; Production: `https://`), discovered the
+hard way this session when the wrong one produced a `WRONG_ASPSP_PROVIDED` / `REDIRECT_URI_NOT_ALLOWED`
+error depending on which secret was stale.
+
+**Same day — rules now persist (`app/src/data/rulesStore.ts`, AsyncStorage).** The single
+piece of in-memory-only state flagged in `TODO.md` since step 5 — mark a payee good, reload the JS
+context, the rule is gone — is fixed: rules hydrate from `AsyncStorage` on the first `subscribe()`
+(mirroring `backendFeed.ts`'s lazy-load pattern), seed from the fixture set on a fresh install only
+in fixture mode (empty in backend mode, which is correct per `R4b`), and persist through a write
+queue so one failed native write can't silently swallow every write after it. Two `coder-reviewer`
+passes: the first found one MUST FIX (an unhandled promise rejection in the write queue could
+permanently wedge all future writes after a single transient failure) and one SHOULD FIX (no
+regression test for it) — both fixed by `coder-mobile` and re-verified mergeable. Confirmed
+on-device: mark a payee, force-close the app, reopen — the rule survives.
+
 **The tracer bullet reached the device on 2026-08-19: every layer is wired end to end, and the
 app shows bank data fetched through our own backend. `TRACER-BULLET.md` is the live document;
 read its "Progress" section first.** Started 2026-08-17. The account behind it is still the

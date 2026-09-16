@@ -153,11 +153,14 @@ The four below are left open on purpose.
 
 ### Blocks anyone actually using the app
 
-- [ ] **Rules live in memory and die with the JS context.** Mark a payee good, reload the bundle,
-      and the rule is gone — the single piece of state in this product the user creates by hand,
-      and the only one not persisted. It was invisible while payees and rules came from the same
-      fixture file. Needs a real store (`AsyncStorage` first, the backend later); note whatever
-      lands has to key on the payee id scheme below.
+- ~~**Rules live in memory and die with the JS context.**~~ — **done 2026-09-16.** Rules now
+      persist to `AsyncStorage` (`app/src/data/rulesStore.ts`): hydrated on first `subscribe()`,
+      seeded from the fixture set only in fixture mode, written through a queue so an out-of-order
+      native write can't silently revert a save. Two review passes (one MUST FIX — an unhandled
+      promise rejection could permanently wedge future writes — fixed and pinned by a regression
+      test). Verified on-device: mark a payee, force-close, reopen — the rule survives. The
+      payee-id-scheme note below is unaffected; a rule still keys on whatever id scheme was active
+      when it was saved.
 
 ### Worth knowing, no action decided
 

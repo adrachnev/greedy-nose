@@ -373,13 +373,24 @@ error/empty/disconnected states.
 
 ### Refining these from real data
 
-R3a and R10b/R10c are written from documentation and one support answer, not from charges this
-app has actually pulled. **The details get revisited once we have real data from a live
-connection** (owner's call, 2026-08-17) — specifically: how often the creditor account is
-missing, whether normalized names collide in practice, and which banks omit or duplicate
-`entry_reference`.
+**Settled 2026-09-16 against a real N26 account** — full evidence in `TRACER-BULLET.md`, "What
+real N26 data said." Headline results:
 
-Until then, these are working answers, deliberately conservative in the direction R1 demands:
-split rather than merge for identity, duplicate rather than miss for de-duplication. Both cost
-the user a false alert at worst. Do not tune the fuzzy matching further on guesswork — collect the
-raw strings (R3a stores them for exactly this reason) and tune against those.
+- `entry_reference` exists on real data, but per-row within one account, not as a bank-wide flag:
+  28 of 91 real debits carried one, the rest fell back to R10b's composite key. That fallback is a
+  permanent path for a meaningful share of any one bank's charges, not only a stopgap for banks
+  that omit the field entirely.
+- No normalized-name collision has been seen across either the sandbox or the N26 payee set, but
+  aggregator prefixes (`PAYPAL *…`, `Zettle_*…`) still key as the aggregator rather than the real
+  merchant — an accepted gap (R3b), not a collision.
+- The creditor account is present on essentially no card payments, and on real credit rows it
+  reliably equals the account's own IBAN — confirming why R2a's filter has to run before payee
+  resolution, not after.
+
+Two things still have **zero evidence** from any account pulled so far, sandbox or production: a
+non-EUR charge, and a pending (not-yet-booked) transaction. R10c's booked-vs-pending split and the
+currency-skip path added after the Enable Banking C# sample review remain untested by real data.
+
+Until those are observed, keep the same conservative defaults R1 demands: split rather than merge
+for identity, duplicate rather than miss for de-duplication. Both cost the user a false alert at
+worst.

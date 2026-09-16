@@ -13,6 +13,16 @@
  * They also cover R7 by construction: the list re-labels immediately when a
  * rule changes, because classification is derived at read time (R6) rather
  * than stored on the debit.
+ *
+ * Rules now hydrate from AsyncStorage (src/data/rulesStore.ts) asynchronously
+ * on first subscribe, so the initial render has to be wrapped in
+ * `await act(async () => {...})` rather than the synchronous `act` this file
+ * used before persistence existed — otherwise the first assertion below would
+ * see the pre-hydration empty state rather than the seeded fixture rules.
+ * Forced to fixture mode here (rather than whatever ./config's checked-in
+ * USE_BACKEND happens to be) because rulesStore.ts seeds the fixture mix only
+ * in fixture mode — see its own seedRules() — and that mix is what this file's
+ * assertions are pinned against.
  */
 
 import React from 'react';
@@ -20,6 +30,12 @@ import ReactTestRenderer, { act } from 'react-test-renderer';
 import { Text } from 'react-native';
 import { useRuleForPayee, useSavePayeeRule } from '../hooks';
 import { classifyPayee } from '../../domain/classification';
+
+jest.mock('../config', () => ({
+  USE_BACKEND: false,
+  BACKEND_BASE_URL: 'http://backend.invalid',
+  BACKEND_TIMEOUT_MS: 1000,
+}));
 
 const PAYEE_ID = 'payee-fitline';
 
@@ -65,9 +81,9 @@ function captureSaveRule(): ReturnType<typeof useSavePayeeRule> {
 }
 
 describe('useRuleForPayee re-render on mutation', () => {
-  it('updates a sibling consumer (the "list") after savePayeeRule() is called elsewhere (the edit screen)', () => {
+  it('updates a sibling consumer (the "list") after savePayeeRule() is called elsewhere (the edit screen)', async () => {
     let renderer!: ReactTestRenderer.ReactTestRenderer;
-    act(() => {
+    await act(async () => {
       renderer = ReactTestRenderer.create(<Screens />);
     });
 
@@ -97,9 +113,9 @@ function RuleProbe() {
 }
 
 describe('useSavePayeeRule re-render on mutation', () => {
-  it('updates a sibling consumer for both fields of a single save', () => {
+  it('updates a sibling consumer for both fields of a single save', async () => {
     let renderer!: ReactTestRenderer.ReactTestRenderer;
-    act(() => {
+    await act(async () => {
       renderer = ReactTestRenderer.create(<RuleProbe />);
     });
 
