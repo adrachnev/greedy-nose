@@ -90,6 +90,13 @@ export const payees: Payee[] = [
 // Note: no fixture uses the 'Bank transfer' payment type any more (the rent
 // payment went with the old fixture set). The union member stays — it is bank
 // vocabulary, not fixture vocabulary, and the real feed will produce it.
+//
+// Every fixture debit carries `hasTime: true`, once per generator rather than
+// once per row. That is a statement, not a formality: these times are chosen
+// (a bakery at 08:20, a gym direct debit at 07:03), where the real feed's rows
+// are booking *dates* and set it to false. Keeping the fixtures on the `true`
+// side of that flag is what keeps the "3 Jul, 09:14" rendering exercised at
+// all — the live sandbox account cannot reach it.
 
 function relativeTimestamp(daysAgo: number, hours: number, minutes: number): string {
   const d = new Date();
@@ -137,6 +144,7 @@ const netflixDebits: Debit[] = monthlyRun(12, 4, 6, 12).map((timestamp, index) =
   payeeId: 'payee-netflix',
   amountEUR: 12.99,
   timestamp,
+  hasTime: true,
   paymentType: 'Subscription',
   reference: 'Netflix Standard plan',
 }));
@@ -151,6 +159,7 @@ const spotifyDebits: Debit[] = monthlyRun(12, 9, 9, 14).map((timestamp, index) =
   payeeId: 'payee-spotify',
   amountEUR: index < SPOTIFY_MONTHS_AT_NEW_PRICE ? 10.99 : 9.99,
   timestamp,
+  hasTime: true,
   paymentType: 'Subscription',
   reference:
     index === SPOTIFY_MONTHS_AT_NEW_PRICE - 1
@@ -163,6 +172,7 @@ const vodafoneDebits: Debit[] = monthlyRun(12, 2, 7, 30).map((timestamp, index) 
   payeeId: 'payee-vodafone',
   amountEUR: 39.99,
   timestamp,
+  hasTime: true,
   paymentType: 'Direct debit',
   reference: 'Mobile plan monthly fee',
 }));
@@ -214,6 +224,7 @@ const bakeryDebits: Debit[] = BAKERY_CHARGES.map(
     payeeId: 'payee-baeckerei',
     amountEUR,
     timestamp: relativeTimestamp(daysAgo, hours, minutes),
+    hasTime: true,
     paymentType: 'Card payment',
     // The bank's transliterated spelling, on purpose: it is what R23a's fold
     // has to cope with in production.
@@ -243,6 +254,7 @@ const scamyloansDebits: Debit[] = SCAMYLOANS_CHARGES.map(
     payeeId: 'payee-scamyloans',
     amountEUR,
     timestamp: relativeTimestamp(daysAgo, hours, minutes),
+    hasTime: true,
     paymentType: 'Direct debit',
     reference: `Invoice #${99213 + index} loan installment`,
   }),
@@ -256,18 +268,21 @@ const fitlineDebits: Debit[] = [
     payeeId: 'payee-fitline',
     amountEUR: 39.9,
     timestamp: relativeTimestamp(0, 7, 3),
+    hasTime: true,
     paymentType: 'Direct debit',
     reference: 'Membership monthly fee',
   },
 ];
 
-// `let`, not `const` — addDebit() below reassigns this to a new array (rather
-// than `push`) so useSyncExternalStore subscribers in hooks.ts see a changed
-// snapshot reference and re-render. Same reasoning for `rules` below.
+// `const`, where `rules` below is still `let`: nothing writes to this array
+// any more (the why is at `addDebit`'s former home, below savePayeeRule).
+// Should a fixture ever need to grow a debit again, it grows the way `rules`
+// does — reassign to a *new* array so useSyncExternalStore sees a changed
+// reference, never `push`.
 //
 // Not sorted here: groupByDateSection sorts newest-first itself, so fixture
 // order is a readability choice rather than a contract.
-export let debits: Debit[] = [
+export const debits: Debit[] = [
   ...fitlineDebits,
   ...scamyloansDebits,
   ...bakeryDebits,
@@ -352,15 +367,10 @@ export function savePayeeRule(payeeId: string, draft: RuleDraft): void {
   notifyDataChanged();
 }
 
-/**
- * Appends a debit (new array reference, not `push` — see above). Unused by
- * any screen today: there is no live feed and no "simulate an incoming
- * charge" UI. It exists so the arrival of a debit is modelled at all, and
- * because the classification it triggers is derived at read time (R6), this
- * is now the whole of it — an arriving charge changes no payee's
- * classification and never can (R8).
- */
-export function addDebit(debit: Debit): void {
-  debits = [...debits, debit];
-  notifyDataChanged();
-}
+// `addDebit` lived here until 2026-08-19 and is deliberately gone. It appended
+// to the *fixture* store, so under USE_BACKEND it would have been a silent
+// no-op named after the thing that adds a charge; `useAddDebit` was removed in
+// step 5 and this was its other half. A debit arrives through
+// src/data/backendFeed.ts's refresh() now, and nothing else writes to `debits`.
+// The array-reference discipline it used to demonstrate is still pinned by
+// savePayeeRule's tests.

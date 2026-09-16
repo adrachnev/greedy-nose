@@ -11,6 +11,11 @@
  * save-time flip, no passive Bad-only flip, and no auto-flip notice left to
  * test. What replaced them is pure and lives in
  * src/domain/__tests__/classification.test.ts.
+ *
+ * The `addDebit` suite went the same way on 2026-08-19, with the function it
+ * covered (the why is recorded at its former home in ../data.ts). Nothing is
+ * lost: savePayeeRule's tests below still pin the array-reference discipline
+ * that suite also happened to cover.
  */
 
 // The fixture module holds mutable module-level state (`rules`, `debits`), so
@@ -108,6 +113,19 @@ describe('fixtures', () => {
 
     expect(dataModule.debits.every(d => new Date(d.timestamp).getTime() <= now)).toBe(true);
   });
+
+  /**
+   * The type only demands an answer, not this one. Real bank data says
+   * `hasTime: false` on every row it has produced so far, so the fixtures are
+   * the *only* place the "3 Jul, 09:14" rendering is exercised at all — a
+   * tidy-up that flipped them to false would leave that branch dead on the
+   * device with every test still green.
+   */
+  it('gives every fixture debit a real time, since the live feed gives none', () => {
+    const dataModule = loadDataModule();
+
+    expect(dataModule.debits.every(d => d.hasTime)).toBe(true);
+  });
 });
 
 describe('savePayeeRule', () => {
@@ -193,65 +211,5 @@ describe('savePayeeRule', () => {
     dataModule.savePayeeRule('payee-baeckerei', { classification: 'bad' });
 
     expect(dataModule.rules.find(r => r.payeeId === 'payee-netflix')).toBe(otherBefore);
-  });
-});
-
-describe('addDebit', () => {
-  it('appends a debit, producing a new `debits` array reference', () => {
-    const dataModule = loadDataModule();
-    const before = dataModule.debits;
-
-    dataModule.addDebit({
-      id: 'debit-test-1',
-      payeeId: 'payee-spotify',
-      amountEUR: 9.99,
-      timestamp: new Date().toISOString(),
-      paymentType: 'Subscription',
-      reference: 'test',
-    });
-
-    expect(dataModule.debits).not.toBe(before);
-    expect(dataModule.debits.find(d => d.id === 'debit-test-1')).toBeDefined();
-  });
-
-  it('notifies subscribers', () => {
-    const dataModule = loadDataModule();
-    const listener = jest.fn();
-    dataModule.subscribeToDataChanges(listener);
-
-    dataModule.addDebit({
-      id: 'debit-test-2',
-      payeeId: 'payee-spotify',
-      amountEUR: 9.99,
-      timestamp: new Date().toISOString(),
-      paymentType: 'Subscription',
-      reference: 'test',
-    });
-
-    expect(listener).toHaveBeenCalled();
-  });
-
-  /**
-   * The key R8 guard: an arriving charge used to be able to flip a payee to
-   * Bad on its own. It cannot any more, in either direction — however large
-   * the charge, and whatever rule the payee carries.
-   */
-  it('never changes any payee’s classification, however large the charge', () => {
-    const dataModule = loadDataModule();
-    const rulesBefore = dataModule.rules;
-
-    dataModule.addDebit({
-      id: 'debit-netflix-huge',
-      payeeId: 'payee-netflix',
-      amountEUR: 99_999,
-      timestamp: new Date().toISOString(),
-      paymentType: 'Bank transfer',
-      reference: 'Wildly over anything',
-    });
-
-    expect(dataModule.rules).toBe(rulesBefore);
-    expect(dataModule.rules.find(r => r.payeeId === 'payee-netflix')!.classification).toBe(
-      'good',
-    );
   });
 });

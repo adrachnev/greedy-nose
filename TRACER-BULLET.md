@@ -34,12 +34,96 @@ One account, hardcoded. Everything the bullet does not need is deliberately abse
 | 2 Consent round trip | **done, verified 2026-08-18** — the Mock ASPSP consent completed in a browser and `/callback` showed the account UID |
 | 3 Raw transactions | **done, verified 2026-08-18** — 100 transactions, 2026-05-13 … 2026-08-18, in `raw/transactions-20260818-122928.json`. See Findings |
 | 4 Map to the domain | **done, verified 2026-08-18** — `GET /debits` returns 92 debits and 45 payees from the 100-row dump: 92 unique ids, no orphan payees, no zero or negative amounts, the 8 credits gone. Reviewed against Enable Banking's own C# sample the same day |
-| 5 Point the app at the backend | **next** — `app/src/data/hooks.ts`, plus `adb reverse tcp:5199 tcp:5199` |
+| 5 Point the app at the backend | **done, verified on the device 2026-08-19** — the Debits tab lists the real sandbox charges. See "Step 5 as built" |
 | 6–7 | not started; 6 waits on Restricted Production |
+
+### Step 5 as built — 2026-08-19
+
+The seam held: no screen learned where its data comes from. What changed, all under `app/`:
+
+- **`src/data/config.ts`** — `USE_BACKEND` (currently `true`), the base URL and a request
+  timeout. Flipping back to fixtures is one line in one file, which is what "keep the fixtures
+  reachable behind a flag" meant.
+- **`src/data/backendFeed.ts`** — `GET /debits` into a module store shaped exactly like the
+  fixture store, so `hooks.ts` can bind either. Same new-array-reference discipline, and the
+  empty case is a shared constant because a fresh `[]` from `getSnapshot` is an infinite render
+  loop rather than a cosmetic problem. It **validates what it reads**: a row with an unusable
+  amount, timestamp or id is dropped and counted, and an **unknown `paymentType` is kept**, not
+  dropped — hiding real money because the bank used a word we lack is the one trade this product
+  cannot make. An orphan debit (one whose payee the payload never sent) was dropped here at
+  first; the review round below replaced that with a placeholder payee, because a drop is the
+  charge-you-never-see failure `R1` exists to prevent.
+- **`src/data/hooks.ts`** — the source is bound **once at module level**, not branched inside
+  each hook: `USE_BACKEND` cannot change while the process lives, and binding per call would
+  subscribe to both stores and start a backend fetch even in fixture mode. `useAddDebit` was
+  removed — it wrote to the fixture store, so under the live feed it would have been a silent
+  no-op wearing the name of the thing that adds a charge.
+- **`src/components/DataSourceBadge.tsx`** replaces `MockDataBadge.tsx`. Once the feed is real
+  an empty list is ambiguous — backend down, `adb reverse` missing, consent expired, or an
+  account with genuinely no debits all paint the same blank screen — and the device is the most
+  expensive place to guess. The bar says which, and tapping it retries.
+- **`src/screens/DebitDetailScreen.tsx`** — the IBAN and Reference rows render only when the
+  bank actually sent the field. This was `TODO.md`'s open question for step 5, and real data
+  answered it: a labelled row with nothing after it reads as data the app lost.
+
+**Rules stay local under both flags** — the backend sends no classification (`R6`), so there is
+nothing on the wire to switch. Two consequences worth knowing before the next session:
+
+- The two sources use **different payee id schemes** (`payee-netflix` vs. `name:LIDL CONNECT`),
+  so fixture rules simply match nothing against live data. Every real payee therefore reads as
+  unreviewed, therefore bad — which is `R4b` behaving correctly, not a bug.
+- Rules are still **in memory only**. Mark a payee good, reload the bundle, and it is gone.
+  Acceptable for the bullet, wrong the moment anyone uses the app; see `TODO.md`.
+
+`npx tsc --noEmit` clean, `npx eslint .` back to its 3 pre-existing warnings, **117 tests pass**
+(99 before, 18 new ones on the feed).
+
+**Process note:** this code was written by the main session rather than by `coder-mobile`, so
+the `SubagentStop` review hook never fired and step 5 initially shipped unreviewed. That is what
+prompted the "How we work" section now at the top of `CLAUDE.md`. The review was run afterwards.
+
+### The review round, and the repo's first tests — 2026-08-19/20
+
+Step 5's belated review returned no MUST FIX and twelve findings. Fixing the ones that mattered
+turned into the first work run properly through plan → `coder-backend`/`coder-mobile` → review,
+and it produced more than the fixes.
+
+**`backend/GreedyNose.Api.Tests` exists — the repo's first test project** (xunit, 41 tests, run
+from the root via `GreedyNose.slnx`; note SDK 10's `dotnet new sln` emits `.slnx`, not `.sln`).
+It replays `TransactionMapper` against
+`TestData/mock-aspsp-transactions.json`, a **curated fixture with invented merchants and IBANs**
+that reproduces every shape the first real dump showed: null `entry_reference` throughout, one
+creditor IBAN in twenty, aggregator prefixes, branch numbers, the `ue` transliteration, nameless
+`ICDT` rows, a `CRDT` row, a pending row, a non-EUR row. The real dumps stay gitignored — the
+decision was to keep the evidence and drop the account history, so the tests run on a machine
+that has never held real data. Deliberately-wrong behaviour (the aggregator prefixes, the
+stranded hyphen) is pinned *with the requirement that will change it cited*, so step 7 changing
+it is a decision rather than an accident.
+
+**The test found a real bug before it shipped, in the plan rather than the code.** The plan said
+`DateOnly.TryParse` succeeding is the signal for "this string carried no time". It is not —
+measured on .NET 10, `DateOnly.TryParse("2026-08-18T14:32:05")` returns **true and discards the
+time**, while the `Z` and `+02:00` forms return false. A bank sending a local ISO timestamp, the
+one common shape with no offset, would have had real charge times thrown away under a flag
+claiming there were none. `ToTimestamp` now decides from the string (`T` or `:`) and only then
+picks a parser, and the evidence is recorded at the method.
+
+**Two findings were the same failure in different places.** `ResolveDebitId` embedded the bank's
+*raw* date string, so once the mapper started accepting timestamped dates, a bank reformatting
+the same instant would re-key every debit and re-alert the entire history — the `R20` storm,
+caused by the fix that widened the parse. It now keys on the normalised day. On the app side,
+three layers each had their own quiet way of dropping a charge whose payee was missing (the feed
+dropped the row, the list's `renderItem` returned null, the detail screen said "Debit not
+found"); all three now resolve to one placeholder in the new `app/src/domain/payees.ts`.
+
+**Also worth keeping:** the `CRDT` filter protects more than tidiness — real credit rows carry
+`creditor: null` and `creditor_account` = *the account holder's own IBAN*, so without `R2a`'s
+filter `R3a` tier 1 would key a payee on the user's own account and file their salary under it.
+A test now asserts no payee carries the account's own IBAN.
 
 ### Picking this up next session
 
-**Steps 0–4 are done. The next action is step 5.**
+**Steps 0–5 are done. The next action is step 6, which waits on Restricted Production.**
 
 1. Start the backend:
    `dotnet run --project backend/GreedyNose.Api/GreedyNose.Api.csproj --launch-profile http`
@@ -51,14 +135,24 @@ One account, hardcoded. Everything the bullet does not need is deliberately abse
    needs no credentials.
 3. `GET /debits` is step 4's output — `Payee`/`Debit` exactly as `app/src/domain/model.ts`
    declares them. 92 debits and 45 payees from the current sandbox data.
-4. **Step 5**: point `app/src/data/hooks.ts` at it and run the app on the device.
-   `adb reverse tcp:5199 tcp:5199` is what lets the phone reach the laptop. Keep the fixtures
-   reachable behind a flag until the real feed is trusted.
+4. Get the app onto the device — the part with the most moving pieces, so in order:
+   `adb reverse tcp:5199 tcp:5199` (backend) **and** `adb reverse tcp:8081 tcp:8081` (Metro),
+   `npx react-native start`, then `.\gradlew.bat app:installDebug` from `app/android` in
+   PowerShell with `JAVA_HOME` on JDK 17. The badge at the top of every screen says whether the
+   feed is live, loading or unreachable — check it before debugging anything else.
 
-Two things step 5 will meet immediately, both in `TODO.md`: 91 of 92 debits now have an **empty
-`reference`** (correct — the field used to echo the payee name), and `DebitDetailScreen` was built
-against fixtures where every debit had one. And `/debits` returns a single page, so the device
-sees roughly three months of history, not a year.
+**Wireless adb needs a network that allows device-to-device traffic.** Public WiFi (the airport
+network this was hit on) runs AP client isolation: the phone and laptop cannot see each other,
+`adb pair` fails with a bare `protocol fault`, and `adb mdns services` finds nothing — none of
+which names the real cause. The fix is the **phone's own hotspot**, with the laptop joining it.
+Two details that cost time: the IP in the phone's pairing dialog is its address *on the current
+network*, so it changes with the network, and running `adb connect <ip>` on top of the mDNS
+auto-connect produces **two transports for one device**, after which every `adb` command fails
+with "more than one device". Note `adb reverse` tunnels through adb itself, so a USB cable works
+just as well and needs no network at all.
+
+`/debits` still returns a single page, so the device sees roughly three months of history, not a
+year — see `TODO.md`.
 
 The Mock ASPSP's accounts and transactions are whatever you put in the **mock ASPSP tab** of the
 control panel — hand-entered, or a real account export imported as JSON. The 2026-08-18 dump is an

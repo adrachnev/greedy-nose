@@ -1,28 +1,48 @@
 // Thin data-access seam. Screens consume payees/debits/rules only through
-// these hooks — never by importing app/src/mocks/data.ts directly. Today they
-// just return the mock fixtures; swapping in real API calls (via React Query,
-// context, whatever) later only touches this file.
+// these hooks — never by importing app/src/mocks/data.ts or backendFeed.ts
+// directly. Which source is behind them is decided once, here, from
+// USE_BACKEND in ./config.
+//
+// Payees and debits come from whichever source that flag names. **Rules do
+// not**: the backend deliberately sends no classification (R6 — the client
+// derives it from the current rule), so there is nothing on the wire to
+// switch, and rules stay in the local store under both flags.
 
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { Debit, Payee, Rule, RuleDraft } from '../domain/model';
 import {
-  addDebit,
-  debits,
-  payees,
+  debits as fixtureDebits,
+  payees as fixturePayees,
   rules,
   savePayeeRule,
   subscribeToDataChanges,
 } from '../mocks/data';
+import {
+  FeedState,
+  getDebits,
+  getPayees,
+  getState,
+  refresh,
+  subscribe as subscribeToFeed,
+} from './backendFeed';
+import { USE_BACKEND } from './config';
 
 // Every collection is read through useSyncExternalStore, so screens re-render
 // when one changes elsewhere — e.g. navigating back to the debit list after
 // editing a rule, which must re-label that payee's debits immediately (R7).
-// Payees happen to be immutable in this fixture layer; they are subscribed the
-// same way anyway, so nothing has to be revisited when the bank feed starts
-// creating them and no screen has to know which collection is which.
+//
+// The source is bound at module level rather than branched inside each hook.
+// USE_BACKEND cannot change while the process lives, so this is not a
+// conditional hook — and binding it per call would mean subscribing to *both*
+// stores, which would start a backend fetch even in fixture mode.
+
+const subscribeToPayees = USE_BACKEND ? subscribeToFeed : subscribeToDataChanges;
+const payeesSnapshot = USE_BACKEND ? getPayees : () => fixturePayees;
+const subscribeToDebits = USE_BACKEND ? subscribeToFeed : subscribeToDataChanges;
+const debitsSnapshot = USE_BACKEND ? getDebits : () => fixtureDebits;
 
 export function usePayees(): Payee[] {
-  return useSyncExternalStore(subscribeToDataChanges, () => payees);
+  return useSyncExternalStore(subscribeToPayees, payeesSnapshot);
 }
 
 export function usePayee(payeeId: string): Payee | undefined {
@@ -31,7 +51,7 @@ export function usePayee(payeeId: string): Payee | undefined {
 }
 
 export function useDebits(): Debit[] {
-  return useSyncExternalStore(subscribeToDataChanges, () => debits);
+  return useSyncExternalStore(subscribeToDebits, debitsSnapshot);
 }
 
 export function useDebit(debitId: string): Debit | undefined {
@@ -68,9 +88,41 @@ export function useSavePayeeRule(): (payeeId: string, draft: RuleDraft) => void 
   }, []);
 }
 
-/** Exposes appending a debit — see addDebit's note on why nothing calls it yet. */
-export function useAddDebit(): (debit: Debit) => void {
-  return useCallback((debit: Debit) => {
-    addDebit(debit);
-  }, []);
+// --- Where the data came from -----------------------------------------------
+
+export type DataSource = {
+  /** `true` when payees/debits are the backend's, `false` when they are fixtures. */
+  live: boolean;
+  /** Meaningful only while `live`; the fixture source never loads or fails. */
+  feed: FeedState;
+  /** Re-reads the feed. A no-op against fixtures, so callers need no branch. */
+  refresh: () => void;
+};
+
+// Nothing loads, nothing fails and nothing is refused on the way in, so both
+// counters are 0 by construction rather than by luck.
+const FIXTURE_FEED: FeedState = { status: 'ready', dropped: 0, skipped: 0 };
+const noopRefresh = () => {};
+// Not awaited: refresh() reports failure through the feed's own state, which is
+// what `feed` above carries to the badge.
+const feedRefresh = () => {
+  refresh();
+};
+
+/**
+ * What the on-device badge reports. It exists because a tracer bullet has to be
+ * *seen* working: an empty list means "the backend is unreachable", "the
+ * consent expired" and "this account genuinely has no debits" all at once, and
+ * the device is the one place where guessing between them is expensive.
+ */
+export function useDataSource(): DataSource {
+  const feed = useSyncExternalStore(
+    USE_BACKEND ? subscribeToFeed : subscribeToDataChanges,
+    USE_BACKEND ? getState : () => FIXTURE_FEED,
+  );
+  return {
+    live: USE_BACKEND,
+    feed,
+    refresh: USE_BACKEND ? feedRefresh : noopRefresh,
+  };
 }

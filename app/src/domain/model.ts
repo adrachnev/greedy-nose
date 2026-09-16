@@ -32,6 +32,21 @@ export type Debit = {
   amountEUR: number;
   /** ISO 8601. Date-section grouping (Today/Yesterday/…) is derived from this. */
   timestamp: string;
+  /**
+   * Whether `timestamp` carries a real clock time or only a date.
+   *
+   * Banks are not obliged to say *when* a charge happened, and the first real
+   * dump said it on **none** of its 100 rows: every one was a booking date
+   * with no time, and `transaction_date` was null throughout. The backend
+   * still sends a full ISO timestamp (midnight UTC) so the date grouping has
+   * something to sort on — this flag is what stops the UI reading that
+   * midnight back as "02:00" and inventing a precision the bank never gave.
+   *
+   * `false` is the safe default: a missing field hides the time rather than
+   * making one up. Fixtures set it to `true` because they carry deliberate,
+   * meaningful times.
+   */
+  hasTime: boolean;
   paymentType: PaymentType;
   reference: string;
 };

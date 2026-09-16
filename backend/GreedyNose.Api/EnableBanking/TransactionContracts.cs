@@ -61,17 +61,31 @@ public sealed record DebitDto(
     [property: JsonPropertyName("payeeId")] string PayeeId,
     [property: JsonPropertyName("amountEUR")] decimal AmountEUR,
     [property: JsonPropertyName("timestamp")] string Timestamp,
+    // Whether the bank booked to a moment or only to a day. False on all 100 rows of the first
+    // dump — booking_date is a plain date and transaction_date was null throughout — so the
+    // timestamp's 00:00:00Z is padding, not information, and the client must not print it as a
+    // time. Named positively so an absent field reads as "no time", which is the safe direction:
+    // hiding a time we never had beats inventing midnight.
+    [property: JsonPropertyName("hasTime")] bool HasTime,
     [property: JsonPropertyName("paymentType")] string PaymentType,
     [property: JsonPropertyName("reference")] string Reference);
 
 public sealed record DebitsDto(
     [property: JsonPropertyName("payees")] IReadOnlyList<PayeeDto> Payees,
-    [property: JsonPropertyName("debits")] IReadOnlyList<DebitDto> Debits);
+    [property: JsonPropertyName("debits")] IReadOnlyList<DebitDto> Debits,
+    // How many charges the mapper refused to represent — a count, never the detail. An empty list
+    // has two very different causes ("you have no charges" and "we could not read your charges"),
+    // and R19's whole point is that the app must never present the second as the first. The
+    // detail strings name merchants and amounts and stay server-side; see MappedDebits.Skipped.
+    [property: JsonPropertyName("skipped")] int Skipped);
 
 /// <summary>
 /// What the mapper produced, plus the charges it refused to produce. <c>Skipped</c> exists because
 /// silently dropping a charge is the one failure mode this product cannot have: the caller logs
 /// every entry, and step 7 counts them against real data before deciding what the real fix is.
-/// It stays out of <see cref="DebitsDto"/> — the app is not the audience for it.
+///
+/// The <em>strings</em> stay out of <see cref="DebitsDto"/> — they name merchants and amounts, and
+/// the app is not their audience. Only their count travels, as <see cref="DebitsDto.Skipped"/>,
+/// because "we dropped some of your charges" is something the user has to be able to find out.
 /// </summary>
 public sealed record MappedDebits(DebitsDto Payload, IReadOnlyList<string> Skipped);

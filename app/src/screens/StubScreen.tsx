@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import MockDataBadge from '../components/MockDataBadge';
+import DataSourceBadge from '../components/DataSourceBadge';
 import { dark, light } from '../theme/colors';
 
 /**
@@ -14,14 +14,14 @@ export default function StubScreen({
   mockFile,
   onContinue,
   continueLabel = 'Continue',
-  showMockBadge = false,
+  showDataSourceBadge = false,
 }: {
   title: string;
   mockFile: string;
   onContinue?: () => void;
   continueLabel?: string;
   /** Set for stub screens reachable inside the main tabs (Rules/Settings). */
-  showMockBadge?: boolean;
+  showDataSourceBadge?: boolean;
 }) {
   const theme = useColorScheme() === 'dark' ? dark : light;
   const insets = useSafeAreaInsets();
@@ -33,7 +33,7 @@ export default function StubScreen({
         { backgroundColor: theme.bg, paddingTop: insets.top },
       ]}
     >
-      {showMockBadge && <MockDataBadge />}
+      {showDataSourceBadge && <DataSourceBadge />}
       <View style={styles.content}>
         <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
         <Text style={[styles.hint, { color: theme.textMuted }]}>

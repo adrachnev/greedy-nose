@@ -1,13 +1,14 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import MockDataBadge from '../components/MockDataBadge';
+import DataSourceBadge from '../components/DataSourceBadge';
 import { useDebit, usePayee, useRuleForPayee } from '../data/hooks';
 import { classifyDebit, classifyPayee, describeBadReason } from '../domain/classification';
+import { unknownPayee } from '../domain/payees';
 import { DebitsStackParamList } from '../navigation/types';
 import { dark, light } from '../theme/colors';
-import { formatCurrencyEUR, formatLongDate, formatTime } from '../utils/format';
+import { formatCurrencyEUR, formatLongDate, formatTime, joinMeta } from '../utils/format';
 
 type Props = NativeStackScreenProps<DebitsStackParamList, 'DebitDetail'>;
 
@@ -15,13 +16,26 @@ export default function DebitDetailScreen({ route, navigation }: Props) {
   const theme = useColorScheme() === 'dark' ? dark : light;
   const insets = useSafeAreaInsets();
   const debit = useDebit(route.params.debitId);
-  const payee = usePayee(debit?.payeeId ?? '');
+  const knownPayee = usePayee(debit?.payeeId ?? '');
   const rule = useRuleForPayee(debit?.payeeId ?? '');
 
-  if (!debit || !payee) {
+  // Memoized rather than rebuilt each render, so this screen keeps the same
+  // "same object every time" guarantee createPayeeLookup gives the list. It
+  // has to sit above the early return, because hooks do.
+  const payee = useMemo(
+    () => knownPayee ?? unknownPayee(debit?.payeeId ?? ''),
+    [knownPayee, debit?.payeeId],
+  );
+
+  // Only a *missing debit* is 'not found'. A debit whose payee the app has no
+  // record of used to land here too, so tapping such a row said the charge did
+  // not exist — the same silent drop the list screen and the feed both used to
+  // do, and the one thing R1 forbids. The placeholder keeps the money on
+  // screen; see src/domain/payees.ts.
+  if (!debit) {
     return (
       <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
-        <MockDataBadge />
+        <DataSourceBadge />
         <Text style={[styles.hint, styles.notFoundText, { color: theme.textMuted }]}>
           Debit not found.
         </Text>
@@ -41,6 +55,9 @@ export default function DebitDetailScreen({ route, navigation }: Props) {
   const debitColor = debitIsBad ? theme.bad : theme.good;
   const debitBg = debitIsBad ? theme.badBg : theme.goodBg;
 
+  const hasIban = payee.iban.trim().length > 0;
+  const hasReference = debit.reference.trim().length > 0;
+
   const payeeSubtitle =
     payeeIsGood && rule?.amountEUR != null
       ? `${payee.name} · limit ${formatCurrencyEUR(rule.amountEUR)}`
@@ -48,7 +65,7 @@ export default function DebitDetailScreen({ route, navigation }: Props) {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
-      <MockDataBadge />
+      <DataSourceBadge />
       <View style={styles.navBar}>
         <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
           <Text style={[styles.navLink, { color: theme.accent }]}>‹ Back</Text>
@@ -66,9 +83,20 @@ export default function DebitDetailScreen({ route, navigation }: Props) {
           <Text style={[styles.amount, { color: theme.text }]}>
             {formatCurrencyEUR(debit.amountEUR)}
           </Text>
+          {/*
+            The time is shown only when the bank actually gave one
+            (Debit.hasTime). It gave none on all 100 rows of the first real
+            dump, and the backend's midnight-UTC placeholder rendered as a
+            confident "02:00" on every charge — precision nobody had. joinMeta
+            drops the separator with the part, so the line reads
+            "Card payment · Aug 18, 2026" rather than trailing a middot.
+          */}
           <Text style={[styles.hint, { color: theme.textMuted }]}>
-            {debit.paymentType} · {formatLongDate(debit.timestamp)} ·{' '}
-            {formatTime(debit.timestamp)}
+            {joinMeta(
+              debit.paymentType,
+              formatLongDate(debit.timestamp),
+              debit.hasTime && formatTime(debit.timestamp),
+            )}
           </Text>
         </View>
 
@@ -88,17 +116,33 @@ export default function DebitDetailScreen({ route, navigation }: Props) {
           )}
         </View>
 
-        <View style={[styles.card, { backgroundColor: theme.surface }]}>
-          <View style={styles.infoRow}>
-            <Text style={[styles.infoLabel, { color: theme.textMuted }]}>Payee IBAN</Text>
-            <Text style={[styles.infoValue, { color: theme.text }]}>{payee.iban}</Text>
+        {/*
+          Both of these are usually absent, which the fixtures hid: in the first
+          real dump the creditor IBAN was present on 1 of 92 debits and a
+          remittance text on 4 of 100. A labelled row with nothing after it
+          reads as data the app lost, so each row appears only when the bank
+          actually sent the field — and when neither did, the card goes too
+          rather than sitting empty.
+        */}
+        {(hasIban || hasReference) && (
+          <View style={[styles.card, { backgroundColor: theme.surface }]}>
+            {hasIban && (
+              <View style={styles.infoRow}>
+                <Text style={[styles.infoLabel, { color: theme.textMuted }]}>Payee IBAN</Text>
+                <Text style={[styles.infoValue, { color: theme.text }]}>{payee.iban}</Text>
+              </View>
+            )}
+            {hasIban && hasReference && (
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+            )}
+            {hasReference && (
+              <View style={styles.infoRow}>
+                <Text style={[styles.infoLabel, { color: theme.textMuted }]}>Reference</Text>
+                <Text style={[styles.infoValue, { color: theme.text }]}>{debit.reference}</Text>
+              </View>
+            )}
           </View>
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          <View style={styles.infoRow}>
-            <Text style={[styles.infoLabel, { color: theme.textMuted }]}>Reference</Text>
-            <Text style={[styles.infoValue, { color: theme.text }]}>{debit.reference}</Text>
-          </View>
-        </View>
+        )}
 
         {/*
           Display-only: this screen shows the debit and the payee's current

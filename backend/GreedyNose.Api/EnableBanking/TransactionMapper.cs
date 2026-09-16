@@ -65,8 +65,8 @@ public static class TransactionMapper
             // becoming €0.00 can never exceed a limit — a missed alert, which R1 does not tolerate
             // — and an unreadable date renders as an "Invalid Date" section header on the device.
             var amount = ReadAmount(transaction.TransactionAmount);
-            var timestamp = ToTimestamp(date);
-            if (amount is null || timestamp is null)
+            var booked = ToTimestamp(date);
+            if (amount is null || booked is null)
             {
                 skipped.Add($"{date} {name}: unreadable amount '{transaction.TransactionAmount?.Amount}' or date");
                 continue;
@@ -81,15 +81,19 @@ public static class TransactionMapper
             }
 
             debits.Add(new DebitDto(
-                Id: ResolveDebitId(transaction, accountKey, payeeKey, amount.Value, date, occurrences),
+                Id: ResolveDebitId(transaction, accountKey, payeeKey, amount.Value, booked.Value.Day, occurrences),
                 PayeeId: payeeKey,
                 AmountEUR: amount.Value,
-                Timestamp: timestamp,
+                Timestamp: booked.Value.Timestamp,
+                HasTime: booked.Value.HasTime,
                 PaymentType: ResolvePaymentType(transaction.BankTransactionCode),
                 Reference: ResolveReference(transaction)));
         }
 
-        return new MappedDebits(new DebitsDto([.. payees.Values], debits), skipped);
+        // The count is filled here rather than at the endpoint so the payload is complete for
+        // every caller — a DTO that is only correct after the caller patches it is a trap for the
+        // second caller, and the tests are already the second caller.
+        return new MappedDebits(new DebitsDto([.. payees.Values], debits, skipped.Count), skipped);
     }
 
     // --- R3a: payee identity ----------------------------------------------------------------
@@ -242,12 +246,21 @@ public static class TransactionMapper
     /// which may simply have dropped entry_reference in the import. Step 6 against the real bank
     /// decides whether the fallback is ever reached in production, and step 7 records the answer.
     /// </summary>
+    /// <param name="day">
+    /// <see cref="BookedAt.Day"/> — the <em>normalised</em> UTC day, never the raw string the bank
+    /// sent. The two used to be the same thing, because every date in the first dump was a bare
+    /// <c>yyyy-MM-dd</c>. They stopped being the same the moment <see cref="ToTimestamp"/> learned
+    /// to accept a booking that carries a time: a bank that starts writing the same instant as
+    /// <c>2026-08-18T00:00:00Z</c> would re-key every debit it ever sent, and R10b reads a changed
+    /// id as a charge never seen before — the re-alert storm R20 exists to prevent, fired by a
+    /// reformatting. Normalising first costs nothing and closes it.
+    /// </param>
     private static string ResolveDebitId(
         EbTransaction transaction,
         string accountKey,
         string payeeKey,
         decimal amount,
-        string? date,
+        string day,
         Dictionary<string, int> occurrences)
     {
         if (!string.IsNullOrWhiteSpace(transaction.EntryReference))
@@ -257,7 +270,7 @@ public static class TransactionMapper
 
         var composite = string.Create(
             CultureInfo.InvariantCulture,
-            $"{accountKey}:{date}:{amount:0.00}:{payeeKey}");
+            $"{accountKey}:{day}:{amount:0.00}:{payeeKey}");
 
         occurrences.TryGetValue(composite, out var seen);
         occurrences[composite] = seen + 1;
@@ -279,15 +292,114 @@ public static class TransactionMapper
             : null;
 
     /// <summary>
+    /// A booking normalised to UTC: the instant the app renders, whether the bank actually named a
+    /// time, and the calendar day the fallback debit id keys on.
+    ///
+    /// All three are derived from one parsed value, so no caller can pair a timestamp with a day
+    /// taken from a differently-formatted string — which is exactly how the same charge would
+    /// acquire two identities.
+    /// </summary>
+    private readonly record struct BookedAt(string Timestamp, bool HasTime, string Day)
+    {
+        public static BookedAt On(DateTime utc, bool hasTime) => new(
+            utc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
+            hasTime,
+            utc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// The booking instant, plus whether the bank actually named one.
+    ///
     /// Banks book to a date, not a moment: booking_date is a plain <c>yyyy-MM-dd</c> and
     /// transaction_date was null on every row of the first dump. Midnight UTC is therefore the
-    /// honest reading, and it keeps the app's Today/Yesterday grouping on the right day for any
-    /// European offset. Times of day are not recoverable from this feed.
+    /// honest reading of a date-only booking, and it keeps the app's Today/Yesterday grouping on
+    /// the right day for any European offset — but that <c>00:00:00Z</c> is padding, not a time,
+    /// and <c>HasTime</c> is what stops the client printing it as one.
+    ///
+    /// The date-only path is unchanged from before the flag existed. The second path is new: a
+    /// string carrying a time used to be counted as unreadable and dropped entirely. Dropping real
+    /// money because a bank was more precise than the first one we met is the failure R1 exists to
+    /// prevent, and R22 says nothing may assume a bank. A time with no offset is read as UTC rather
+    /// than as the server's local time, so the result does not depend on where this runs.
+    ///
+    /// <b>Whether the string named a time is decided by the string, not by the parser</b>, and that
+    /// is not pedantry — <c>DateOnly.TryParse</c> is not the signal it looks like. Measured on
+    /// .NET 10 (2026-08-19):
+    /// <code>
+    /// "2026-08-18"                 → true   (date only)
+    /// "2026-08-18T14:32:05"        → true   ← accepts it and silently discards the time
+    /// "2026-08-18T14:32:05Z"       → false
+    /// "2026-08-18T14:32:05+02:00"  → false
+    /// "2026-08-18 14:32:05"        → false
+    /// </code>
+    /// So a bank sending a local ISO timestamp — the one shape with no offset — would have had its
+    /// times thrown away under a flag claiming there were none.
+    ///
+    /// Null means the string is neither a date nor a moment, and the caller drops the charge rather
+    /// than shipping an "Invalid Date" section header to the device.
     /// </summary>
-    private static string? ToTimestamp(string? date) =>
-        DateOnly.TryParse(date, CultureInfo.InvariantCulture, out var parsed)
-            ? parsed.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)
-            : null;
+    private static BookedAt? ToTimestamp(string? date)
+    {
+        if (string.IsNullOrWhiteSpace(date))
+        {
+            return null;
+        }
+
+        var carriesTime = CarriesTime(date);
+
+        if (!carriesTime && DateOnly.TryParse(date, CultureInfo.InvariantCulture, out var day))
+        {
+            return BookedAt.On(day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc), hasTime: false);
+        }
+
+        // DateTime rather than DateTimeOffset: it handles an offset just as well, and it is the
+        // only one of the two that accepts NoCurrentDateDefault — DateTimeOffset.TryParse throws
+        // on that style outright.
+        if (!DateTime.TryParse(
+                date,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.NoCurrentDateDefault | DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+                out var moment))
+        {
+            return null;
+        }
+
+        // A string that named a time but no day — "14:32:05" — would otherwise be dated *today*,
+        // which makes a charge's identity depend on when the mapper happened to run and re-keys it
+        // at every midnight. NoCurrentDateDefault turns that into 0001-01-01 so it can be caught
+        // and refused instead: an undated charge is one the caller skips, logs and counts.
+        if (moment.Date == default)
+        {
+            return null;
+        }
+
+        // A bank that says "00:00:00Z" has named midnight, and that is a time. Only the absence of
+        // any time in the source produces false.
+        return BookedAt.On(moment, carriesTime);
+    }
+
+    /// <summary>
+    /// Whether the string names a clock time, asked of the string itself.
+    ///
+    /// A colon settles it. The ISO <c>T</c> separator only counts when it sits between two digits
+    /// (<c>2026-08-18T14</c>): a bare <c>Contains('T')</c> also fires on an uppercase text month —
+    /// <c>18 OCTOBER 2026</c> — and would report a padded <c>00:00</c> for a date the bank wrote
+    /// out in words.
+    /// </summary>
+    private static bool CarriesTime(string date)
+    {
+        if (date.Contains(':', StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var separator = date.IndexOf('T', StringComparison.Ordinal);
+
+        return separator > 0
+               && separator < date.Length - 1
+               && char.IsAsciiDigit(date[separator - 1])
+               && char.IsAsciiDigit(date[separator + 1]);
+    }
 
     /// <summary>
     /// ISO 20022 family codes → the app's four payment types. Observed in the first dump: CCRD

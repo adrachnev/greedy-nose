@@ -44,9 +44,11 @@ Two review passes over the R0/R4/R5/R8 rework. The first found a critical invert
       costs a small state machine, and the rows themselves no longer re-render (memoized row +
       hoisted `renderItem`). Revisit with the paged history from the backend, where the sort is
       the part that will hurt.
-- [ ] `useAddDebit` has no caller and `addDebit` is only reached from tests
-      (`app/src/data/hooks.ts:72`). Intentional for now — it models the arrival of a charge, which
-      the real feed will need — but delete it if the backend lands with a different shape.
+- ~~`useAddDebit` has no caller~~ — **done 2026-08-19.** Removed in step 5. The shape the backend
+      landed with was identical, but the hook wrote to the *fixture* store, so under the live feed
+      it would have been a silent no-op named after the thing that adds a charge. `addDebit`
+      itself stays in `src/mocks/data.ts`, where its tests are; `backendFeed.refresh()` is how a
+      charge arrives now.
 
 ## From the R23/R24 review — 2026-08-17
 
@@ -138,13 +140,42 @@ The four below are left open on purpose.
       the bank re-keys the payee *and* every debit under it at once, which R10b reads as an
       entirely new history. Only reachable while `entry_reference` is missing — step 6 decides
       whether that is ever the case in production.
-- [ ] **91 of 92 debits now have an empty `reference`.** That is correct — the field was echoing
-      the payee name, and `remittance_information` genuinely is populated on ~4% of rows — but
-      `DebitDetailScreen` was built against fixtures where every debit had one. Check it renders
-      nothing rather than an empty labelled row when step 5 lands.
+- ~~**91 of 92 debits now have an empty `reference`**~~ — **done 2026-08-19.** Checked when step 5
+      landed, and it did render an empty labelled row. Both the Reference *and* the Payee IBAN row
+      on `DebitDetailScreen` now appear only when the bank sent the field, and the card they sit
+      in disappears when neither did. The IBAN half was the worse of the two and was not in the
+      original item: it is empty on 44 of 45 payees.
 - [ ] **The granted-expiry path is coded but unverified.** `ConsentStore.ExpiresAt` reads
       `access.valid_until` from the session response; the consent currently on disk predates the
       field, so `/health` reports `expiresAt: null`. The next fresh consent exercises it.
+
+## From step 5 — the app on the live feed, 2026-08-19
+
+### Blocks anyone actually using the app
+
+- [ ] **Rules live in memory and die with the JS context.** Mark a payee good, reload the bundle,
+      and the rule is gone — the single piece of state in this product the user creates by hand,
+      and the only one not persisted. It was invisible while payees and rules came from the same
+      fixture file. Needs a real store (`AsyncStorage` first, the backend later); note whatever
+      lands has to key on the payee id scheme below.
+
+### Worth knowing, no action decided
+
+- [ ] **The two data sources use different payee id schemes** — `payee-netflix` in the fixtures,
+      `name:LIDL CONNECT` from the backend — so a rule saved under one matches nothing under the
+      other. Correct behaviour under `R4b` (no rule = unreviewed = bad) rather than a bug, and
+      flipping `USE_BACKEND` therefore reads as "every payee is new again". Recorded because it
+      will look like data loss the first time someone hits it.
+- [ ] **Booking timestamps are midnight UTC**, because `transaction_date` was null on every row
+      (see `TRACER-BULLET.md`). Germany is UTC+1/+2 so the date sections land on the right day,
+      but in any timezone behind UTC the same charge would group under the previous day, and
+      `DebitDetailScreen` prints a meaningless `01:00`/`02:00` for every debit. `R22` says nothing
+      may assume a bank; nothing should assume a timezone either.
+- [ ] **The unreviewed-payee flood is now real**: 45 payees, none with a rule, so the Rules tab is
+      45 rows under Bad and every debit is bad. This is what onboarding's one-time bulk review
+      exists for (`mocks/01c`, the flow `R4b` calls the only user of the has-a-rule distinction),
+      and it is not ported yet — the fixtures' six payees hid how bad the unclassified state
+      looks at real scale.
 
 ## Standing
 

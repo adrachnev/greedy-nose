@@ -93,7 +93,7 @@ function RulesNavigator() {
 }
 
 function SettingsStub() {
-  return <StubScreen title="Settings" mockFile="06-settings.html" showMockBadge />;
+  return <StubScreen title="Settings" mockFile="06-settings.html" showDataSourceBadge />;
 }
 
 const TAB_ICON_BY_ROUTE: Record<keyof MainTabParamList, TabIconName> = {

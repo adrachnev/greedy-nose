@@ -218,6 +218,10 @@ app.MapGet("/debits", async (EnableBankingClient eb, ConsentStore consent, Cance
 
     // Loudly, one line each: a charge the mapper could not represent is invisible to the user, and
     // an invisible charge is the failure R1 exists to prevent. Step 7 wants these counts.
+    //
+    // Only the *count* goes to the app, as DebitsDto.Skipped — these strings name merchants and
+    // amounts, and the app is not their audience. The mapper fills that count itself, so the
+    // payload here is already complete; nothing below patches it.
     foreach (var skipped in mapped.Skipped)
     {
         app.Logger.LogWarning("Skipped a debit the mapper could not represent — {Detail}", skipped);

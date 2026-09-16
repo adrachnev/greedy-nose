@@ -8,6 +8,42 @@ A mobile app (iOS + Android) that connects to a European bank account and notifi
 the moment a debitor they've flagged as "Bad" charges them. That's the whole product — it is
 deliberately not a general finance/budgeting app.
 
+## How we work — plan, delegate, review
+
+**Settled 2026-08-19. This is the process, not a suggestion.** Every piece of work above the
+trivial floor below runs through three steps, in order:
+
+1. **Plan.** The main session writes the plan — it already carries the context a fresh `Plan`
+   agent would have to re-derive — and presents it in **plan mode**. Nothing starts before the
+   user approves it. A plan is a repo document (like `TRACER-BULLET.md`) only when the work
+   spans sessions; otherwise plan mode is the whole artefact.
+2. **Delegate.** Code is written by **`coder-mobile`** (anything under `app/`) or
+   **`coder-backend`** (anything under `backend/`), never by the main session. Work spanning
+   both settles the seam between them in the plan first — the DTO/domain contract — then both
+   agents run in parallel against it instead of one guessing at the other.
+3. **Review.** `coder-reviewer` reviews what the coder agent produced. This half is already
+   automated: `.claude/hooks/review-after-coder.sh` fires on `SubagentStop` and requests the
+   review whenever a coder agent finishes.
+
+**Findings go back to the same coder agent** via `SendMessage`, not to a fresh one and not to
+the main session — the original agent still holds the context that produced the code. The main
+session verifies `npx tsc --noEmit`, `npx eslint .` and `npx jest` afterwards. A second review
+pass only if the fix itself clears the trivial floor.
+
+**The trivial floor** is the review hook's own threshold: **10 changed lines**. At or below it,
+and for docs-only changes, the main session edits directly — spinning up an agent costs more
+than it saves, and the review hook would skip it anyway. `CLAUDE.md`, `REQUIREMENTS.md`,
+`ARCHITECTURE.md`, `TRACER-BULLET.md` and `TODO.md` are documentation, not code.
+
+**What the main session still owns**, because no subagent can do it: the device toolchain —
+`adb` pairing and reverse tunnels, Gradle builds, launching the app, reading logcat, running
+the backend. That is operational work, and it is not a loophole for writing code.
+
+**Why this is written down:** the automation only covers step 3, and its trigger is a coder
+agent *stopping*. When the main session writes code itself, no agent stops, so no review is
+ever requested — one skipped step silently removes two, with nothing on screen to say so.
+That is exactly what happened during tracer-bullet step 5 on 2026-08-19.
+
 ## Requirements
 
 **`REQUIREMENTS.md` is the single source of truth for what the app does. Read it first.**
@@ -24,8 +60,12 @@ not** — that rework is the next piece of work.
 
 ## Status
 
-**2026-08-17 — the tracer bullet to real bank data is under way. `TRACER-BULLET.md` is the live
-document; read its "Progress" section first.** The plan, settled the same day: an end-to-end slice
+**The tracer bullet reached the device on 2026-08-19: every layer is wired end to end, and the
+app shows bank data fetched through our own backend. `TRACER-BULLET.md` is the live document;
+read its "Progress" section first.** Started 2026-08-17. The account behind it is still the
+**sandbox** Mock ASPSP (holding an import of real German account data, which is why its findings
+are worth something) — firing the same code at the real N26 account is step 6, and it waits on
+Restricted Production approval. The plan, settled the same day: an end-to-end slice
 (sandbox ASPSP → local ASP.NET Core minimal API → the device's debit list), sandbox first and the
 real N26 account after, with no DB, push, polling or Azure in the first shot.
 
@@ -36,7 +76,24 @@ steps 1–4, in step order.
 **2026-08-18 — steps 2, 3 and 4 are done and verified against a live connection.** The Mock ASPSP
 consent completed in a browser; `/raw` returned 100 real transactions (kept in `raw/`, gitignored);
 `/debits` maps them to 92 debits and 45 payees in exactly the shape `app/src/domain/model.ts`
-declares. **Step 5 — pointing `app/src/data/hooks.ts` at the backend — is the next action.**
+declares.
+
+**2026-08-19 — step 5 is done and verified on the device: the app runs on real bank data.** The
+Debits tab lists the sandbox charges through `adb reverse tcp:5199 tcp:5199`. The seam held —
+no screen learned where its data comes from. New under `app/src/data/`: `config.ts` (the
+`USE_BACKEND` flag, so fixtures stay one line away) and `backendFeed.ts` (fetch, validation and
+the `useSyncExternalStore` store); `hooks.ts` binds the source **once at module level**, and
+rules stay local under both flags because `R6` means the backend sends no classification.
+`MockDataBadge` became `DataSourceBadge` — once the feed is real, an empty list could mean the
+backend is down, `adb reverse` is missing, the consent expired, or the account is genuinely
+empty, and the device is the worst place to guess. Full detail in `TRACER-BULLET.md`'s
+"Step 5 as built". **Steps 0–5 are done; step 6 waits on Restricted Production approval.**
+
+Three things step 5 exposed, all in `TODO.md`: **rules are in-memory only** and die with the JS
+context (the one piece of state the user creates by hand, and the only unpersisted one — hidden
+while rules and payees shared a fixture file); booking timestamps are **midnight UTC**, which
+groups correctly only in a timezone ahead of UTC; and **45 payees with no rule** make the
+unclassified state real for the first time, which is the onboarding bulk review's whole purpose.
 
 **Real data broke three assumptions**, all recorded with evidence in `TRACER-BULLET.md`'s Findings:
 

@@ -72,6 +72,21 @@ export function formatLongDate(isoTimestamp: string): string {
   });
 }
 
+/**
+ * Joins the parts of a debit's meta line with the middot the mocks use
+ * ("Card payment · 3 Jul, 09:14"), dropping the parts that are not there.
+ *
+ * It exists because the separator has to disappear *with* its part. Most
+ * debits from a real bank carry no time at all (Debit.hasTime — 100 of 100
+ * rows in the first dump), and a screen that simply leaves the time out of a
+ * template ends up rendering "Card payment · " with a dangling middot, which
+ * reads as a value the app failed to load. Two screens build this line, so it
+ * is one function rather than the same `filter().join()` twice.
+ */
+export function joinMeta(...parts: (string | null | undefined | false)[]): string {
+  return parts.filter((part): part is string => typeof part === 'string' && part !== '').join(' · ');
+}
+
 // formatRelativeTime() lived here for the "Auto-marked Bad · Xm ago" marker.
 // R8 removed the automatic flip that produced it, and with it the only caller.
 

@@ -2,7 +2,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import MockDataBadge from '../components/MockDataBadge';
+import DataSourceBadge from '../components/DataSourceBadge';
 import SearchField from '../components/SearchField';
 import { usePayees, useRuleByPayeeId } from '../data/hooks';
 import { classifyPayee } from '../domain/classification';
@@ -107,7 +107,7 @@ export default function RulesListScreen({ navigation }: Props) {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
-      <MockDataBadge />
+      <DataSourceBadge />
       <View style={styles.navBar}>
         <Text style={[styles.navTitle, { color: theme.text }]}>Rules</Text>
       </View>

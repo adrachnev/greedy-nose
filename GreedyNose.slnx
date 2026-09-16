@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/backend/">
+    <Project Path="backend/GreedyNose.Api.Tests/GreedyNose.Api.Tests.csproj" />
+    <Project Path="backend/GreedyNose.Api/GreedyNose.Api.csproj" />
+  </Folder>
+</Solution>

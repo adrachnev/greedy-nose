@@ -1,12 +1,13 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import MockDataBadge from '../components/MockDataBadge';
+import DataSourceBadge from '../components/DataSourceBadge';
 import SearchField from '../components/SearchField';
 import { useDebits, usePayees, useRuleByPayeeId } from '../data/hooks';
 import { classifyDebit, classifyPayee } from '../domain/classification';
 import { Debit, Payee, Rule } from '../domain/model';
+import { createPayeeLookup } from '../domain/payees';
 import { dateFromDateKey, useCurrentDateKey } from '../hooks/useCurrentDateKey';
 import { useTabScopedSearch } from '../hooks/useTabScopedSearch';
 import { DebitsStackParamList } from '../navigation/types';
@@ -17,6 +18,7 @@ import {
   formatDayShort,
   formatTime,
   groupByDateSection,
+  joinMeta,
 } from '../utils/format';
 import { matchesDebitSearch } from '../utils/search';
 
@@ -68,9 +70,16 @@ function DebitRowView({
   const avatarColor = payeeIsGood ? theme.good : theme.bad;
   const avatarBg = payeeIsGood ? theme.goodBg : theme.badBg;
 
-  const when = showDay
-    ? `${formatDayShort(debit.timestamp)}, ${formatTime(debit.timestamp)}`
-    : formatTime(debit.timestamp);
+  // The time appears only when the bank gave one (Debit.hasTime — it gave none
+  // on any of the first real dump's 100 rows), so a Today row can legitimately
+  // end up with nothing but its payment type. Both joins collapse rather than
+  // leaving a separator behind: "Card payment · 3 Jul" and "Card payment", not
+  // "Card payment · 3 Jul, " or "Card payment · ". The day keeps its comma —
+  // that is how mocks/02-debit-list.html writes it, and the middot is what
+  // separates the payment type from the whole date.
+  const day = showDay ? formatDayShort(debit.timestamp) : '';
+  const time = debit.hasTime ? formatTime(debit.timestamp) : '';
+  const when = day !== '' && time !== '' ? `${day}, ${time}` : day || time;
 
   return (
     <Pressable
@@ -85,7 +94,7 @@ function DebitRowView({
           {payee.name}
         </Text>
         <Text style={[styles.debitDate, { color: theme.textMuted }]}>
-          {debit.paymentType} · {when}
+          {joinMeta(debit.paymentType, when)}
         </Text>
       </View>
       <View style={styles.debitRight}>
@@ -118,7 +127,38 @@ export default function DebitListScreen({ navigation }: Props) {
   const { search, setSearch } = useTabScopedSearch();
   const dateKey = useCurrentDateKey();
 
-  const payeeById = useMemo(() => new Map(payees.map(p => [p.id, p])), [payees]);
+  // R1's last mile on this screen. A debit whose payee is missing used to be
+  // filtered out below and rendered as null further down — two silent drops of
+  // a charge that really left the user's account. The lookup answers for every
+  // id instead, inventing an "Unknown payee" when it has to (see
+  // src/domain/payees.ts), so the row is visible, searchable and rule-able like
+  // any other. It caches, so a memoized row does not see a new payee prop per
+  // keystroke.
+  const { lookupPayee, invented } = useMemo(() => {
+    const inventedIds: string[] = [];
+    return {
+      lookupPayee: createPayeeLookup(payees, payeeId => inventedIds.push(payeeId)),
+      invented: inventedIds,
+    };
+  }, [payees]);
+
+  // Collected during render, reported after it. console.warn *from* a render
+  // is a side effect React may repeat or throw away, so the count in the log
+  // would not be evidence of anything. By the time this runs the collection is
+  // complete for this payee list: the filter below calls lookupPayee for every
+  // debit, so no id is first discovered later, inside a row.
+  //
+  // It re-reports when the payees change, not when the debits do — a charge
+  // arriving alone joins the same array and waits for the next payee update to
+  // be logged. That is a fair trade for a developer's log line, because the
+  // user-facing signal is the row itself, which is on screen either way.
+  useEffect(() => {
+    if (invented.length > 0) {
+      console.warn(
+        `[debit list] ${invented.length} charge(s) reference a payee the app has no record of, shown as unknown: ${invented.join(', ')}`,
+      );
+    }
+  }, [invented]);
 
   // Filter, then group — never the other way round, because R23 requires the
   // date grouping to survive filtering: searching one subscription must still
@@ -130,12 +170,11 @@ export default function DebitListScreen({ navigation }: Props) {
   // current *day*, so this recomputes at midnight and the Today/Yesterday
   // labels cannot go stale in a long-lived session.
   const sections = useMemo(() => {
-    const matching = debits.filter(debit => {
-      const payee = payeeById.get(debit.payeeId);
-      return payee != null && matchesDebitSearch(search, payee.name, debit.amountEUR);
-    });
+    const matching = debits.filter(debit =>
+      matchesDebitSearch(search, lookupPayee(debit.payeeId).name, debit.amountEUR),
+    );
     return groupByDateSection(matching, d => d.timestamp, dateFromDateKey(dateKey));
-  }, [debits, payeeById, search, dateKey]);
+  }, [debits, lookupPayee, search, dateKey]);
 
   const query = search.trim();
   // R23: a search that matches nothing has to say so, and name the query. An
@@ -156,23 +195,17 @@ export default function DebitListScreen({ navigation }: Props) {
   const renderItem = useCallback<
     NonNullable<React.ComponentProps<typeof SectionList<Debit, DateSection<Debit>>>['renderItem']>
   >(
-    ({ item, section }) => {
-      const payee = payeeById.get(item.payeeId);
-      if (!payee) {
-        return null;
-      }
-      return (
-        <DebitRow
-          theme={theme}
-          debit={item}
-          payee={payee}
-          rule={ruleByPayeeId.get(item.payeeId)}
-          showDay={section.kind === 'month'}
-          onPress={openDebit}
-        />
-      );
-    },
-    [theme, payeeById, ruleByPayeeId, openDebit],
+    ({ item, section }) => (
+      <DebitRow
+        theme={theme}
+        debit={item}
+        payee={lookupPayee(item.payeeId)}
+        rule={ruleByPayeeId.get(item.payeeId)}
+        showDay={section.kind === 'month'}
+        onPress={openDebit}
+      />
+    ),
+    [theme, lookupPayee, ruleByPayeeId, openDebit],
   );
 
   const renderSectionHeader = useCallback(
@@ -204,7 +237,7 @@ export default function DebitListScreen({ navigation }: Props) {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
-      <MockDataBadge />
+      <DataSourceBadge />
       <View style={styles.navBar}>
         <Text style={[styles.navTitle, { color: theme.text }]}>Debits</Text>
       </View>
