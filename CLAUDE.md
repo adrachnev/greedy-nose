@@ -60,6 +60,24 @@ not** — that rework is the next piece of work.
 
 ## Status
 
+**`NOTIFICATION-TRACER-BULLET.md` is the live document for the notification work; read its
+Progress section first.** Scoped and started 2026-09-17, right after the first tracer bullet
+closed — Postgres, FCM push, the polling worker, the rule engine and rules-sync are all new
+ground it covers step by step. Nothing implemented yet; step 0 (Firebase project, done live in a
+session) is next.
+
+**2026-09-17 — tracer bullet complete: step 6 confirmed on the device, all steps 0–7 done.** The
+backend was switched back to the **Production** application (`ApplicationId`/`PrivateKeyPath`/
+`RedirectUrl` restored, see the note below) and the real N26 consent restored from
+`consent.local.json.n26-bak` — still valid (expires 2026-12-15), so no fresh browser consent was
+needed. `adb reverse` plus a fresh `installDebug` put the app on the device: the Debits tab showed
+real N26 charges, and the rules created the previous session against the backend's payee ids were
+still there and matched correctly — confirming rules persistence and the payee-id scheme survive a
+Sandbox↔Production secret switch and a reinstall, not only a restart. One gap found along the way,
+now recorded in `REQUIREMENTS.md`: the `Subscription` payment type is confirmed unreachable from
+any real bank data seen — the owner's own Netflix and Anthropic charges both arrive as plain card
+payments. Full detail in `TRACER-BULLET.md`'s "Step 6 as built".
+
 **2026-09-16 — tracer-bullet steps 6 and 7 are done at the backend, verified against the real N26
 account (91 debits, 52 payees) through the Production application; device confirmation of step 6
 is the one thing still open.** It's blocked by N26 itself, not by code: Enable Banking rate-limits

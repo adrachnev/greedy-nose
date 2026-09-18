@@ -117,3 +117,6 @@ dependencies {
         implementation jscFlavor
     }
 }
+
+// NOTIFICATION-TRACER-BULLET.md step 0: applies app/google-services.json to this module.
+apply plugin: "com.google.gms.google-services"

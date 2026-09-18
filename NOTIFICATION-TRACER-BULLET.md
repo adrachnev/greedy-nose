@@ -1,0 +1,255 @@
+# Notification tracer bullet
+
+The second tracer bullet, same discipline as `TRACER-BULLET.md`: the thinnest end-to-end slice
+through every new layer, seen working before moving on, not a prototype to throw away.
+`TRACER-BULLET.md` proved the app can read real bank data end to end; it deliberately stopped
+short of everything in `ARCHITECTURE.md`'s "Deliberately out of scope" list — Postgres, FCM push,
+the polling worker, the rule engine, the three ingestion modes. Notifications are the actual
+product (`CLAUDE.md`: "the whole product"), so this is the next slice. Written 2026-09-17, scoped
+in conversation before any code — see "Decisions" below.
+
+**This will span several sessions.** Update the Progress table before ending each one, same habit
+as `TRACER-BULLET.md`.
+
+## The path
+
+```
+Mock ASPSP (sandbox)  →  local C# API (poll worker + rule engine)  →  Postgres  →  FCM  →  device
+```
+
+Testing happens against **Mock ASPSP, not real N26** — same reasoning as the first tracer bullet:
+the consent/data loop can be re-run endlessly while wiring this up, without touching the
+rate-limited production quota (`TRACER-BULLET.md`'s Findings).
+
+## Decisions taken before writing this (2026-09-17)
+
+| Question | Decision |
+|---|---|
+| Definition of done | A real push lands on the phone, not just a logged decision |
+| Ingestion modes | Steady-state only — first-run and reconnect (`R20`) deferred |
+| Seen-debits storage | Postgres, not a flat file |
+| Timer location | Inside the local backend process (`dotnet run`), not Azure Functions |
+| Postgres scope | Full `ARCHITECTURE.md` schema shape (minus one trim, see below) |
+| Rules sync | Real client→server sync (new endpoint), not seeded by hand |
+| Firebase/FCM setup | Done live together in session, when implementation starts |
+| Tap-to-open (`R12`) | Deferred — prove the banner first |
+| Auth | Tables only, one seeded user row, no login screen |
+| Dev database | Local Docker Postgres |
+
+**Scope trim, flagged rather than silently decided:** the full schema includes `BankConsents`,
+but `ConsentStore` (file-backed `consent.local.json`) already works and is proven against real
+N26 data. This bullet creates `Users`/`Payees`/`Rules`/`Debits`/`NotificationLog`/`DeviceTokens` —
+everything it actually reads or writes — and leaves `BankConsents` and migrating `ConsentStore`
+for a later, separate piece of work.
+
+**Formatting default:** `R17` formats amounts by device locale, but the server has no device
+locale to format push text with. Push titles/bodies use a fixed `de-DE`-style format ("49,00 €"),
+matching the mocks and the target market. In-app screens the push eventually links to (once `R12`
+lands) still use `formatCurrencyEUR` and the real device locale — this only affects the transient
+OS notification text.
+
+## What already exists and gets reused, not rebuilt
+
+- `EnableBankingClient` + `TransactionMapper` (`backend/GreedyNose.Api/EnableBanking/`) — the
+  ingestion worker calls the same mapping path `/debits` already uses, refactored into a shared
+  method rather than duplicated.
+- `ConsentStore`'s shape (singleton, in-memory state + `Lock`, restore-on-startup) is the pattern
+  new stateful services should follow structurally, even though most of them move to EF Core.
+- `app/src/data/rulesStore.ts`'s single write path, `saveRule(payeeId, draft)` — the one place a
+  backend sync call hooks in, after the existing `persist(nextRules)` call.
+- `app/src/data/backendFeed.ts`'s fetch pattern (`AbortController`, timeout, error-to-state
+  rather than throw) — the template for the two new mobile→backend calls.
+- `app/src/domain/classification.ts`'s decision table — ported line-for-line to C#, not
+  redesigned.
+- `app/src/data/hooks.ts`'s module-level singleton binding — the pattern a new device-token store
+  follows (mirrors `rulesStore.ts`, exposed the same way).
+
+## Progress
+
+| Step | State |
+|---|---|
+| 0 Firebase project | **done, verified 2026-09-18** — real push sent from Firebase Console reached the device |
+| 1 Postgres schema | not started |
+| 2 Device token registration | not started |
+| 3 Backend can send, proven in isolation | not started |
+| 4 Rules sync | not started |
+| 5 Rule engine, ported and tested | not started |
+| 6 Ingestion worker — steady state | not started |
+| 7 Record findings | not started |
+
+## Steps
+
+Each ends in something visible.
+
+### 0. Firebase project — owner's task, done live in session
+
+Create the Firebase project, add the Android app (package `com.greedynose`), download
+`google-services.json` into `app/android/app/`, add the `com.google.gms.google-services` Gradle
+plugin, generate a service-account JSON key for server-side sending (gitignored, same treatment
+as the Enable Banking `.pem`).
+
+**Done when:** a test push sent from the Firebase console's own "Compose notification" tool
+reaches the physical device — before any of our code sends anything. Isolates "is Firebase wired
+up at all" before building on top of it, same reasoning as the first tracer bullet's step 1
+keeping the JWT alone.
+
+**Done, 2026-09-18.** Firebase project `greedy-nose` created, Android app registered under
+`com.greedynose`, `google-services.json` in place (gitignored), Google Services Gradle plugin
+wired into both `app/android/build.gradle` (classpath, `4.5.0`) and `app/android/app/build.gradle`
+(apply plugin). Service-account key downloaded and gitignored (`*firebase-adminsdk*.json`, repo
+root) for step 3.
+
+A small, deliberately temporary probe (`coder-mobile`, not reviewed per instruction — throwaway
+code, superseded by step 2) was needed to actually get a token to test with: `@react-native-firebase/app`
++ `@react-native-firebase/messaging` installed, a `useEffect` in `App.tsx` requests notification
+permission and logs the FCM token. One real gotcha found and fixed in the same pass: **Firebase's
+own `requestPermission()` is an iOS-only API that resolves `AUTHORIZED` unconditionally on
+Android** — it does not trigger the OS permission dialog there at all. `PermissionsAndroid.request`
+is what actually has to ask, plus a `POST_NOTIFICATIONS` entry in `AndroidManifest.xml`. Both
+missing at first; the temporary probe now does it correctly, and step 2's real implementation
+needs to as well.
+
+**Second gotcha, worth remembering for every future test on this project:** a push sent while the
+app is in the **foreground** is delivered silently to the app's own message handler — Android
+only auto-shows the OS banner when the app is backgrounded or killed. The app has no message
+handler yet (deferred to a later step), so a foreground test looks like nothing happened. Always
+background the app before sending a test push.
+
+Confirmed end to end: real FCM token logged from the device → pasted into Firebase Console's
+"Send test message" → banner appeared on the physical device with the app backgrounded.
+
+### 1. Postgres schema
+
+Docker Compose (`backend/docker-compose.yml`, one `postgres:16` service) for local dev. Add
+`Microsoft.EntityFrameworkCore`, `Npgsql.EntityFrameworkCore.PostgreSQL`,
+`Microsoft.EntityFrameworkCore.Design` to `GreedyNose.Api.csproj`. New `GreedyNoseDbContext` with
+`Users`, `Payees`, `Rules`, `Debits`, `NotificationLog`, `DeviceTokens`. One seeded `User` row
+(fixed id, no auth fields beyond what anchors the foreign keys). Connection string via
+`dotnet user-secrets` (`ConnectionStrings:Postgres`), same pattern as the Enable Banking config.
+
+**Done when:** `dotnet ef database update` succeeds and the tables exist.
+
+### 2. Device token registration
+
+New `POST /device-token` (`{ token }`, upserts `DeviceTokens` for the seeded user). New
+`app/src/data/deviceStore.ts` mirroring `rulesStore.ts`'s shape: requests Android notification
+permission (`POST_NOTIFICATIONS`, required from Android 13), reads the FCM token via
+`@react-native-firebase/messaging` (new dependency, needs a native rebuild), POSTs it once. Wired
+into `hooks.ts` alongside the existing stores.
+
+**Done when:** the token row appears in Postgres after installing the app.
+
+### 3. Backend can send, proven in isolation
+
+Add the `FirebaseAdmin` NuGet package. A small `NotificationSender` wrapping
+`FirebaseMessaging.SendAsync`. A temporary `POST /debug/send-test-push` endpoint that reads the
+stored token and sends a fixed "hello" message.
+
+**Done when:** curling that endpoint puts a real push on the phone, sent by our backend code
+rather than the Firebase console. Isolates "can we send" before the rule engine sits on top of
+it. Endpoint gets deleted once step 6 proves the real path.
+
+### 4. Rules sync
+
+New `POST /rules` (`{ payeeId, classification: 'good' | 'bad', amountEUR?: number }`, upserts
+`Rules` for the seeded user). `rulesStore.ts`'s `saveRule()` gets a sibling fire-and-forget call
+to it, following `backendFeed.ts`'s error-swallowing pattern — a failed sync must not block the
+local save, since AsyncStorage stays the in-app source of truth (`R6`) and Postgres's copy is
+only what the server-side rule engine reads.
+
+**Done when:** marking a payee in the app shows the row in `Rules`.
+
+### 5. Rule engine, ported and tested
+
+New static `RuleEngine` class (backend), porting `classification.ts`'s table exactly:
+
+| Rule state | Result |
+|---|---|
+| No rule | bad, `no-rule` → "New payee — you haven't seen this one before." |
+| `classification: bad` | bad, `marked-bad` → "You marked this payee as bad." |
+| `classification: good`, no `amountEUR` | good |
+| `classification: good`, `amountEUR` set | good if `debit.amountEUR <= amountEUR`, else bad, `over-limit` → "Over your limit of «amount»." |
+
+New `RuleEngineTests.cs` in the existing `GreedyNose.Api.Tests` project, mirroring
+`classification.test.ts`'s cases and the existing requirement-id-in-test-name convention.
+
+**Done when:** tests pass.
+
+### 6. The ingestion worker — steady state, configurable interval
+
+A `BackgroundService` using `PeriodicTimer`, interval from config
+(`Ingestion:PollIntervalSeconds`) — a short value in dev (e.g. 30s, via user-secrets), the real
+6h default in `appsettings.json`. Each tick, per active consent:
+
+1. Fetch + map debits (the shared method from "What already exists").
+2. Upsert `Payees`.
+3. **Bootstrap case** (no `Debits` rows yet for this account): insert everything as seen, no rule
+   evaluation, no notification — a minimal stand-in for `R10b`'s "first sync" consequence,
+   without building the full onboarding classify-screen mode (deferred, see below).
+4. **Steady-state case**: any mapped debit not already in `Debits` is new → insert it → look up
+   its `Rules` row → `RuleEngine.Classify` → if bad, check `NotificationLog` for that debit id
+   (guards against a duplicate send across restarts, `R11`) → if not sent, `NotificationSender`
+   fires and a `NotificationLog` row is written in the same step.
+
+**Done when:** add a mock transaction for a bad-rule payee in Mock ASPSP's control panel, wait
+one poll interval, a real push lands on the device — title `«Payee» · «amount»`, correct `R12a`
+body. A good-and-under-limit payee's new debit produces zero pushes across the same wait.
+
+### 7. Record findings
+
+Same spirit as the first tracer bullet's step 7 — update `REQUIREMENTS.md`/`ARCHITECTURE.md`
+with anything the sandbox run actually taught (e.g., whether Mock ASPSP's added transactions
+carry `entry_reference`, timing behavior of the configurable poll, anything about the
+bootstrap/steady-state boundary that surprised us).
+
+## Deliberately out of scope
+
+- First-run onboarding classify screen UX (the bootstrap step above is silent, no UI).
+- Reconnect summary push (`R20`).
+- Health Monitor (staleness checks, operator email alerts).
+- Real user auth/login.
+- Tap-to-open → debit detail (`R12`'s navigation half).
+- `BankConsents` table / migrating `ConsentStore` off its file.
+- Azure deployment — the worker stays in-process for this bullet.
+- iOS/APNs — Android device only, same as the rest of this project so far.
+
+## Critical files
+
+- `backend/GreedyNose.Api/Program.cs` — wiring for the new DbContext, `NotificationSender`,
+  `BackgroundService`, and the two new endpoints.
+- `backend/GreedyNose.Api/EnableBanking/TransactionMapper.cs` — the fetch+map call the worker
+  reuses; may need a small refactor to expose it as a callable method rather than only living
+  inside the `/debits` endpoint handler.
+- New: `backend/GreedyNose.Api/Data/GreedyNoseDbContext.cs` and entity classes.
+- New: `backend/GreedyNose.Api/Notifications/RuleEngine.cs`, `NotificationSender.cs`,
+  `IngestionWorker.cs`.
+- `backend/GreedyNose.Api.Tests/` — new `RuleEngineTests.cs` alongside the existing
+  `TransactionMapperTests.cs`.
+- `app/src/data/rulesStore.ts` — the sync call added to `saveRule()`.
+- New: `app/src/data/deviceStore.ts`, following `rulesStore.ts`'s shape.
+- `app/src/data/hooks.ts` — wiring the new device-token store in.
+- `app/android/app/build.gradle`, `app/android/build.gradle` — Google Services plugin.
+- `app/package.json` — `@react-native-firebase/app`, `@react-native-firebase/messaging`.
+
+## Verification
+
+- Backend: `dotnet test` (existing 41 + new `RuleEngineTests`) and `dotnet ef database update`
+  against the local Docker Postgres.
+- Mobile: `npx tsc --noEmit`, `npx eslint .`, `npx jest`.
+- End to end, on the physical device, against Mock ASPSP: mark a payee bad, add a mock
+  transaction for it, confirm exactly one real push arrives within one (shortened, dev-config)
+  poll interval; confirm a second poll tick does not re-send it.
+
+## Process note
+
+Per `CLAUDE.md`'s delegation rule, step 0 (Firebase) is done live together since it's a
+browser/console task, not code. Steps 1–6 are backend-only, mobile-only, or split at the
+`POST /rules` / `POST /device-token` contracts above (already settled here, so `coder-backend`
+and `coder-mobile` can work the two sides in parallel once step 1's schema exists) — each step
+goes through `coder-backend`/`coder-mobile` then `coder-reviewer`, same as every other piece of
+work in this repo.
+
+## Picking this up next session
+
+Not started yet. Start with **step 0** — the Firebase project, done live together in the browser
+(same pattern as the Enable Banking application registration in `TRACER-BULLET.md`'s step 0).

@@ -22,3 +22,13 @@ consent.local.json*
 # Account exports used to seed the Mock ASPSP (TRACER-BULLET.md, step 3). N26.json is a real
 # account's full transaction history — the same class of data as raw/, just arriving by hand.
 N26.json
+
+# Firebase config for the Android app (NOTIFICATION-TRACER-BULLET.md, step 0). Carries a
+# project-specific API key; same treatment as the Enable Banking .pem — never committed, each
+# developer/environment gets their own from the Firebase console.
+app/android/app/google-services.json
+
+# Firebase Admin SDK service account key (NOTIFICATION-TRACER-BULLET.md, step 0) — grants
+# server-side send access to the whole Firebase project. Same class as the Enable Banking .pem:
+# the entire credential, no token endpoint, stays server-side forever.
+*firebase-adminsdk*.json

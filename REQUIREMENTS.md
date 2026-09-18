@@ -386,6 +386,12 @@ real N26 data said." Headline results:
 - The creditor account is present on essentially no card payments, and on real credit rows it
   reliably equals the account's own IBAN — confirming why R2a's filter has to run before payee
   resolution, not after.
+- **The `Subscription` payment type is confirmed unreachable from any bank data seen so far.** The
+  account owner's own real, repeating charges (Netflix, an Anthropic subscription) both arrive as
+  plain card payments — nothing on the wire distinguishes a subscription from a one-off swipe of
+  the same amount. Keeping `Subscription` in `PaymentType` is a decision, not a bug: reaching it
+  would need a same-amount/same-payee recurrence heuristic that does not exist yet, not a mapping
+  fix.
 
 Two things still have **zero evidence** from any account pulled so far, sandbox or production: a
 non-EUR charge, and a pending (not-yet-booked) transaction. R10c's booked-vs-pending split and the

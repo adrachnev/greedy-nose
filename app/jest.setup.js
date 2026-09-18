@@ -11,3 +11,16 @@
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest'),
 );
+
+// @react-native-firebase/messaging has no native module in the Jest environment (there's no
+// device), so importing it unmocked throws "Native module ... is not registered" the moment
+// any file requires it — including transitively, via App.tsx. Ships no jest mock of its own
+// (unlike async-storage above), so this is a hand-rolled stand-in covering only the modular API
+// surface App.tsx currently calls; extend it if a later step (device token registration) uses
+// more of it.
+jest.mock('@react-native-firebase/messaging', () => ({
+  AuthorizationStatus: { NOT_DETERMINED: -1, DENIED: 0, AUTHORIZED: 1, PROVISIONAL: 2 },
+  getMessaging: jest.fn(),
+  getToken: jest.fn(() => Promise.resolve('test-fcm-token')),
+  requestPermission: jest.fn(() => Promise.resolve(1)),
+}));

@@ -35,7 +35,7 @@ One account, hardcoded. Everything the bullet does not need is deliberately abse
 | 3 Raw transactions | **done, verified 2026-08-18** — 100 transactions, 2026-05-13 … 2026-08-18, in `raw/transactions-20260818-122928.json`. See Findings |
 | 4 Map to the domain | **done, verified 2026-08-18** — `GET /debits` returns 92 debits and 45 payees from the 100-row dump: 92 unique ids, no orphan payees, no zero or negative amounts, the 8 credits gone. Reviewed against Enable Banking's own C# sample the same day |
 | 5 Point the app at the backend | **done, verified on the device 2026-08-19** — the Debits tab lists the real sandbox charges. See "Step 5 as built" |
-| 6 Re-fire at the real bank | **backend done, verified 2026-09-16** — real N26 account connected through the Production application; 91 debits and 52 payees from ~3 months of history via `/debits`. By this step's own "done when," it isn't finished until the device shows it — that's still open |
+| 6 Re-fire at the real bank | **done, verified 2026-09-17** — backend confirmed 2026-09-16 (91 debits, 52 payees via `/debits`); device confirmed 2026-09-17, see "Step 6 as built" |
 | 7 Record what real data taught us | **done, verified 2026-09-16** — see "What real N26 data said" below, and the updated "Refining from real data" sections in `REQUIREMENTS.md`/`ARCHITECTURE.md` |
 
 ### Step 5 as built — 2026-08-19
@@ -82,6 +82,27 @@ nothing on the wire to switch. Two consequences worth knowing before the next se
 **Process note:** this code was written by the main session rather than by `coder-mobile`, so
 the `SubagentStop` review hook never fired and step 5 initially shipped unreviewed. That is what
 prompted the "How we work" section now at the top of `CLAUDE.md`. The review was run afterwards.
+
+### Step 6 as built — 2026-09-17
+
+Backend switched from Sandbox back to the Production application: `dotnet user-secrets` set to
+the Production `ApplicationId`/`PrivateKeyPath`, and `RedirectUrl` set to
+`https://localhost:5199/callback` to match the Production app's registered redirect URI. The real
+N26 consent was restored from `consent.local.json.n26-bak` — still valid (`expiresAt`
+2026-12-15), so no fresh browser consent was needed; `/health` reported `connected: true` against
+N26 immediately on startup.
+
+`adb reverse tcp:5199 tcp:5199` and `tcp:8081 tcp:8081`, then `gradlew.bat app:installDebug`
+(JDK 17) onto the connected device. **Done when met**: the Debits tab showed real N26 charges, and
+the rules created the previous session (2026-09-16, against the same backend payee id scheme)
+were still there and matched correctly — confirming rules persistence and the payee-id scheme
+survive a Sandbox↔Production secret switch and an app reinstall, not only a process restart.
+
+One gap surfaced along the way and recorded in `REQUIREMENTS.md`'s "Refining these from real
+data": `PaymentType.Subscription` is confirmed unreachable from any real data seen — the account
+owner's own Netflix and Anthropic subscriptions both arrive as plain card payments.
+
+**Tracer bullet complete: steps 0–7 all done and verified, backend and device both.**
 
 ### The review round, and the repo's first tests — 2026-08-19/20
 

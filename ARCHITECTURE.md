@@ -423,9 +423,20 @@ cost even serverless, which is why the data store moved to a free-tier Postgres 
 
 ## Open questions
 
-- Confirm the "4x/day background" limit **per bank** — it is documented as ASPSP-general
-  behavior and verified for none of them, N26 included. The poll cadence is per-ASPSP config
-  precisely because this answer may differ for ING-DiBa or DKB.
+- ~~Confirm the "4x/day background" limit **per bank**~~ — confirmed for N26 2026-09-16: three
+  `/debits` calls in quick succession during tracer-bullet device work returned
+  `429 ASPSP_RATE_LIMIT_EXCEEDED`, matching Enable Banking's FAQ exactly. Still unconfirmed for
+  ING-DiBa or DKB, and still only proves a real cap exists — not that it is precisely 4/day rather
+  than, say, a burst limit that a well-spaced 6h timer would clear either way. See
+  `TRACER-BULLET.md`'s Findings.
+- **New, raised by that same incident: does the on-demand "app is open" fetch actually get
+  exempted from this cap on real N26, or does every call count the same regardless of PSU
+  headers?** The 429 above came from direct debug calls, not from the real on-demand code path
+  with PSU headers — so the exemption the 6h-cadence design leans on for same-day latency is
+  still an assumption from Enable Banking's docs, untested against a real ASPSP. If it doesn't
+  hold, opening the app a few times a day plus the timer poll could exhaust the quota faster than
+  designed for, showing the "can't reach your bank" state more often than intended. Worth a
+  deliberate test once the ingestion worker is actually built, not assumed from the docs.
 - Enable Banking's own request rate limits/quotas on the free tier are not published —
   worth confirming before scaling beyond a handful of users.
 - ~~Which of the three identifiers is stable~~ — answered 2026-08-17: `entry_reference`, scoped
