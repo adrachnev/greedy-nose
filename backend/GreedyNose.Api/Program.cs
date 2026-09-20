@@ -1,15 +1,40 @@
 using System.Globalization;
 using System.Text.Json;
+using GreedyNose.Api.Data;
 using GreedyNose.Api.EnableBanking;
+using Microsoft.EntityFrameworkCore;
 
 // Tracer bullet (TRACER-BULLET.md): the thinnest path from Enable Banking to the device.
 // Steps live here in order — 1 authenticate, 2 consent round trip, 3 raw transactions, 4 the
-// domain mapping. There is still no storage and no user; each arrives with the step that needs it.
+// domain mapping. The endpoints below still have no storage and no user. The database arrived with
+// NOTIFICATION-TRACER-BULLET.md step 1 and is wired but unused: each table gets its first reader
+// or writer in the step that needs it.
 
 var builder = WebApplication.CreateBuilder(args);
 
 var options = builder.Configuration.GetSection(EnableBankingOptions.SectionName).Get<EnableBankingOptions>()
               ?? new EnableBankingOptions();
+
+// Same philosophy as the signer check below: a missing connection string is a setup mistake, and
+// finding it here beats finding it as an opaque 500 on the first query. Not a connectivity check —
+// a database that is merely down must not stop /health from answering.
+var postgres = builder.Configuration.GetConnectionString("Postgres");
+if (string.IsNullOrWhiteSpace(postgres))
+{
+    throw new InvalidOperationException(
+        "ConnectionStrings:Postgres is not set. Configure it with `dotnet user-secrets set " +
+        "\"ConnectionStrings:Postgres\" \"Host=localhost;Port=5432;Database=greedynose;Username=greedynose;Password=...\"` " +
+        "(the local database is started by backend/docker-compose.yml).");
+}
+
+// A factory rather than plain AddDbContext: the ingestion worker (step 6) is a singleton
+// BackgroundService and cannot take a scoped context, so it must inject
+// IDbContextFactory<GreedyNoseDbContext> — never GreedyNoseDbContext itself — and make one
+// short-lived context per poll tick. AddDbContextFactory also keeps GreedyNoseDbContext resolvable
+// as a scoped service, so the endpoints can keep asking for it directly.
+//
+// No migration on startup: `dotnet ef database update` stays a deliberate, manual step.
+builder.Services.AddDbContextFactory<GreedyNoseDbContext>(db => db.UseNpgsql(postgres));
 
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(TimeProvider.System);

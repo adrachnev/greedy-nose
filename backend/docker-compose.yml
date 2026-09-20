@@ -1,0 +1,25 @@
+# Local dev Postgres for the notification tracer bullet (NOTIFICATION-TRACER-BULLET.md, step 1).
+# Throwaway database: the password below is dev-only and never used anywhere real. The connection
+# string the backend actually reads lives in `dotnet user-secrets` (ConnectionStrings:Postgres).
+services:
+  postgres:
+    image: postgres:16
+    container_name: greedy-nose-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: greedynose
+      POSTGRES_PASSWORD: greedynose-dev
+      POSTGRES_DB: greedynose
+    ports:
+      # Loopback only: the password is in the repo, and from step 6 on this holds real bank data.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - greedy-nose-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U greedynose -d greedynose"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  greedy-nose-pgdata:

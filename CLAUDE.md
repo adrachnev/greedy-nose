@@ -63,8 +63,12 @@ not** — that rework is the next piece of work.
 **`NOTIFICATION-TRACER-BULLET.md` is the live document for the notification work; read its
 Progress section first.** Scoped and started 2026-09-17, right after the first tracer bullet
 closed — Postgres, FCM push, the polling worker, the rule engine and rules-sync are all new
-ground it covers step by step. Nothing implemented yet; step 0 (Firebase project, done live in a
-session) is next.
+ground it covers step by step. **Steps 0 (Firebase, 2026-09-18) and 1 (Postgres schema,
+2026-09-20) are done; step 2, device token registration, is next.** Step 1: local Docker Postgres
+(`backend/docker-compose.yml`, loopback only), EF Core schema and two migrations in
+`backend/GreedyNose.Api/Data/`, one seeded user, two review passes. The decisions it left open for
+steps 2–6 (notably: `POST /rules` must handle the `Rules→Payees` foreign key) are written up in
+`NOTIFICATION-TRACER-BULLET.md` under step 1.
 
 **2026-09-17 — tracer bullet complete: step 6 confirmed on the device, all steps 0–7 done.** The
 backend was switched back to the **Production** application (`ApplicationId`/`PrivateKeyPath`/

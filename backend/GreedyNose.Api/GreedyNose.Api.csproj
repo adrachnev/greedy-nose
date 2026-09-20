@@ -7,4 +7,17 @@
     <UserSecretsId>cc71818b-1ac5-4dc8-9df9-7d86f0eb7498</UserSecretsId>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.12" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <!-- Pinned to Core's version on purpose. The Npgsql provider only asks for Relational >= 10.0.4,
+         so without this the test project resolves Relational 10.0.4 next to Core 10.0.12 and MSBuild
+         warns about the mismatch (MSB3277). Keep the three EF Core packages on one version. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.12" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+  </ItemGroup>
+
 </Project>

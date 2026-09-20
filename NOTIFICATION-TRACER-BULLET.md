@@ -69,7 +69,7 @@ OS notification text.
 | Step | State |
 |---|---|
 | 0 Firebase project | **done, verified 2026-09-18** — real push sent from Firebase Console reached the device |
-| 1 Postgres schema | not started |
+| 1 Postgres schema | **done, verified 2026-09-20** — both migrations applied to the local Docker Postgres, six tables + one seeded user; two `coder-reviewer` passes, no MUST FIX left |
 | 2 Device token registration | not started |
 | 3 Backend can send, proven in isolation | not started |
 | 4 Rules sync | not started |
@@ -128,6 +128,57 @@ Docker Compose (`backend/docker-compose.yml`, one `postgres:16` service) for loc
 `dotnet user-secrets` (`ConnectionStrings:Postgres`), same pattern as the Enable Banking config.
 
 **Done when:** `dotnet ef database update` succeeds and the tables exist.
+
+**Done, 2026-09-20.** Built by `coder-backend`, reviewed twice by `coder-reviewer` (the first pass
+found two SHOULD FIX and five CONSIDER items, the second found two SHOULD FIX and a few nits; all
+the ones the owner picked are fixed).
+
+- **Local setup (main session):** `backend/docker-compose.yml` runs `postgres:16` as
+  `greedy-nose-postgres`, named volume `greedy-nose-pgdata`, **bound to `127.0.0.1` only** (the dev
+  password is in the repo, and from step 6 the DB holds real bank data). `dotnet-ef` 10.0.12 is a
+  **local tool** (`dotnet-tools.json` at the repo root, so `dotnet ef` works from `backend/`).
+  Connection string is the `ConnectionStrings:Postgres` user-secret.
+- **Code:** `backend/GreedyNose.Api/Data/` — `GreedyNoseDbContext`, one entity class per table,
+  `SeedData.UserId` (the fixed seeded user, `5f0d7c3a-8b1e-4d6a-9a52-3c7e1b2f4a90`), `Migrations/`
+  (`InitialCreate`, then `TightenDeleteBehaviorAndRuleLimit`). The `Classification` enum lives in
+  `GreedyNose.Api.Domain` (not `Data`), so step 5's `RuleEngine` depends on the domain, not on
+  persistence; the lowercase `good`/`bad` converter stays in `Data`.
+- **Startup:** a missing `ConnectionStrings:Postgres` fails at startup with the exact
+  `dotnet user-secrets set` command in the message. There is **no** migration on startup and no
+  connectivity check — `/health` still answers with Postgres down. `database update` is a manual step.
+- **Delete behaviour:** the five `UserId → Users` FKs cascade (account deletion is a real delete).
+  The three cross-table FKs (`Rules→Payees`, `Debits→Payees`, `NotificationLog→Debits`) are
+  `NoAction`, so deleting a lone debit cannot erase its `R11` guard row and a delete-and-reinsert
+  payee "upsert" cannot silently wipe a rule. Tested against real Postgres in a rolled-back
+  transaction, both directions.
+- **Constraints:** `CK_Rules_Classification` (`good`/`bad`), `CK_Rules_AmountEUR_Positive`
+  (null or > 0), unique `IX_DeviceTokens_Token`, unique `IX_NotificationLog_UserId_DebitId` (the
+  DB-level `R11` guard).
+
+**Carried into later steps — decisions the review surfaced, not yet made:**
+
+- **Step 2/6:** the step 6 `BackgroundService` is a singleton and must inject
+  `IDbContextFactory<GreedyNoseDbContext>` (registered with `AddDbContextFactory`), **never** the
+  context itself. Endpoints keep taking the scoped context.
+- **Step 4:** `Rules` has a composite FK to `Payees` (owner's choice), and nothing writes `Payees`
+  before step 6. `POST /rules` therefore cannot save a rule for a payee the DB has never seen, and
+  its planned body carries no name/initials/iban. Step 4 must either add those fields to the
+  request (the app has them) or upsert the payee from it — decide there, or step 4's "done when"
+  (mark a payee, see a `Rules` row) fails on the FK.
+- **Step 4:** `ClassificationText.Parse` throws `FormatException` — right for a corrupt DB value,
+  wrong for a client's bad `POST /rules` body. The endpoint needs a `TryParse` or a 400 mapping,
+  and should validate the limit is positive itself (the DB check is only the last line of defence).
+- **Step 6:** decide the order of "insert `NotificationLog` row" vs. "send the push". `SentAt` is
+  non-null and there is no status column, so a row can only mean "sent". If step 6 inserts the row
+  first to use the unique index as the race guard, a failed FCM send leaves a row for a push that
+  never went out — the missed-alert direction, the worst failure for this product. Likely answer:
+  a nullable `SentAt`, or send first and insert after; decide before writing the worker.
+- **Step 6:** add a `(UserId, AccountKey)` index on `Debits` when the bootstrap check ("any debits
+  for this account?") is written. Parse the mapper's UTC timestamps so the offset stays zero
+  (`AssumeUniversal`) — Npgsql throws on a non-zero offset for `timestamptz`.
+- **Later:** `NotificationLog.DebitId` is a required FK, so the table cannot record the
+  consent-expiry push (`ARCHITECTURE.md`) or the `R20` summary push, neither of which has a debit.
+  Out of scope now; revisit when either is built.
 
 ### 2. Device token registration
 
@@ -251,5 +302,7 @@ work in this repo.
 
 ## Picking this up next session
 
-Not started yet. Start with **step 0** — the Firebase project, done live together in the browser
-(same pattern as the Enable Banking application registration in `TRACER-BULLET.md`'s step 0).
+Steps 0 and 1 are done. Start with **step 2** (device token registration) — and step 4's
+`POST /rules` contract question above needs an answer before its coder agent starts. Postgres must
+be running: `docker compose up -d` in `backend/` (the container restarts on its own after a reboot
+once Docker Desktop is up).

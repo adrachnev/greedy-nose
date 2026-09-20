@@ -180,6 +180,18 @@ The four below are left open on purpose.
       and it is not ported yet — the fixtures' six payees hid how bad the unclassified state
       looks at real scale.
 
+## Process
+
+- [ ] **The `SubagentStop` review hook did not request a review after `coder-backend` stopped**
+      (seen again 2026-09-20, notification tracer-bullet step 1). The hook does run —
+      `.claude/hooks/last-subagent-stop.json` was rewritten when the reviewer stopped — but no
+      "requesting an automatic code review" instruction reached the session after the coder's
+      stop, so the main session had to start `coder-reviewer` by hand. Not yet known whether the
+      hook exited early (the size check or the `coder-reviewer` text match), or whether
+      `additionalContext` from a `SubagentStop` hook is simply not surfaced. To find out: log the
+      hook's decision (skip reason or "requesting") to a file, then run one more coder agent.
+      Until then, treat the hook as unreliable and start the review by hand.
+
 ## Standing
 
 - [ ] **Run the reworked app on the device.** Partly done 2026-08-17 — it builds, installs and
