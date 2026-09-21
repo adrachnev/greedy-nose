@@ -282,7 +282,8 @@ The four below are left open on purpose.
       ("this half is already automated") is not automated. Until a hook mechanism that reaches the
       *main* session is found (a `SubagentStop` hook cannot launch an agent itself, and its
       context lands in the stopped agent), the main session starts `coder-reviewer` by hand after
-      every coder stops, and `CLAUDE.md` should say so instead of "already automated".
+      every coder stops — `CLAUDE.md` now says so (2026-09-21). Idea, untested: a `Stop` hook on
+      the *main* session that blocks finishing while unreviewed code exists.
 
 ## Standing
 
