@@ -2,13 +2,14 @@ using System.Globalization;
 using System.Text.Json;
 using GreedyNose.Api.Data;
 using GreedyNose.Api.EnableBanking;
+using GreedyNose.Api.Notifications;
 using Microsoft.EntityFrameworkCore;
 
 // Tracer bullet (TRACER-BULLET.md): the thinnest path from Enable Banking to the device.
 // Steps live here in order — 1 authenticate, 2 consent round trip, 3 raw transactions, 4 the
-// domain mapping. The endpoints below still have no storage and no user. The database arrived with
-// NOTIFICATION-TRACER-BULLET.md step 1 and is wired but unused: each table gets its first reader
-// or writer in the step that needs it.
+// domain mapping. The step 1-4 endpoints below still have no storage and no user. The database
+// arrived with NOTIFICATION-TRACER-BULLET.md step 1: each table gets its first reader or writer in
+// the step that needs it — DeviceTokens in step 2, at the end of this file.
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -34,6 +35,10 @@ if (string.IsNullOrWhiteSpace(postgres))
 // as a scoped service, so the endpoints can keep asking for it directly.
 //
 // No migration on startup: `dotnet ef database update` stays a deliberate, manual step.
+//
+// Never set `Include Error Detail` in the connection string and never call
+// `EnableSensitiveDataLogging()`: either one puts the full device token (a delivery credential)
+// into logs and the dev error page — see DeviceTokenEndpoint.
 builder.Services.AddDbContextFactory<GreedyNoseDbContext>(db => db.UseNpgsql(postgres));
 
 builder.Services.AddSingleton(options);
@@ -254,6 +259,12 @@ app.MapGet("/debits", async (EnableBankingClient eb, ConsentStore consent, Cance
 
     return Results.Ok(mapped.Payload);
 });
+
+// --- Notification tracer bullet, step 2: device token registration ---------------------------
+
+// The app posts its FCM token here on every launch (and when Firebase rotates it); idempotent, no
+// auth yet — see DeviceTokenEndpoint for both. Takes the scoped GreedyNoseDbContext.
+app.MapPost("/device-token", DeviceTokenEndpoint.HandleAsync);
 
 app.Run();
 

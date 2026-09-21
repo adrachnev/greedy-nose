@@ -70,7 +70,7 @@ OS notification text.
 |---|---|
 | 0 Firebase project | **done, verified 2026-09-18** — real push sent from Firebase Console reached the device |
 | 1 Postgres schema | **done, verified 2026-09-20** — both migrations applied to the local Docker Postgres, six tables + one seeded user; two `coder-reviewer` passes, no MUST FIX left |
-| 2 Device token registration | not started |
+| 2 Device token registration | **done, verified on the device 2026-09-21** — the phone's real token lands in `DeviceTokens` within seconds of launch; two `coder-reviewer` passes per half, no MUST FIX left |
 | 3 Backend can send, proven in isolation | not started |
 | 4 Rules sync | not started |
 | 5 Rule engine, ported and tested | not started |
@@ -190,6 +190,54 @@ into `hooks.ts` alongside the existing stores.
 
 **Done when:** the token row appears in Postgres after installing the app.
 
+**Done, 2026-09-21.** Backend by `coder-backend`, app by `coder-mobile`, in parallel against a
+contract settled in the plan; each half reviewed twice by `coder-reviewer`.
+
+- **Contract, as built:** `POST /device-token`, `{ "token": "…" }` → `204` (stored or already
+  stored, idempotent), `400` problem details otherwise, `413` above an 8 KB body. A token is
+  **printable ASCII only (0x21–0x7E) and at most 1024 characters** — the plan said 4096, and the
+  first review found that a 3000-character token hits Postgres's btree row limit and a NUL
+  character fails with `22021`, both as a 500. ASCII-only makes length equal UTF-8 bytes, so 1024
+  sits about 2.6× under the index limit. Real FCM tokens are ~140–200 characters of
+  `[A-Za-z0-9:_-]`. The token is stored exactly as sent, never trimmed.
+- **Backend:** `backend/GreedyNose.Api/Notifications/DeviceTokenEndpoint.cs` and
+  `DeviceTokenValidation.cs`. Update-first upsert on the unique `Token`; a lost insert race (two
+  requests for the same new token) is caught on that one index name and answered `204` — a real
+  case, since the app posts once after `getToken` and again on `onTokenRefresh` at first launch.
+  The full token is never logged (a 6-character preview at most, and none for short tokens). No
+  auth, tagged `// PRAGMATIC:` with a `TODO.md` item to close it before any deploy.
+- **App:** `app/src/data/deviceStore.ts` (`startDeviceRegistration()`), reached through
+  `useDeviceRegistration()` in `hooks.ts`, called from `App.tsx`; the step 0 probe is gone. Asks for
+  `POST_NOTIFICATIONS` on Android 13+, reads the token, POSTs it, and POSTs again on
+  `onTokenRefresh`. Only in backend mode. **A denied permission still registers the token** (it is
+  valid regardless). No retry loop and no persisted flag — the upsert is idempotent and the next
+  launch retries. Never throws; a failure is a `console.warn` and the app is unaffected.
+- **A test bug the review missed, found by the database:** a jest run POSTed the fake
+  `test-fcm-token` into the dev database, because `App.test.tsx` rendered `App` and RN's `fetch`
+  really does reach `localhost` inside Jest. Fixed twice over: `App.test.tsx` now mocks
+  `deviceStore` and asserts the hook is wired (deleting the call from `App.tsx` fails a test), and
+  `jest.setup.js` installs a global `fetch` that rejects loudly ("tests must not reach the
+  network"). Proven with the backend listening: a control POST created a row, then the full suite
+  left none. (An earlier "proof" of this was worthless — the backend had failed to start — which is
+  why the control POST is part of the check.)
+- **Verified on the device (Sandbox backend, `adb reverse`, JS-only reload — no native rebuild was
+  needed):** first launch → a 142-character token for the seeded user appeared 6 s after start;
+  force-close and reopen → still one row, `UpdatedAt` moved (3 s); backend stopped, app launched →
+  opens normally, one `[deviceStore] could not reach the backend…` warning 3 s in, no crash; backend
+  restarted, relaunch → `UpdatedAt` moved again (7 s). **Not verified:** that the stored token is
+  the one the step 0 probe logged — the new code deliberately never logs it. Step 3, sending to it,
+  is the real proof.
+- **Phone gotchas found:** a screen-off (doze) phone freezes the app's network — one relaunch
+  logged `Network request failed` 43 s after start while the backend was up, and the screen had
+  gone to sleep; keep the screen awake (`adb shell input keyevent KEYCODE_WAKEUP`) during timed
+  tests. That one failure is a likely-but-unproven doze effect, not a bug found. Also: the
+  adb daemon was not running at session start and wireless pairing had lapsed (already in the
+  toolchain notes); when grepping `adb logcat -v time`, the level marker is `W/ReactNativeJS(…)`, not
+  ` W ` — the first backend-down check "found nothing" only because of that.
+- **Deferred, in `TODO.md`:** no auth, no retry on warm resume, stale rows after token rotation
+  (step 3+ must prune on FCM `UNREGISTERED`), the Error-level log noise from a handled race, no
+  server-side trace of a rejected token, and a few test/comment gaps.
+
 ### 3. Backend can send, proven in isolation
 
 Add the `FirebaseAdmin` NuGet package. A small `NotificationSender` wrapping
@@ -302,7 +350,13 @@ work in this repo.
 
 ## Picking this up next session
 
-Steps 0 and 1 are done. Start with **step 2** (device token registration) — and step 4's
-`POST /rules` contract question above needs an answer before its coder agent starts. Postgres must
-be running: `docker compose up -d` in `backend/` (the container restarts on its own after a reboot
-once Docker Desktop is up).
+Steps 0–2 are done. Start with **step 3** (the backend sends a push to the stored token) — it
+needs the Firebase service-account key at the repo root (gitignored, `*firebase-adminsdk*.json`).
+Step 4's `POST /rules` contract question (the `Rules→Payees` foreign key) needs an answer before
+its coder agent starts. Postgres must be running: `docker compose up -d` in `backend/` (the
+container restarts on its own after a reboot once Docker Desktop is up).
+
+**The backend is on the Sandbox application for this whole bullet** (switched 2026-09-21, so app
+launches — which call `/debits` — do not spend N26's ~4/day quota). Switch back to Production when
+the bullet ends: `ApplicationId`, `PrivateKeyPath`, `RedirectUrl` (`https://…`) and copy
+`consent.local.json.n26-bak` over `consent.local.json`.

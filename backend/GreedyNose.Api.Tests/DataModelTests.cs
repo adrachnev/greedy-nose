@@ -1,4 +1,5 @@
 using GreedyNose.Api.Data;
+using GreedyNose.Api.Notifications;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -52,6 +53,26 @@ public class DataModelTests
             i => i.Properties.Select(p => p.Name).SequenceEqual([nameof(NotificationLogEntry.UserId), nameof(NotificationLogEntry.DebitId)]));
 
         Assert.True(index.IsUnique);
+    }
+
+    /// <summary>
+    /// The device-token endpoint treats "the unique index on Token rejected this insert" as "already
+    /// registered" and matches it by index name. Both halves are pinned here: the index has to be
+    /// unique (or a duplicate token would quietly become two rows and one push twice), and its name
+    /// has to be the very constant the endpoint's catch uses — not a second copy of the string.
+    /// </summary>
+    [Fact]
+    public void The_device_token_index_is_unique_and_named_as_the_endpoints_race_catch_expects()
+    {
+        using var context = NewContext();
+        var entity = DesignTimeModel(context).FindEntityType(typeof(DeviceToken))!;
+
+        var index = Assert.Single(
+            entity.GetIndexes(),
+            i => i.Properties.Select(p => p.Name).SequenceEqual([nameof(DeviceToken.Token)]));
+
+        Assert.True(index.IsUnique);
+        Assert.Equal(DeviceTokenEndpoint.TokenIndexName, index.GetDatabaseName());
     }
 
     [Fact]

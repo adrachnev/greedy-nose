@@ -180,6 +180,48 @@ The four below are left open on purpose.
       and it is not ported yet — the fixtures' six payees hid how bad the unclassified state
       looks at real scale.
 
+## From notification tracer-bullet step 2 — device token registration, 2026-09-21
+
+- [ ] **`POST /device-token` has no authentication** (`backend/GreedyNose.Api/Notifications/DeviceTokenEndpoint.cs`).
+      Deliberate while the backend only runs on the owner's machine and there is one seeded user;
+      whoever can reach it can register a token. **Close before the backend is deployed anywhere.**
+      Also the moment real login exists: an existing token's row keeps its old `UserId` on
+      re-registration ("last registrant wins" is not implemented), so a phone handed to another
+      account would keep receiving the previous owner's alerts.
+- [ ] **A failed first registration is not retried until the process restarts.** The owner's
+      decision was "retry on the next launch", but Android can keep a cached process alive for
+      days, so a warm resume never retries (`app/src/data/deviceStore.ts`). Cheap fix if wanted:
+      re-attempt on `AppState` → `active` while no attempt has succeeded.
+- [ ] **Every token rotation leaves a stale row** — the backend upserts per token and never deletes
+      one. Step 3+ (the sender) must prune a token when FCM answers `UNREGISTERED`/`NOT_FOUND`.
+- [ ] Minor: the token read waits for the notification-permission dialog
+      (`deviceStore.ts`, `register()`), though the token does not depend on it — a user who kills
+      the app while the dialog is open stays unregistered for that launch.
+- [ ] **A handled insert race still logs two Error-level EF entries with a stack trace**
+      (`DeviceTokenEndpoint.cs`, the `catch` on the unique index). The race is real, not
+      theoretical: the app posts once after `getToken` and again on `onTokenRefresh` at first
+      launch (249 pairs in 320 concurrent posts in the review). The lines look like failures and
+      train people to ignore the log. A single `INSERT ... ON CONFLICT ("Token") DO UPDATE` would
+      remove the catch, the index-name coupling and the noise — at the price of raw SQL that the
+      no-database test project cannot check. Left as is by decision; revisit if the noise bites.
+- [ ] A rejected token (400) leaves no trace on the server (`Microsoft.AspNetCore` is at
+      Warning). If FCM ever changes its token format, the only sign is a warning in the phone's
+      logcat. A server warning with the length and the problem sentence (never the token) would
+      surface it.
+- [ ] Nothing in the automated suite pins `[RequestSizeLimit(8192)]` on the route — the manual
+      curl checks are the only coverage; deleting the attribute keeps all tests green.
+- [ ] `deviceStore.test.ts` leak tests: the "token that cannot be read" row never has the token in
+      play (vacuous), and no row's error carries the token, so the Error-expansion helper is never
+      shown to actually find one. Add a positive control; `{...arg}` also misses a non-enumerable
+      `cause`.
+- [ ] Comment drift: `app/jest.setup.js` says RN's `fetch` is "XHR-backed" in Jest, which it is
+      not (there `XMLHttpRequest` is undefined and `fetch` is Node's own), and
+      `backendFeed.test.ts:35` says Jest has no `fetch` at all. Reconcile the two. Also
+      `deviceStore.ts` says "there is no iOS branch" while `Platform.OS !== 'android'` is one
+      (on iOS it would register a token without asking permission); and `DeviceTokenEndpoint.cs`
+      says a maximum-length token needs "~1.1 KB" — as `\uXXXX` escapes it is ~6 KB (still
+      inside the 8 KB limit).
+
 ## Process
 
 - [ ] **The `SubagentStop` review hook did not request a review after `coder-backend` stopped**

@@ -63,12 +63,16 @@ not** — that rework is the next piece of work.
 **`NOTIFICATION-TRACER-BULLET.md` is the live document for the notification work; read its
 Progress section first.** Scoped and started 2026-09-17, right after the first tracer bullet
 closed — Postgres, FCM push, the polling worker, the rule engine and rules-sync are all new
-ground it covers step by step. **Steps 0 (Firebase, 2026-09-18) and 1 (Postgres schema,
-2026-09-20) are done; step 2, device token registration, is next.** Step 1: local Docker Postgres
-(`backend/docker-compose.yml`, loopback only), EF Core schema and two migrations in
-`backend/GreedyNose.Api/Data/`, one seeded user, two review passes. The decisions it left open for
-steps 2–6 (notably: `POST /rules` must handle the `Rules→Payees` foreign key) are written up in
-`NOTIFICATION-TRACER-BULLET.md` under step 1.
+ground it covers step by step. **Steps 0 (Firebase, 2026-09-18), 1 (Postgres schema, 2026-09-20)
+and 2 (device token registration, 2026-09-21) are done; step 3, the backend sending a push, is
+next.** Step 1: local Docker Postgres (`backend/docker-compose.yml`, loopback only), EF Core schema
+and two migrations in `backend/GreedyNose.Api/Data/`, one seeded user. Step 2: `POST /device-token`
+(printable ASCII, ≤1024 chars) plus `app/src/data/deviceStore.ts`; verified on the phone — the real
+FCM token lands in `DeviceTokens` within seconds of launch, survives relaunch and a backend outage.
+Two review passes per half each time. The decisions left open for later steps (notably: `POST
+/rules` must handle the `Rules→Payees` foreign key) are in `NOTIFICATION-TRACER-BULLET.md`.
+**The backend is on the Sandbox application until the bullet ends** (to spare N26's daily quota);
+the switch-back procedure is at the end of that file.
 
 **2026-09-17 — tracer bullet complete: step 6 confirmed on the device, all steps 0–7 done.** The
 backend was switched back to the **Production** application (`ApplicationId`/`PrivateKeyPath`/

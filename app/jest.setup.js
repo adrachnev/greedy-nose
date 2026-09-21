@@ -16,11 +16,36 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 // device), so importing it unmocked throws "Native module ... is not registered" the moment
 // any file requires it — including transitively, via App.tsx. Ships no jest mock of its own
 // (unlike async-storage above), so this is a hand-rolled stand-in covering only the modular API
-// surface App.tsx currently calls; extend it if a later step (device token registration) uses
-// more of it.
+// surface src/data/deviceStore.ts calls (getMessaging, getToken, onTokenRefresh) — nothing else
+// of the real package's ~30 exports exists here, so an import of anything else is undefined;
+// extend it if a later step uses more of it.
 jest.mock('@react-native-firebase/messaging', () => ({
-  AuthorizationStatus: { NOT_DETERMINED: -1, DENIED: 0, AUTHORIZED: 1, PROVISIONAL: 2 },
   getMessaging: jest.fn(),
   getToken: jest.fn(() => Promise.resolve('test-fcm-token')),
-  requestPermission: jest.fn(() => Promise.resolve(1)),
+  onTokenRefresh: jest.fn(() => () => {}),
 }));
+
+// No test may reach the network. React Native's `fetch` is XHR-backed and, in Jest, really does
+// connect to localhost — a rendered <App/> once POSTed the mock token above ('test-fcm-token')
+// into a developer's running dev database. So the default `fetch` fails loudly instead, and a
+// test that needs one assigns its own (global.fetch = fetchMock, as backendFeed.test.ts,
+// deviceStore.test.ts and hooksSource.test.tsx do). setupFiles run per test file, so a test's
+// own assignment never leaks into the next file.
+//
+// A plain function, not jest.fn(): a test's jest.restoreAllMocks()/resetAllMocks() must not be
+// able to strip the rejection and turn this back into a silent no-op. It rejects rather than
+// throws, because that is how a failed fetch reaches real callers (backendFeed's and
+// deviceStore's catch), so the code under test takes its ordinary failure path — and the error
+// message says why.
+//
+// Only `fetch` is guarded. Code that opens an XMLHttpRequest or a socket directly is not; there
+// is none in app/ today.
+global.fetch = function fetchNotMocked(input) {
+  return Promise.reject(
+    new Error(
+      `fetch is not mocked in this test — tests must not reach the network (called with ${String(
+        input,
+      )}). Assign global.fetch = jest.fn(...) in the test.`,
+    ),
+  );
+};

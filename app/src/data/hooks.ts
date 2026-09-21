@@ -8,7 +8,7 @@
 // derives it from the current rule), so there is nothing on the wire to
 // switch, and rules stay in the local store under both flags.
 
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { Debit, Payee, Rule, RuleDraft } from '../domain/model';
 import { debits as fixtureDebits, payees as fixturePayees, subscribeToDataChanges } from '../mocks/data';
 import {
@@ -20,6 +20,7 @@ import {
   subscribe as subscribeToFeed,
 } from './backendFeed';
 import { USE_BACKEND } from './config';
+import { startDeviceRegistration } from './deviceStore';
 import { getRules, saveRule, subscribe as subscribeToRules } from './rulesStore';
 
 // Every collection is read through useSyncExternalStore, so screens re-render
@@ -120,4 +121,17 @@ export function useDataSource(): DataSource {
     feed,
     refresh: USE_BACKEND ? feedRefresh : noopRefresh,
   };
+}
+
+// --- Push registration --------------------------------------------------------
+
+/**
+ * Keeps this phone's FCM token registered with the backend for as long as the
+ * app is mounted — call it once, from the root component. It reads nothing, so
+ * nothing re-renders on its account. It is gated on USE_BACKEND inside the
+ * store (fixture mode makes no prompt and no request), and the store's own
+ * idempotence is what makes a strict-mode remount safe; see deviceStore.ts.
+ */
+export function useDeviceRegistration(): void {
+  useEffect(() => startDeviceRegistration(), []);
 }
