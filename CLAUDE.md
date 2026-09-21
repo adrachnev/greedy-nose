@@ -63,9 +63,12 @@ not** — that rework is the next piece of work.
 **`NOTIFICATION-TRACER-BULLET.md` is the live document for the notification work; read its
 Progress section first.** Scoped and started 2026-09-17, right after the first tracer bullet
 closed — Postgres, FCM push, the polling worker, the rule engine and rules-sync are all new
-ground it covers step by step. **Steps 0 (Firebase, 2026-09-18), 1 (Postgres schema, 2026-09-20)
-and 2 (device token registration, 2026-09-21) are done; step 3, the backend sending a push, is
-next.** Step 1: local Docker Postgres (`backend/docker-compose.yml`, loopback only), EF Core schema
+ground it covers step by step. **Steps 0 (Firebase, 2026-09-18), 1 (Postgres schema, 2026-09-20),
+2 (device token registration) and 3 (the backend sends a push, both 2026-09-21) are done; steps 4
+(rules sync) and 5 (the rule engine port) are next, and independent of each other.** Step 3, verified
+on the phone: our own backend put a real banner on it, a high-priority push woke the screen while
+Dozing, and FCM's answers to bad tokens matched the sender's four outcomes (`Sent` /
+`TokenNoLongerValid` / `Rejected` / `Transient` — what step 6 may do with each is in the doc). Step 1: local Docker Postgres (`backend/docker-compose.yml`, loopback only), EF Core schema
 and two migrations in `backend/GreedyNose.Api/Data/`, one seeded user. Step 2: `POST /device-token`
 (printable ASCII, ≤1024 chars) plus `app/src/data/deviceStore.ts`; verified on the phone — the real
 FCM token lands in `DeviceTokens` within seconds of launch, survives relaunch and a backend outage.

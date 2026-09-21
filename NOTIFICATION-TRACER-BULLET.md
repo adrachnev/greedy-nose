@@ -71,7 +71,7 @@ OS notification text.
 | 0 Firebase project | **done, verified 2026-09-18** — real push sent from Firebase Console reached the device |
 | 1 Postgres schema | **done, verified 2026-09-20** — both migrations applied to the local Docker Postgres, six tables + one seeded user; two `coder-reviewer` passes, no MUST FIX left |
 | 2 Device token registration | **done, verified on the device 2026-09-21** — the phone's real token lands in `DeviceTokens` within seconds of launch; two `coder-reviewer` passes per half, no MUST FIX left |
-| 3 Backend can send, proven in isolation | not started |
+| 3 Backend can send, proven in isolation | **done, verified on the device 2026-09-21** — a real banner from our own backend; two `coder-reviewer` passes, no MUST FIX left |
 | 4 Rules sync | not started |
 | 5 Rule engine, ported and tested | not started |
 | 6 Ingestion worker — steady state | not started |
@@ -248,6 +248,76 @@ stored token and sends a fixed "hello" message.
 rather than the Firebase console. Isolates "can we send" before the rule engine sits on top of
 it. Endpoint gets deleted once step 6 proves the real path.
 
+**Done, 2026-09-21.** Backend only, by `coder-backend`; reviewed twice by `coder-reviewer`, and the
+review's findings changed the design in ways worth knowing before step 6.
+
+- **Shape:** `INotificationSender.SendAsync(PushMessage, ct) → SendResult`, implemented by
+  `FirebaseNotificationSender` (`backend/GreedyNose.Api/Notifications/`). Step 6's worker depends on
+  the interface, so its tests use a fake. `FirebaseOptions` (`Firebase:ServiceAccountPath`, a
+  user-secret like the Enable Banking key) is loaded once at startup into one `FirebaseApp`; a
+  missing or wrong key **refuses to start** with the exact `user-secrets` command in the message.
+- **The message:** a notification message (title + body), `Android.Priority = High`, TTL 1 hour, no
+  data payload. Pure builder, pinned by tests down to the wire format (`"priority":"high"`,
+  `"ttl":"3600s"`).
+- **Four outcomes, and who may do what with them** — the part step 6 must honour:
+
+  | Outcome | Means | Step 6 may |
+  |---|---|---|
+  | `Sent(messageId)` | FCM accepted it | log it |
+  | `TokenNoLongerValid` | `Unregistered` only | prune that token |
+  | `Rejected` | needs a human: `InvalidArgument`, `SenderIdMismatch` (wrong-project key), a revoked key (`TokenResponseException`), any bare 400/401/403/404 without a messaging code, any unknown code | keep the alert **pending**, alarm loudly, never prune |
+  | `Transient` | try later: `Unavailable`/`Internal`/`QuotaExceeded`, network failure, timeout, Google's token endpoint 429/5xx, and the SDK's `NullReferenceException` on any empty-bodied error (status lost) | retry, **bounded** (e.g. stop after the alert outlives its TTL) |
+
+  `Classify(MessagingErrorCode?, ErrorCode?)` is pure and table-driven, and a test fails the build
+  when the SDK adds a code to either enum without a decision. Caller cancellation always propagates
+  (as `OperationCanceledException`); an FCM timeout does not.
+- **Never logged:** the full device token or any key material. Failures log a scrubbed message, never
+  the exception object; the token is replaced by a 6-character preview (none for short tokens).
+- **The debug endpoint:** `POST /debug/send-test-push`, mapped **only in Development** (a launch
+  without the `http` profile is Production and fails closed → 404). Sends "Greedy Nose / Test push
+  from the backend" to every token of the seeded user; returns `[{ tokenPreview, outcome, messageId,
+  reason }]`, previews only; `409` when no token is registered; never deletes a token. Tagged
+  `// TRACER-BULLET:`; **delete it and its test after step 6.**
+- **Tests:** 164 backend tests, 0 warnings. `FirebaseSenderOfflineTests` runs the real sender against
+  a stub HTTP layer with fake credentials — checked to reach **no** network (whole suite under a dead
+  proxy, plus a socket/DNS probe with a positive control), and mutation-checked (dropping the
+  redaction, the cancellation line, or a table row each fails a test; one mutation — "429 removed" —
+  could not be run because Windows Application Control blocked the mutant build, and is argued from
+  the code only).
+- **Verified for real, on the phone (Sandbox backend, Development, app in the background — not
+  force-stopped):**
+  - Our backend → `Sent`, message id `projects/greedy-nose/messages/…`, and the banner "Greedy Nose ·
+    Test push from the backend" arrived. Re-done after the review fixes rebuilt the sender: `Sent`
+    again, a third notification on the phone.
+  - **Screen off (`Dozing`) → the push woke the screen within 5 s.** High priority does what the
+    product needs.
+  - **What FCM answers to bad tokens** (fake rows, deleted afterwards): a malformed token →
+    `Rejected` / `InvalidArgument`; a well-formed but unknown token → `TokenNoLongerValid` /
+    `Unregistered`. Both exactly as the classifier's documentation-based table predicted.
+  - The full device token appears **0** times in the backend log (nor its first 20 characters); only
+    the preview does. A bad key path refuses to start.
+- **Findings — all in `TODO.md`:**
+  - **`Message.Token` is `[Obsolete]` in FirebaseAdmin 3.6.0** ("Use `Fid` instead"). Registration
+    tokens still work today; a `#pragma` tagged `// PRAGMATIC:` carries it. Pin the package version
+    until the SDK announces the removal — moving to Firebase Installation IDs would be an app change.
+  - **Pushes arrive on FCM's default channel at importance 3 — no heads-up pop-up — with a generic
+    square small icon.** A dedicated high-importance channel and a real icon are a native app change
+    and their own decision before shipping.
+  - **The SDK retries a failing send internally** (4 retries with back-off, ~15 s on a 503 or
+    network error, not configurable); a black-holed connection waits 100 s. Step 6 needs a per-send
+    time budget.
+  - **FCM does not deliver to a force-stopped app.** Before shipping, check what the target phones do
+    and what the app should tell the user.
+  - The 1-hour TTL means a phone offline longer never gets the alert while a later `NotificationLog`
+    row would say "sent" — a step 6 question (does the app show missed alerts another way?).
+- **Process notes:** two reviewer conclusions were wrong or thin and were caught by checking — the
+  step 2 review said the App test made no network call (the database said otherwise), and this step's
+  first "0 requests" style checks are only worth anything with a positive control. **Do not
+  screenshot the phone's notification shade to check a push:** it captures the user's other,
+  private notifications. Read the app's own notifications with `adb shell dumpsys notification
+  --noredact` (the tag is `FCM-Notification:<n>`) instead. And the `SubagentStop` hook's review request
+  goes to the coder agent, not to the main session (`TODO.md`), so the review is started by hand.
+
 ### 4. Rules sync
 
 New `POST /rules` (`{ payeeId, classification: 'good' | 'bad', amountEUR?: number }`, upserts
@@ -350,11 +420,14 @@ work in this repo.
 
 ## Picking this up next session
 
-Steps 0–2 are done. Start with **step 3** (the backend sends a push to the stored token) — it
-needs the Firebase service-account key at the repo root (gitignored, `*firebase-adminsdk*.json`).
-Step 4's `POST /rules` contract question (the `Rules→Payees` foreign key) needs an answer before
-its coder agent starts. Postgres must be running: `docker compose up -d` in `backend/` (the
-container restarts on its own after a reboot once Docker Desktop is up).
+Steps 0–3 are done. Next are **step 4** (rules sync: `POST /rules` + `rulesStore.ts`'s `saveRule()`)
+and **step 5** (the rule engine port + tests). They are independent of each other, so two coders can
+run in parallel. Step 4's `POST /rules` contract question (the `Rules→Payees` foreign key: add the
+payee's name/initials/iban to the request, or upsert the payee) needs an answer before its coder
+agent starts. Step 6 (the ingestion worker) must read "Step 3 as built" above — the four send
+outcomes decide what it may retry, prune or keep pending. Postgres must be running:
+`docker compose up -d` in `backend/` (the container restarts on its own after a reboot once Docker
+Desktop is up); the Firebase key path is the `Firebase:ServiceAccountPath` user-secret.
 
 **The backend is on the Sandbox application for this whole bullet** (switched 2026-09-21, so app
 launches — which call `/debits` — do not spend N26's ~4/day quota). Switch back to Production when

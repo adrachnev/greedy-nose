@@ -180,6 +180,52 @@ The four below are left open on purpose.
       and it is not ported yet — the fixtures' six payees hid how bad the unclassified state
       looks at real scale.
 
+## From notification tracer-bullet step 3 — the backend sends a push, 2026-09-21
+
+- [ ] **`Message.Token` is `[Obsolete]` in FirebaseAdmin 3.6.0** ("Deprecated. Use `Fid` instead",
+      per the package's own XML docs). A Firebase Installation ID is a different identifier from
+      the FCM registration token `getToken()` returns, so moving to it means an app change and a
+      different `DeviceTokens` value. Registration tokens still work today (a real push landed on
+      the phone), so `FirebaseNotificationSender.BuildMessage` carries a
+      `#pragma warning disable CS0618` tagged `// PRAGMATIC:`. Revisit when the SDK announces the
+      removal of `Token` — pin the package version until then rather than upgrading blind.
+- [ ] **Pushes arrive on FCM's default channel and look plain.** Verified on the phone: the
+      notification sits on `fcm_fallback_notification_channel` at importance 3 — sound, shade
+      entry, **no heads-up pop-up** — with a generic square small icon. For "the moment a bad
+      payee charges you" a dedicated high-importance channel is the likely answer, plus a proper
+      monochrome small icon (`com.google.firebase.messaging.default_notification_icon` in the
+      manifest) and `channel_id` on the message. It needs a native channel in the app, so it is
+      its own decision before shipping — not step 3, not step 6.
+- [ ] **Step 6 must use the sender's four outcomes correctly** (`INotificationSender`,
+      `FirebaseNotificationSender.Classify`/`SendAsync`; written after both step 3 reviews):
+      - **`Rejected` means "needs a human — keep the alert pending", not "discard it".** It now
+        includes a revoked or wrong-project key (`TokenResponseException`, `SenderIdMismatch`),
+        a malformed token/request (`InvalidArgument`) and any bare 401/403/404 with no messaging
+        code. If the worker gave up on the alert there, a fixable outage would silently lose it.
+      - **Only `TokenNoLongerValid` (`Unregistered`) may prune a token.** A wrong-project key must
+        never empty the token list.
+      - **`Transient` needs a bound.** A natural one: stop retrying once the alert is older than
+        its 1-hour TTL. It also catches a network failure, a timeout, a Google token-endpoint
+        429/5xx, and the SDK's `NullReferenceException` on **any empty-bodied error response**
+        (the HTTP status is lost there, so an empty-bodied permanent 401/403/404 — a proxy, say —
+        also lands as `Transient`, logged at Error).
+      - **Time budget per send.** FirebaseAdmin retries a failing send 4 times with back-off
+        internally (~15 s for a 503/network error, not configurable through `AppOptions`), the
+        credential path adds ~3 s, and a black-holed connection waits the 100 s `HttpClient`
+        timeout. The poll loop needs its own budget.
+      - **Deadline vs. shutdown.** Any caller cancellation is rethrown as
+        `OperationCanceledException`, including the worker's own per-send `CancelAfter` — the
+        worker must tell its deadline from a host shutdown.
+      - Also: `SendResult` has a public constructor that can bypass its factories, and carries no
+        `Retry-After`; `catch (Exception)` also turns a future SDK validation failure (once a data
+        payload exists) into "Transient".
+- [ ] `POST /debug/send-test-push` (`DebugSendTestPushEndpoint.cs`, Development-only) is
+      temporary — delete it, and its test, once step 6 proves the real path.
+- [ ] FCM does not deliver to a **force-stopped** app (Settings → Force stop; on some OEMs a swipe
+      from recents behaves the same). The whole product rests on delivery, so before shipping,
+      check what the target phones do and what the app should tell the user (`R19`-style: never
+      silently dead).
+
 ## From notification tracer-bullet step 2 — device token registration, 2026-09-21
 
 - [ ] **`POST /device-token` has no authentication** (`backend/GreedyNose.Api/Notifications/DeviceTokenEndpoint.cs`).
@@ -193,7 +239,9 @@ The four below are left open on purpose.
       days, so a warm resume never retries (`app/src/data/deviceStore.ts`). Cheap fix if wanted:
       re-attempt on `AppState` → `active` while no attempt has succeeded.
 - [ ] **Every token rotation leaves a stale row** — the backend upserts per token and never deletes
-      one. Step 3+ (the sender) must prune a token when FCM answers `UNREGISTERED`/`NOT_FOUND`.
+      one. Step 6's dispatcher must prune a token when FCM answers `UNREGISTERED` — the sender's
+      `TokenNoLongerValid` outcome, and the only one that may prune (a bare 404 with no messaging
+      code is `Rejected`, see above).
 - [ ] Minor: the token read waits for the notification-permission dialog
       (`deviceStore.ts`, `register()`), though the token does not depend on it — a user who kills
       the app while the dialog is open stays unregistered for that launch.
@@ -224,15 +272,17 @@ The four below are left open on purpose.
 
 ## Process
 
-- [ ] **The `SubagentStop` review hook did not request a review after `coder-backend` stopped**
-      (seen again 2026-09-20, notification tracer-bullet step 1). The hook does run —
-      `.claude/hooks/last-subagent-stop.json` was rewritten when the reviewer stopped — but no
-      "requesting an automatic code review" instruction reached the session after the coder's
-      stop, so the main session had to start `coder-reviewer` by hand. Not yet known whether the
-      hook exited early (the size check or the `coder-reviewer` text match), or whether
-      `additionalContext` from a `SubagentStop` hook is simply not surfaced. To find out: log the
-      hook's decision (skip reason or "requesting") to a file, then run one more coder agent.
-      Until then, treat the hook as unreliable and start the review by hand.
+- [ ] **The `SubagentStop` review hook's request goes to the wrong recipient.** Seen at every
+      coder stop in the notification tracer bullet (steps 1–3). The hook does run and does decide
+      to request a review (`.claude/hooks/last-subagent-stop.json` is rewritten), but its
+      `additionalContext` is delivered to **the subagent that just stopped** — on 2026-09-21 the
+      step 3 coder reported, in its own final message, that "the hook asks for `coder-reviewer`
+      to be launched" and that it could not do that (no agent-spawning tool). The main session
+      never sees it, so nothing starts the review. Consequence: the process step 3 of `CLAUDE.md`
+      ("this half is already automated") is not automated. Until a hook mechanism that reaches the
+      *main* session is found (a `SubagentStop` hook cannot launch an agent itself, and its
+      context lands in the stopped agent), the main session starts `coder-reviewer` by hand after
+      every coder stops, and `CLAUDE.md` should say so instead of "already automated".
 
 ## Standing
 

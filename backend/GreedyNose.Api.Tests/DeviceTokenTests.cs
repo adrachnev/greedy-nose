@@ -88,29 +88,6 @@ public class DeviceTokenTests
         Assert.True(DeviceTokenValidation.TryValidate(padded.Trim(), out _), "The trimmed form is fine — the padding is what is refused.");
     }
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(5)]
-    [InlineData(31)]
-    [InlineData(32)]
-    [InlineData(163)]
-    [InlineData(1024)]
-    public void The_log_preview_never_contains_the_whole_token(int length)
-    {
-        var token = new string('x', length);
-
-        var preview = DeviceTokenValidation.Preview(token);
-
-        Assert.DoesNotContain(token, preview);
-        Assert.True(preview.Length <= 7, "Preview should be a short prefix plus an ellipsis.");
-    }
-
-    [Fact]
-    public void The_log_preview_of_a_real_length_token_still_tells_registrations_apart()
-    {
-        Assert.Equal("fcm-ab…", DeviceTokenValidation.Preview("fcm-ab" + new string('z', 150)));
-    }
-
     /// <summary>
     /// Proves two things for each kind of invalid input: the handler answers 400 problem details, and
     /// it does so before the database is touched — the context is null, so a handler that reached for

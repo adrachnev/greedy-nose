@@ -69,7 +69,7 @@ public static class DeviceTokenEndpoint
 
         if (refreshed > 0)
         {
-            logger.LogInformation("Device token refreshed — {TokenPreview}", DeviceTokenValidation.Preview(token));
+            logger.LogInformation("Device token refreshed — {TokenPreview}", TokenPreview.Of(token));
             return Results.NoContent();
         }
 
@@ -84,7 +84,7 @@ public static class DeviceTokenEndpoint
         try
         {
             await db.SaveChangesAsync(ct);
-            logger.LogInformation("Device token registered — {TokenPreview}", DeviceTokenValidation.Preview(token));
+            logger.LogInformation("Device token registered — {TokenPreview}", TokenPreview.Of(token));
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException
                                            {
@@ -104,7 +104,7 @@ public static class DeviceTokenEndpoint
             // never set it — EF Core logs the failed save itself, at error level, before this catch.
             logger.LogInformation(
                 "Device token already registered by a concurrent request — {TokenPreview}",
-                DeviceTokenValidation.Preview(token));
+                TokenPreview.Of(token));
         }
 
         return Results.NoContent();

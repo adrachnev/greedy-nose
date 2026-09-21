@@ -61,14 +61,4 @@ public static class DeviceTokenValidation
         problem = null;
         return true;
     }
-
-    /// <summary>
-    /// The only form of a token that may be logged. An FCM token is a delivery credential for one
-    /// phone, so the log gets enough to tell two registrations apart and never the whole thing.
-    ///
-    /// A token shorter than 32 characters is not shown at all: on a short string a 6-character prefix
-    /// is a large share of the secret. Real tokens are far longer, so in practice this only affects
-    /// test or malformed input.
-    /// </summary>
-    public static string Preview(string token) => token.Length >= 32 ? $"{token[..6]}…" : "…";
 }

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using GreedyNose.Api.Data;
 using GreedyNose.Api.EnableBanking;
+using FirebaseAdmin.Messaging;
 using GreedyNose.Api.Notifications;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,7 +10,8 @@ using Microsoft.EntityFrameworkCore;
 // Steps live here in order — 1 authenticate, 2 consent round trip, 3 raw transactions, 4 the
 // domain mapping. The step 1-4 endpoints below still have no storage and no user. The database
 // arrived with NOTIFICATION-TRACER-BULLET.md step 1: each table gets its first reader or writer in
-// the step that needs it — DeviceTokens in step 2, at the end of this file.
+// the step that needs it — DeviceTokens in step 2, the Firebase sender in step 3, both at the end of
+// this file.
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -54,11 +56,25 @@ builder.Services.AddHttpClient<EnableBankingClient>(client =>
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
+// Notification tracer bullet, step 3. One FirebaseApp for the process, created from the service-account
+// key the first time the sender is resolved — which happens right after Build(), so a missing or
+// unreadable key stops the backend at startup rather than on the first alert. Singletons on purpose:
+// FirebaseMessaging holds the credential and its token cache, and the step 6 worker is a singleton too.
+var firebase = builder.Configuration.GetSection(FirebaseOptions.SectionName).Get<FirebaseOptions>()
+               ?? new FirebaseOptions();
+builder.Services.AddSingleton(firebase);
+builder.Services.AddSingleton(sp =>
+    FirebaseMessaging.GetMessaging(FirebaseAppFactory.GetOrCreate(sp.GetRequiredService<FirebaseOptions>())));
+builder.Services.AddSingleton<INotificationSender, FirebaseNotificationSender>();
+
 var app = builder.Build();
 
 // Fail loudly at startup rather than on the first request: a missing key or application ID is a
 // setup mistake, and finding it in a 500 later costs more than finding it here.
 app.Services.GetRequiredService<EnableBankingSigner>();
+
+// Same for the Firebase key: resolving the sender loads it (see FirebaseAppFactory).
+app.Services.GetRequiredService<INotificationSender>();
 
 // Pick up a consent left by an earlier run, so restarting the backend does not cost a click.
 app.Services.GetRequiredService<ConsentStore>().Restore(TimeProvider.System.GetUtcNow());
@@ -265,6 +281,15 @@ app.MapGet("/debits", async (EnableBankingClient eb, ConsentStore consent, Cance
 // The app posts its FCM token here on every launch (and when Firebase rotates it); idempotent, no
 // auth yet — see DeviceTokenEndpoint for both. Takes the scoped GreedyNoseDbContext.
 app.MapPost("/device-token", DeviceTokenEndpoint.HandleAsync);
+
+// --- Notification tracer bullet, step 3: the backend can send ---------------------------------
+
+// TRACER-BULLET: proves the send path before the worker exists — delete once step 6 proves the real
+// path. Development only, because it pushes to the owner's real phone on demand and has no auth.
+if (app.Environment.IsDevelopment())
+{
+    app.MapPost("/debug/send-test-push", DebugSendTestPushEndpoint.HandleAsync);
+}
 
 app.Run();
 
