@@ -102,7 +102,7 @@ export default function PayeeEditScreen({ route, navigation }: Props) {
    */
   function handleSave() {
     if (!isGood) {
-      savePayeeRule(payee.id, { classification: 'bad', amountEUR: rule?.amountEUR });
+      savePayeeRule(payee, { classification: 'bad', amountEUR: rule?.amountEUR });
       navigation.goBack();
       return;
     }
@@ -112,14 +112,14 @@ export default function PayeeEditScreen({ route, navigation }: Props) {
       showToast(INVALID_AMOUNT_MESSAGE);
       return;
     }
-    savePayeeRule(payee.id, { classification: 'good', amountEUR: parsed.amountEUR });
+    savePayeeRule(payee, { classification: 'good', amountEUR: parsed.amountEUR });
     navigation.goBack();
   }
 
   /** Drops the limit and keeps the payee good — "no limit", not "alert on
    * everything" (R4a). Only reachable while the draft is good. */
   function handleClear() {
-    savePayeeRule(payee.id, { classification: 'good', amountEUR: undefined });
+    savePayeeRule(payee, { classification: 'good', amountEUR: undefined });
     navigation.goBack();
   }
 

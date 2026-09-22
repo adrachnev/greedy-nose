@@ -72,8 +72,8 @@ OS notification text.
 | 1 Postgres schema | **done, verified 2026-09-20** — both migrations applied to the local Docker Postgres, six tables + one seeded user; two `coder-reviewer` passes, no MUST FIX left |
 | 2 Device token registration | **done, verified on the device 2026-09-21** — the phone's real token lands in `DeviceTokens` within seconds of launch; two `coder-reviewer` passes per half, no MUST FIX left |
 | 3 Backend can send, proven in isolation | **done, verified on the device 2026-09-21** — a real banner from our own backend; two `coder-reviewer` passes, no MUST FIX left |
-| 4 Rules sync | not started |
-| 5 Rule engine, ported and tested | not started |
+| 4 Rules sync | **done, verified on the device 2026-09-22** — marking a payee creates both the `Payees` and `Rules` row; `coder-backend`/`coder-mobile` in parallel, two `coder-reviewer` passes on the backend half, no MUST FIX left |
+| 5 Rule engine, ported and tested | **done, verified 2026-09-22** — `RuleEngine.cs`, 210/210 backend tests pass |
 | 6 Ingestion worker — steady state | not started |
 | 7 Record findings | not started |
 
@@ -320,13 +320,60 @@ review's findings changed the design in ways worth knowing before step 6.
 
 ### 4. Rules sync
 
-New `POST /rules` (`{ payeeId, classification: 'good' | 'bad', amountEUR?: number }`, upserts
-`Rules` for the seeded user). `rulesStore.ts`'s `saveRule()` gets a sibling fire-and-forget call
-to it, following `backendFeed.ts`'s error-swallowing pattern — a failed sync must not block the
-local save, since AsyncStorage stays the in-app source of truth (`R6`) and Postgres's copy is
-only what the server-side rule engine reads.
+**Decided 2026-09-22, before starting:** `Rules` has a composite FK to `Payees`, and nothing
+writes `Payees` before step 6, so `POST /rules` cannot save a rule for a payee the DB has never
+seen. Resolved by having the request carry the payee's `name`/`initials`/`iban` (the app already
+has them) and having the endpoint upsert `Payees` before `Rules`. On that upsert, `FirstSeenAt`
+is set only when the row is first inserted (a synthetic "now") — never touched on update. Step 6,
+once it starts reading real bank data, must overwrite `FirstSeenAt` with the true (earlier) date
+for any payee step 4 created first; flagged again in step 6 below. Also decided: `POST /rules`
+must not let `ClassificationText.Parse`'s `FormatException` (right for a corrupt DB value) reach
+the client as a 500 — a `TryParse` or explicit 400 mapping, plus its own check that `amountEUR`
+is positive, same posture as `DeviceTokenValidation`.
 
-**Done when:** marking a payee in the app shows the row in `Rules`.
+New `POST /rules` (`{ payeeId, classification: 'good' | 'bad', amountEUR?: number, name,
+initials, iban? }`, upserts `Payees` then `Rules` for the seeded user). `rulesStore.ts`'s
+`saveRule()` gets a sibling fire-and-forget call to it, following `backendFeed.ts`'s
+error-swallowing pattern — a failed sync must not block the local save, since AsyncStorage stays
+the in-app source of truth (`R6`) and Postgres's copy is only what the server-side rule engine
+reads.
+
+**Done when:** marking a payee in the app shows the row in `Rules` (and, now, `Payees`).
+
+**Done, 2026-09-22.** `coder-backend` (`Rules/RulesEndpoint.cs`, `Rules/RulesValidation.cs`) and
+`coder-mobile` (`rulesStore.ts`, `hooks.ts`, `PayeeEditScreen.tsx`) ran in parallel against the
+contract above. Two `coder-reviewer` passes on the backend half (one fix round each), one pass on
+the mobile half (one fix round) — no MUST FIX left on either.
+
+- **Backend, as built:** one `SaveChangesAsync` covers both the `Payees` and `Rules` upsert (a
+  first draft split it into two calls on a mistaken belief that EF Core's change tracker needed
+  the split to order the FK insert correctly; checked against a real repro and collapsed to one).
+  A concurrent-insert race on either table's primary key (two `POST /rules` for the same brand-new
+  payee) is caught and resolved to `204`, same posture as `DeviceTokenEndpoint`'s own race catch —
+  but unlike that endpoint, if the two racing requests carried genuinely different content, the
+  loser's values are silently dropped and it still gets a `204` with no signal to retry. Judged
+  not worth fixing now: only reachable on a payee's very first-ever sync, and self-heals since
+  nothing downstream reads this table yet (deferred, `TODO.md`, revisit before step 6 trusts it).
+- **Mobile, as built:** `saveRule()`'s signature changed from `(payeeId, draft)` to
+  `(payee, draft)` so the sync call has the name/initials/iban to send; the local write path is
+  otherwise untouched. **No retry on a failed or never-attempted sync** — a rule created before
+  this sync code existed, or one whose one-shot sync attempt failed, stays local-only until the
+  user re-saves it by hand. Found live on the device this session: 2 pre-existing rules (from
+  earlier testing sessions, before this feature existed) never reached Postgres, while a newly
+  saved one did. Expected given the settled scope (a fire-and-forget call, not a backfill), and
+  already deferred in `TODO.md` with the likely fix (a per-launch resync of every local rule,
+  mirroring `deviceStore.ts`'s pattern) — matters once step 6 starts trusting this table for
+  pushes, not before.
+- **Verified on the device:** marking `KAUFLAND OSTFILDERN` good (no limit) produced both rows —
+  `Payees` (`name:KAUFLAND OSTFILDERN`, `Name`/`Initials` correct, `Iban` empty as expected for a
+  card payment) and `Rules` (`classification: good`) — within seconds, against the Sandbox
+  backend and local Docker Postgres.
+- **One coder agent got stuck after finishing its own work** (an infinite `SubagentStop`-hook
+  loop — see the `TODO.md` "Process" item on the hook landing in the stopped coder, not the main
+  session; this run hit the loop itself for the first time, not just the wrong-recipient symptom
+  previously seen). Its file edits were already complete and correct on disk; the main session
+  verified independently (build/test) and a fresh `coder-reviewer` reviewed the same diff, rather
+  than waiting on or resuming the stuck agent.
 
 ### 5. Rule engine, ported and tested
 
@@ -344,6 +391,22 @@ New `RuleEngineTests.cs` in the existing `GreedyNose.Api.Tests` project, mirrori
 
 **Done when:** tests pass.
 
+**Done, 2026-09-22.** `RuleEngine.cs` in `GreedyNose.Api.Domain`, built by `coder-backend`
+alongside step 4's backend half; reviewed twice (as part of the same two review passes as step
+4), a clean bill both times — no findings anywhere in this piece.
+
+- **As built:** a `DebitClassification` result type built only through factory methods
+  (`Good()`/`NoRule()`/`MarkedBad()`/`OverLimit(decimal)`), the C# stand-in for the TS
+  discriminated union's invariant ("over-limit with no limit" is unrepresentable). Confirmed by
+  grep, not just by reading, that `Domain/` has no reference to `Data` (EF entities) — the rule
+  engine takes plain values, not `Data.Rule`/`Data.Debit`. `FormatAmountEUR` builds the fixed
+  de-DE-style "49,00 €" via `ToString("F2", InvariantCulture)` + a comma swap, never
+  `CultureInfo.CurrentCulture` or `ToString("C")` — deterministic wherever it runs, matching the
+  doc's "Formatting default" decision that the server has no device locale.
+- **Verified:** `dotnet test` — 210/210 (up from 164 pre-existing), including the `A1`
+  leftover-limit regression and the R5a exactly-at-the-limit boundary, both ported case-for-case
+  from `classification.test.ts`.
+
 ### 6. The ingestion worker — steady state, configurable interval
 
 A `BackgroundService` using `PeriodicTimer`, interval from config
@@ -351,7 +414,9 @@ A `BackgroundService` using `PeriodicTimer`, interval from config
 6h default in `appsettings.json`. Each tick, per active consent:
 
 1. Fetch + map debits (the shared method from "What already exists").
-2. Upsert `Payees`.
+2. Upsert `Payees` — **must overwrite `FirstSeenAt`** with the mapper's real date, not just
+   insert-if-missing: step 4's `POST /rules` may already have created the row with a synthetic
+   "now" if the user reviewed a payee before its first real sync (decided 2026-09-22).
 3. **Bootstrap case** (no `Debits` rows yet for this account): insert everything as seen, no rule
    evaluation, no notification — a minimal stand-in for `R10b`'s "first sync" consequence,
    without building the full onboarding classify-screen mode (deferred, see below).
@@ -390,10 +455,11 @@ bootstrap/steady-state boundary that surprised us).
   reuses; may need a small refactor to expose it as a callable method rather than only living
   inside the `/debits` endpoint handler.
 - New: `backend/GreedyNose.Api/Data/GreedyNoseDbContext.cs` and entity classes.
-- New: `backend/GreedyNose.Api/Notifications/RuleEngine.cs`, `NotificationSender.cs`,
-  `IngestionWorker.cs`.
-- `backend/GreedyNose.Api.Tests/` — new `RuleEngineTests.cs` alongside the existing
-  `TransactionMapperTests.cs`.
+- Built: `backend/GreedyNose.Api/Domain/RuleEngine.cs` (step 5), `backend/GreedyNose.Api/Rules/`
+  (step 4's `RulesEndpoint.cs`/`RulesValidation.cs`). Still to come: `NotificationSender.cs`'s
+  caller and `IngestionWorker.cs` for step 6.
+- `backend/GreedyNose.Api.Tests/` — new `RuleEngineTests.cs`, `RulesTests.cs`, alongside the
+  existing `TransactionMapperTests.cs`.
 - `app/src/data/rulesStore.ts` — the sync call added to `saveRule()`.
 - New: `app/src/data/deviceStore.ts`, following `rulesStore.ts`'s shape.
 - `app/src/data/hooks.ts` — wiring the new device-token store in.
@@ -420,12 +486,10 @@ work in this repo.
 
 ## Picking this up next session
 
-Steps 0–3 are done. Next are **step 4** (rules sync: `POST /rules` + `rulesStore.ts`'s `saveRule()`)
-and **step 5** (the rule engine port + tests). They are independent of each other, so two coders can
-run in parallel. Step 4's `POST /rules` contract question (the `Rules→Payees` foreign key: add the
-payee's name/initials/iban to the request, or upsert the payee) needs an answer before its coder
-agent starts. Step 6 (the ingestion worker) must read "Step 3 as built" above — the four send
-outcomes decide what it may retry, prune or keep pending. Postgres must be running:
+Steps 0–5 are done. **Step 6** (the ingestion worker) is next, and must read "Step 3 as built"
+above — the four send outcomes decide what it may retry, prune or keep pending — and step 4's
+"as built" note on `Payees.FirstSeenAt`: step 6's own upsert must overwrite it with the real bank
+date, since step 4 may already have created the row with a synthetic "now". Postgres must be running:
 `docker compose up -d` in `backend/` (the container restarts on its own after a reboot once Docker
 Desktop is up); the Firebase key path is the `Firebase:ServiceAccountPath` user-secret.
 

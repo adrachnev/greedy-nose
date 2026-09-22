@@ -30,6 +30,7 @@ import ReactTestRenderer, { act } from 'react-test-renderer';
 import { Text } from 'react-native';
 import { useRuleForPayee, useSavePayeeRule } from '../hooks';
 import { classifyPayee } from '../../domain/classification';
+import { Payee } from '../../domain/model';
 
 jest.mock('../config', () => ({
   USE_BACKEND: false,
@@ -38,6 +39,10 @@ jest.mock('../config', () => ({
 }));
 
 const PAYEE_ID = 'payee-fitline';
+// Fixture mode never syncs (USE_BACKEND is mocked false above), so these
+// stand-ins only need to satisfy saveRule()'s Payee parameter — their
+// name/initials/iban are not asserted on anywhere in this file.
+const PAYEE: Payee = { id: PAYEE_ID, name: 'FitLine Gym', initials: 'FG', iban: '' };
 
 // Stands in for the debit list: derives the payee's status from the rule.
 function ListProbe() {
@@ -92,7 +97,7 @@ describe('useRuleForPayee re-render on mutation', () => {
 
     const saveRule = captureSaveRule();
     act(() => {
-      saveRule(PAYEE_ID, { classification: 'good' });
+      saveRule(PAYEE, { classification: 'good' });
     });
 
     // The regression: this must reflect the change, not just the detail
@@ -104,6 +109,7 @@ describe('useRuleForPayee re-render on mutation', () => {
 
 /** Both fields at once, since one Save now commits both. */
 const LIMIT_PAYEE_ID = 'payee-baeckerei';
+const LIMIT_PAYEE: Payee = { id: LIMIT_PAYEE_ID, name: 'Bäckerei Müller', initials: 'BM', iban: '' };
 
 function RuleProbe() {
   const rule = useRuleForPayee(LIMIT_PAYEE_ID);
@@ -125,19 +131,19 @@ describe('useSavePayeeRule re-render on mutation', () => {
     const saveRule = captureSaveRule();
 
     act(() => {
-      saveRule(LIMIT_PAYEE_ID, { classification: 'good', amountEUR: 15 });
+      saveRule(LIMIT_PAYEE, { classification: 'good', amountEUR: 15 });
     });
     expect(textAt(renderer.root, 'rule-status')).toBe('good/over-15');
 
     // Clearing the limit is the other half of the same write path (R4a).
     act(() => {
-      saveRule(LIMIT_PAYEE_ID, { classification: 'good', amountEUR: undefined });
+      saveRule(LIMIT_PAYEE, { classification: 'good', amountEUR: undefined });
     });
     expect(textAt(renderer.root, 'rule-status')).toBe('good/no-limit');
 
     // And both fields moving in one save must land in one render pass.
     act(() => {
-      saveRule(LIMIT_PAYEE_ID, { classification: 'bad', amountEUR: 40 });
+      saveRule(LIMIT_PAYEE, { classification: 'bad', amountEUR: 40 });
     });
     expect(textAt(renderer.root, 'rule-status')).toBe('bad/over-40');
   });

@@ -137,19 +137,38 @@ not** — that rework is the next piece of work.
 **`NOTIFICATION-TRACER-BULLET.md` is the live document for the notification work; read its
 Progress section first.** Scoped and started 2026-09-17, right after the first tracer bullet
 closed — Postgres, FCM push, the polling worker, the rule engine and rules-sync are all new
-ground it covers step by step. **Steps 0 (Firebase, 2026-09-18), 1 (Postgres schema, 2026-09-20),
-2 (device token registration) and 3 (the backend sends a push, both 2026-09-21) are done; steps 4
-(rules sync) and 5 (the rule engine port) are next, and independent of each other.** Step 3, verified
-on the phone: our own backend put a real banner on it, a high-priority push woke the screen while
-Dozing, and FCM's answers to bad tokens matched the sender's four outcomes (`Sent` /
-`TokenNoLongerValid` / `Rejected` / `Transient` — what step 6 may do with each is in the doc). Step 1: local Docker Postgres (`backend/docker-compose.yml`, loopback only), EF Core schema
+ground it covers step by step. **Steps 0–5 are done (0 Firebase 2026-09-18, 1 Postgres schema
+2026-09-20, 2 device token registration and 3 the backend sends a push both 2026-09-21, 4 rules
+sync and 5 the rule engine port both 2026-09-22); step 6 (the ingestion worker) is next.**
+**The backend is on the Sandbox application until the bullet ends** (to spare N26's daily quota);
+the switch-back procedure is at the end of that file.
+
+**2026-09-22 — steps 4 and 5 done, as an owner-approved "automated run" (first use of that
+mode).** Step 5: `RuleEngine.cs` (backend), a line-for-line port of `classification.ts`'s R5
+table — 210/210 tests pass, no review findings. Step 4: `POST /rules` (`Rules/RulesEndpoint.cs`)
+plus `rulesStore.ts`'s sync call, built by `coder-backend`/`coder-mobile` in parallel against a
+contract settled in plan mode (the request carries the payee's name/initials/iban so the endpoint
+can upsert `Payees` before `Rules`, satisfying the composite FK). Verified on the device: marking
+a payee creates both the `Payees` and `Rules` row. Two `coder-reviewer` passes on the backend
+half found and fixed an unhandled concurrent-insert race; a narrower race (the loser of that race
+can silently lose its own data) and a few test-coverage gaps were judged low-severity and
+deferred to `TODO.md` rather than spent on a third fix round. One coder agent got stuck in an
+infinite loop after finishing its own work — see `TODO.md`'s "Process" item on the `SubagentStop`
+review hook; worked around by verifying its (correct, already-saved) output directly rather than
+waiting on it. Also found on the device, not a regression: rules saved before this session have
+no retry mechanism and never reached the backend — expected given the step's scope, fix deferred.
+The decisions left open for step 6 (notably: its own `Payees` upsert must overwrite
+`FirstSeenAt`, which step 4 may have already set to a synthetic "now") are in
+`NOTIFICATION-TRACER-BULLET.md`.
+
+Step 3, verified on the phone: our own backend put a real banner on it, a high-priority push woke
+the screen while Dozing, and FCM's answers to bad tokens matched the sender's four outcomes
+(`Sent` / `TokenNoLongerValid` / `Rejected` / `Transient` — what step 6 may do with each is in the
+doc). Step 1: local Docker Postgres (`backend/docker-compose.yml`, loopback only), EF Core schema
 and two migrations in `backend/GreedyNose.Api/Data/`, one seeded user. Step 2: `POST /device-token`
 (printable ASCII, ≤1024 chars) plus `app/src/data/deviceStore.ts`; verified on the phone — the real
 FCM token lands in `DeviceTokens` within seconds of launch, survives relaunch and a backend outage.
-Two review passes per half each time. The decisions left open for later steps (notably: `POST
-/rules` must handle the `Rules→Payees` foreign key) are in `NOTIFICATION-TRACER-BULLET.md`.
-**The backend is on the Sandbox application until the bullet ends** (to spare N26's daily quota);
-the switch-back procedure is at the end of that file.
+Two review passes per half each time.
 
 **2026-09-17 — tracer bullet complete: step 6 confirmed on the device, all steps 0–7 done.** The
 backend was switched back to the **Production** application (`ApplicationId`/`PrivateKeyPath`/

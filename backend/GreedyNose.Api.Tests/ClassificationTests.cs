@@ -38,4 +38,29 @@ public class ClassificationTests
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => _converter.ConvertToProvider((Classification)99));
     }
+
+    [Theory]
+    [InlineData("good", Classification.Good)]
+    [InlineData("bad", Classification.Bad)]
+    public void TryParse_reads_the_apps_lowercase_text(string text, Classification expected)
+    {
+        Assert.True(ClassificationText.TryParse(text, out var classification));
+        Assert.Equal(expected, classification);
+    }
+
+    /// <summary>
+    /// The client-facing counterpart to <c>Converter_refuses_a_stored_value_it_does_not_recognise</c>
+    /// above: same bad inputs, but <see cref="ClassificationText.TryParse"/> must answer <c>false</c>
+    /// instead of throwing — a client's bad <c>POST /rules</c> body is a 400, not a 500.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("maybe")]
+    [InlineData("Good")]
+    [InlineData("BAD")]
+    public void TryParse_returns_false_for_anything_it_does_not_recognise(string? text)
+    {
+        Assert.False(ClassificationText.TryParse(text, out _));
+    }
 }

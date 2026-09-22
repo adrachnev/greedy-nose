@@ -4,6 +4,7 @@ using GreedyNose.Api.Data;
 using GreedyNose.Api.EnableBanking;
 using FirebaseAdmin.Messaging;
 using GreedyNose.Api.Notifications;
+using GreedyNose.Api.Rules;
 using Microsoft.EntityFrameworkCore;
 
 // Tracer bullet (TRACER-BULLET.md): the thinnest path from Enable Banking to the device.
@@ -290,6 +291,13 @@ if (app.Environment.IsDevelopment())
 {
     app.MapPost("/debug/send-test-push", DebugSendTestPushEndpoint.HandleAsync);
 }
+
+// --- Notification tracer bullet, step 4: rules sync --------------------------------------------
+
+// app/src/data/rulesStore.ts posts here after every local save (fire-and-forget, error-swallowed —
+// AsyncStorage stays the source of truth per R6). Upserts Payees then Rules for the seeded user;
+// see RulesEndpoint for the Rules→Payees FK ordering and the no-auth PRAGMATIC note.
+app.MapPost("/rules", RulesEndpoint.HandleAsync);
 
 app.Run();
 

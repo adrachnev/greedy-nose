@@ -180,6 +180,55 @@ The four below are left open on purpose.
       and it is not ported yet — the fixtures' six payees hid how bad the unclassified state
       looks at real scale.
 
+## From notification tracer-bullet step 4 — rules sync, 2026-09-22
+
+- [ ] **A failed first sync of a rule is never retried** (`app/src/data/rulesStore.ts`,
+      `syncRuleToBackend`). Same shape as step 2's device-token finding below, and not fixed for
+      the same reason: the owner's decision there was "retry on the next launch", but this step's
+      plan only called for a fire-and-forget call whose failure must not block the local save —
+      not a retry mechanism. If the one sync attempt fails (offline, backend down), the rule stays
+      correct in `AsyncStorage` (R6) but never reaches Postgres, so that payee can never trigger a
+      push until the user re-saves the rule by hand. Likely fix: a per-launch resync of every local
+      rule, mirroring `deviceStore.ts`'s pattern (attempt once per launch, no persisted "already
+      synced" flag, safe because the backend's upsert is idempotent).
+- [ ] **Saving a rule for an unknown payee syncs a placeholder name/initials to the backend**
+      (`app/src/screens/PayeeEditScreen.tsx` via `domain/payees.ts`'s `unknownPayee` fallback,
+      through `saveRule`). The `Payees` row the backend upserts gets `"Unknown payee"`/`"?"`
+      instead of the real name. Low priority: step 4's contract sets `FirstSeenAt` only on first
+      insert and never touches it on update, so the row self-heals once step 6's ingestion worker
+      upserts the real payee data from a later fetch — the placeholder is a brief, cosmetic
+      mismatch, not a permanent one.
+- [ ] **`POST /rules` has no authentication** (`backend/GreedyNose.Api/Rules/RulesEndpoint.cs`).
+      Same posture and same reason as `POST /device-token`'s finding below: deliberate while the
+      backend only runs on the owner's machine and there is one seeded user; whoever can reach it
+      can rewrite that user's payees and rules. **Close before the backend is deployed anywhere,**
+      ideally in the same pass that closes `POST /device-token`.
+- [ ] **On the insert race (`RulesEndpoint.cs`'s `catch` on `PayeePrimaryKeyName`/
+      `RulePrimaryKeyName`), the loser's own content can be silently discarded.** Two concurrent
+      `POST /rules` for the same brand-new payeeId with genuinely different classification/amount:
+      the winner's write persists, and the loser gets the same `204` the winner does — unlike
+      `DeviceTokenEndpoint`'s equivalent race (where the raced content *is* the key, so there is
+      nothing to lose), here the loser has no signal that its own values didn't land, so it does
+      not know to re-POST. Narrow and self-healing today — only reachable on a payee's very
+      first-ever sync, and `AsyncStorage` stays the source of truth (R6) with nothing downstream
+      reading this table yet — but revisit before step 6 starts trusting `Rules` as authoritative.
+      Second review pass, 2026-09-22.
+- [ ] **The race catch above is untestable against the InMemory provider, and `RulesTests.cs`
+      doesn't say so** (unlike `DeviceTokenTests.cs`, which does). `PostgresException` never
+      surfaces from `UseInMemoryDatabase`, so the `catch`'s pattern match can only be proven
+      against real Postgres. Also missing: a test pinning `RulesEndpoint.PayeePrimaryKeyName`/
+      `RulePrimaryKeyName` against the actual EF model, the way `DataModelTests.cs` pins
+      `DeviceTokenEndpoint.TokenIndexName` — without one, a future migration renaming either
+      constraint would make the catch silently stop matching. Second review pass, 2026-09-22.
+- [ ] **`RulesEndpoint.PayeeIdPreview` shows a short payee id (≤10 chars) completely unredacted**,
+      unlike `TokenPreview.Of`'s more conservative "too short → show nothing". Harmless today —
+      every real payee id (`TransactionMapper`'s `iban:…`/`name:…` keys) is well over 10 chars —
+      but inconsistent. Second review pass, 2026-09-22.
+- [ ] **`RulesEndpoint`'s handled insert race logs two Error-level EF entries with a stack trace**,
+      same noise as the already-tracked `DeviceTokenEndpoint` finding below — not re-explained
+      here, just not previously written down for this endpoint too. Second review pass,
+      2026-09-22.
+
 ## From notification tracer-bullet step 3 — the backend sends a push, 2026-09-21
 
 - [ ] **`Message.Token` is `[Obsolete]` in FirebaseAdmin 3.6.0** ("Deprecated. Use `Fid` instead",

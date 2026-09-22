@@ -16,9 +16,9 @@
 // store is the only source of truth a rule ever has, under either flag.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Rule, RuleDraft } from '../domain/model';
+import { Payee, Rule, RuleDraft } from '../domain/model';
 import { FIXTURE_SEED_RULES } from '../mocks/data';
-import { USE_BACKEND } from './config';
+import { BACKEND_BASE_URL, BACKEND_TIMEOUT_MS, USE_BACKEND } from './config';
 
 /**
  * Versioned in the key itself: a future breaking schema change moves to
@@ -211,9 +211,16 @@ function persist(next: Rule[]): void {
  * reference and subscribers actually re-render — this codebase shipped that
  * exact regression once already (see the array-reference discipline pinned in
  * this module's tests).
+ *
+ * Takes the whole `payee`, not just its id: the local write below only ever
+ * needed `payee.id` (and still keys on it, exactly as before), but the
+ * backend sync this function also kicks off (NOTIFICATION-TRACER-BULLET.md
+ * step 4) needs `name`/`initials`/`iban` too, since `POST /rules` upserts a
+ * `Payees` row the backend may never have seen (nothing writes `Payees`
+ * before step 6).
  */
-export function saveRule(payeeId: string, draft: RuleDraft): void {
-  const existing = rules.find(r => r.payeeId === payeeId);
+export function saveRule(payee: Payee, draft: RuleDraft): void {
+  const existing = rules.find(r => r.payeeId === payee.id);
   if (
     existing &&
     existing.classification === draft.classification &&
@@ -221,11 +228,80 @@ export function saveRule(payeeId: string, draft: RuleDraft): void {
   ) {
     return;
   }
-  const next: Rule = { payeeId, classification: draft.classification };
+  const next: Rule = { payeeId: payee.id, classification: draft.classification };
   if (draft.amountEUR != null) {
     next.amountEUR = draft.amountEUR;
   }
-  const nextRules = existing ? rules.map(r => (r.payeeId === payeeId ? next : r)) : [...rules, next];
+  const nextRules = existing ? rules.map(r => (r.payeeId === payee.id ? next : r)) : [...rules, next];
   setRules(nextRules);
   persist(nextRules);
+  // Not awaited: sync reports through console.warn, same posture as
+  // deviceStore.ts's postToken() — see syncRuleToBackend's own comment.
+  syncRuleToBackend(payee, next);
+}
+
+/**
+ * Fire-and-forget sibling to the local write above, same shape and posture as
+ * deviceStore.ts's postToken(): AbortController + BACKEND_TIMEOUT_MS so a dead
+ * backend can't hang behind Android's own multi-minute socket timeout, never
+ * throws, and a non-2xx or network failure is a console.warn — never a reason
+ * to block or revert the local save, which already landed above. AsyncStorage
+ * stays the in-app source of truth (R6); Postgres's copy is only what the
+ * server-side rule engine reads.
+ *
+ * Skipped outright in fixture mode: there is nothing on the backend to sync
+ * to, and fixture payee ids (`payee-netflix`) use a different scheme entirely
+ * from the backend's (`name:LIDL CONNECT`) — see config.ts's own note on why a
+ * rule saved under one scheme simply matches nothing under the other.
+ *
+ * **Known gap, deliberately not fixed here (see TODO.md):** unlike
+ * deviceStore.ts's register(), which gets a fresh attempt on every launch,
+ * there is no retry when this very first sync fails — offline, or the
+ * backend down at exactly the moment the user saves. If it fails, that rule
+ * can silently never reach Postgres, so that payee's charges can never
+ * trigger a push until the user re-opens the rule and saves it again by
+ * hand. AsyncStorage still holds the correct rule throughout (R6), so
+ * nothing is lost *in the app* — only the backend's copy is stale. Building
+ * a per-launch resync of every local rule (mirroring deviceStore.ts's
+ * pattern) is bigger than this step's plan called for ("a sibling
+ * fire-and-forget call... failure must not block local save"); tracked as a
+ * follow-up rather than built now.
+ */
+async function syncRuleToBackend(payee: Payee, rule: Rule): Promise<void> {
+  if (!USE_BACKEND) {
+    return;
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
+  try {
+    // Key order matches the contract in NOTIFICATION-TRACER-BULLET.md's step 4
+    // exactly — not load-bearing for the backend, but keeps this body legible
+    // against the doc it implements. amountEUR/iban are omitted rather than
+    // sent as undefined/empty, matching the contract's `?`.
+    const body: Record<string, unknown> = {
+      payeeId: payee.id,
+      classification: rule.classification,
+    };
+    if (rule.amountEUR != null) {
+      body.amountEUR = rule.amountEUR;
+    }
+    body.name = payee.name;
+    body.initials = payee.initials;
+    if (payee.iban) {
+      body.iban = payee.iban;
+    }
+    const response = await fetch(`${BACKEND_BASE_URL}/rules`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      console.warn(`[rulesStore] backend did not store the rule: HTTP ${response.status}`);
+    }
+  } catch (error) {
+    console.warn('[rulesStore] could not reach the backend to sync the rule', error);
+  } finally {
+    clearTimeout(timeout);
+  }
 }

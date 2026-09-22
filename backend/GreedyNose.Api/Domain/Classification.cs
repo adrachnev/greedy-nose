@@ -43,4 +43,26 @@ public static class ClassificationText
         Bad => Classification.Bad,
         _ => throw new FormatException($"'{text}' is not a classification (expected '{Good}' or '{Bad}')."),
     };
+
+    /// <summary>
+    /// Same mapping as <see cref="Parse"/>, without the throw: for a client-supplied string (e.g.
+    /// <c>POST /rules</c>'s body), where an unrecognised value is a bad request (400), not a corrupt
+    /// stored value. <see cref="Parse"/> stays reserved for reading the database, where "unrecognised"
+    /// really does mean something is broken and failing loudly is correct.
+    /// </summary>
+    public static bool TryParse(string? text, out Classification classification)
+    {
+        switch (text)
+        {
+            case Good:
+                classification = Classification.Good;
+                return true;
+            case Bad:
+                classification = Classification.Bad;
+                return true;
+            default:
+                classification = default;
+                return false;
+        }
+    }
 }
