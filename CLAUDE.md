@@ -137,11 +137,27 @@ not** — that rework is the next piece of work.
 **`NOTIFICATION-TRACER-BULLET.md` is the live document for the notification work; read its
 Progress section first.** Scoped and started 2026-09-17, right after the first tracer bullet
 closed — Postgres, FCM push, the polling worker, the rule engine and rules-sync are all new
-ground it covers step by step. **Steps 0–5 are done (0 Firebase 2026-09-18, 1 Postgres schema
+ground it covers step by step. **Steps 0–6 are done (0 Firebase 2026-09-18, 1 Postgres schema
 2026-09-20, 2 device token registration and 3 the backend sends a push both 2026-09-21, 4 rules
-sync and 5 the rule engine port both 2026-09-22); step 6 (the ingestion worker) is next.**
-**The backend is on the Sandbox application until the bullet ends** (to spare N26's daily quota);
-the switch-back procedure is at the end of that file.
+sync, 5 the rule engine port and 6 the ingestion worker all 2026-09-22); step 7 (record findings,
+docs-only) is next.** **The backend is on the Sandbox application until the bullet ends** (to
+spare N26's daily quota); the switch-back procedure is at the end of that file.
+
+**2026-09-22 — step 6 (the ingestion worker) done, verified on the device.** A bootstrap tick
+silently seeded 92 historical debits with no notifications; two later mock transactions for
+unclassified payees each produced exactly one real push, a following poll did not resend either,
+and marking one of those payees Good in the app silenced its next debit. Built by the main
+session directly, not `coder-backend` — agent-spawning was blocked by a permission classifier for
+this whole step (both a resume and a fresh spawn were denied). This is the exact process gap
+`CLAUDE.md` already names as dangerous (main-session code with no automatic review), compensated
+by starting `coder-reviewer` by hand three times regardless, since that agent type was not
+blocked. Two real MUST FIX findings came back, both about the one failure this product cannot
+have — a charge that silently never notifies — and both fixed and verified by reproduction: a
+bulk-insert-then-classify shape that could strand an already-committed debit if a tick was cut
+short, and a payee-upsert race that poisoned the rest of a tick's writes. See
+`NOTIFICATION-TRACER-BULLET.md`'s step 6 "as built" for the full detail, including the
+`IDebitsFetcher` seam added beyond the plan (mirrors `INotificationSender`, needed so the new
+tests exercise real mapping logic without a socket).
 
 **2026-09-22 — steps 4 and 5 done, as an owner-approved "automated run" (first use of that
 mode).** Step 5: `RuleEngine.cs` (backend), a line-for-line port of `classification.ts`'s R5

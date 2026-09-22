@@ -121,6 +121,10 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
                 .WithMany()
                 .HasForeignKey(d => new { d.UserId, d.PayeeId })
                 .OnDelete(DeleteBehavior.NoAction);
+
+            // Step 6's bootstrap check ("any debits for this account yet?") is a WHERE on exactly
+            // these two columns, run once per poll tick — flagged as needed back in step 1's review.
+            debit.HasIndex(d => new { d.UserId, d.AccountKey });
         });
 
         modelBuilder.Entity<NotificationLogEntry>(entry =>

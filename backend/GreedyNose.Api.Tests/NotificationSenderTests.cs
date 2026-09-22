@@ -1,10 +1,6 @@
-using System.Text.Json;
 using FirebaseAdmin;
 using FirebaseAdmin.Messaging;
 using GreedyNose.Api.Notifications;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GreedyNose.Api.Tests;
 
@@ -291,60 +287,4 @@ public class NotificationSenderTests
         }
     }
 
-    // --- The debug endpoint's response shape ------------------------------------------------------------
-
-    private sealed class FakeSender(Func<PushMessage, SendResult> respond) : INotificationSender
-    {
-        public List<PushMessage> Sent { get; } = [];
-
-        public Task<SendResult> SendAsync(PushMessage message, CancellationToken ct)
-        {
-            Sent.Add(message);
-            return Task.FromResult(respond(message));
-        }
-    }
-
-    [Fact]
-    public async Task With_no_registered_token_the_debug_endpoint_answers_409_and_sends_nothing()
-    {
-        var sender = new FakeSender(_ => throw new InvalidOperationException("nothing should be sent"));
-
-        var result = await DebugSendTestPushEndpoint.SendToAsync([], sender, NullLogger.Instance, CancellationToken.None);
-
-        var problem = Assert.IsType<ProblemHttpResult>(result);
-        Assert.Equal(StatusCodes.Status409Conflict, problem.StatusCode);
-        Assert.Empty(sender.Sent);
-    }
-
-    [Fact]
-    public async Task The_debug_endpoint_reports_every_token_by_preview_and_never_returns_one_whole()
-    {
-        var goodToken = "good-token-" + new string('a', 60);
-        var deadToken = "dead-token-" + new string('b', 60);
-        var sender = new FakeSender(m => m.Token == goodToken
-            ? SendResult.Accepted("projects/greedy-nose/messages/42")
-            : SendResult.Failed(SendOutcome.TokenNoLongerValid, "Unregistered"));
-
-        // The dead token comes first: one failure must not stop the others from being tried.
-        var result = await DebugSendTestPushEndpoint.SendToAsync(
-            [deadToken, goodToken], sender, NullLogger.Instance, CancellationToken.None);
-
-        var ok = Assert.IsType<Ok<List<TestPushReport>>>(result);
-        Assert.Equal(
-            [
-                new TestPushReport(TokenPreview.Of(deadToken), "TokenNoLongerValid", null, "Unregistered"),
-                new TestPushReport(TokenPreview.Of(goodToken), "Sent", "projects/greedy-nose/messages/42", null),
-            ],
-            ok.Value);
-
-        var body = JsonSerializer.Serialize(ok.Value);
-        Assert.DoesNotContain(goodToken, body);
-        Assert.DoesNotContain(deadToken, body);
-
-        // What was sent is the fixed test message, to each token.
-        Assert.Equal(
-            [new PushMessage(deadToken, "Greedy Nose", "Test push from the backend"),
-             new PushMessage(goodToken, "Greedy Nose", "Test push from the backend")],
-            sender.Sent);
-    }
 }

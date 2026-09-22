@@ -180,6 +180,22 @@ The four below are left open on purpose.
       and it is not ported yet — the fixtures' six payees hid how bad the unclassified state
       looks at real scale.
 
+## From notification tracer-bullet step 6 — the ingestion worker, 2026-09-22
+
+- [ ] **`Payee.FirstSeenAt` is only as accurate as one page of `/debits`.** `IngestionRunner`
+      sets it to the earliest `Timestamp` seen in the current fetch, which is correct today but is
+      the earliest date visible in one page, not necessarily the payee's true first-ever charge —
+      `/debits` still reads a single page (`continuation_key` is ignored, tracked separately above).
+      Revisit once pagination is turned on.
+- [ ] **`ClassifyInsertAndNotifyAsync`'s `NotificationLog` race-catch can silently drop a token
+      prune from the same iteration** (`IngestionRunner.cs`, the `IX_NotificationLog_UserId_DebitId`
+      catch). `db.ChangeTracker.Clear()` — needed so the poisoned insert doesn't abort the rest of
+      the tick, same fix as the payee-upsert race — also discards any `DeviceTokens.Remove(token)`
+      queued earlier in that same call. Only reachable with two processes concurrently ingesting the
+      same account, which this tracer bullet does not deploy (`IngestionWorker` runs one tick at a
+      time, one process). Self-heals: FCM keeps answering `TokenNoLongerValid` for that token on
+      every later bad debit until it is actually pruned. Third review pass, 2026-09-22.
+
 ## From notification tracer-bullet step 4 — rules sync, 2026-09-22
 
 - [ ] **A failed first sync of a rule is never retried** (`app/src/data/rulesStore.ts`,
@@ -268,8 +284,6 @@ The four below are left open on purpose.
       - Also: `SendResult` has a public constructor that can bypass its factories, and carries no
         `Retry-After`; `catch (Exception)` also turns a future SDK validation failure (once a data
         payload exists) into "Transient".
-- [ ] `POST /debug/send-test-push` (`DebugSendTestPushEndpoint.cs`, Development-only) is
-      temporary — delete it, and its test, once step 6 proves the real path.
 - [ ] FCM does not deliver to a **force-stopped** app (Settings → Force stop; on some OEMs a swipe
       from recents behaves the same). The whole product rests on delivery, so before shipping,
       check what the target phones do and what the app should tell the user (`R19`-style: never

@@ -3,6 +3,7 @@ using System.Text.Json;
 using GreedyNose.Api.Data;
 using GreedyNose.Api.EnableBanking;
 using FirebaseAdmin.Messaging;
+using GreedyNose.Api.Ingestion;
 using GreedyNose.Api.Notifications;
 using GreedyNose.Api.Rules;
 using Microsoft.EntityFrameworkCore;
@@ -67,6 +68,18 @@ builder.Services.AddSingleton(firebase);
 builder.Services.AddSingleton(sp =>
     FirebaseMessaging.GetMessaging(FirebaseAppFactory.GetOrCreate(sp.GetRequiredService<FirebaseOptions>())));
 builder.Services.AddSingleton<INotificationSender, FirebaseNotificationSender>();
+
+// Notification tracer bullet, step 6: the ingestion worker. IngestionOptions has no credential —
+// bound straight from config, same as the others are bound from user secrets, just a different
+// source. EnableBankingDebitsFetcher is scoped-free (built fresh per call from
+// IHttpClientFactory, see its own doc comment) so it can be a singleton like everything else the
+// worker depends on.
+var ingestion = builder.Configuration.GetSection(IngestionOptions.SectionName).Get<IngestionOptions>()
+                ?? new IngestionOptions();
+builder.Services.AddSingleton(ingestion);
+builder.Services.AddSingleton<IDebitsFetcher, EnableBankingDebitsFetcher>();
+builder.Services.AddSingleton<IngestionRunner>();
+builder.Services.AddHostedService<IngestionWorker>();
 
 var app = builder.Build();
 
@@ -282,15 +295,6 @@ app.MapGet("/debits", async (EnableBankingClient eb, ConsentStore consent, Cance
 // The app posts its FCM token here on every launch (and when Firebase rotates it); idempotent, no
 // auth yet — see DeviceTokenEndpoint for both. Takes the scoped GreedyNoseDbContext.
 app.MapPost("/device-token", DeviceTokenEndpoint.HandleAsync);
-
-// --- Notification tracer bullet, step 3: the backend can send ---------------------------------
-
-// TRACER-BULLET: proves the send path before the worker exists — delete once step 6 proves the real
-// path. Development only, because it pushes to the owner's real phone on demand and has no auth.
-if (app.Environment.IsDevelopment())
-{
-    app.MapPost("/debug/send-test-push", DebugSendTestPushEndpoint.HandleAsync);
-}
 
 // --- Notification tracer bullet, step 4: rules sync --------------------------------------------
 
