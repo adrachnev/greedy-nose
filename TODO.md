@@ -331,8 +331,22 @@ The four below are left open on purpose.
       ("this half is already automated") is not automated. Until a hook mechanism that reaches the
       *main* session is found (a `SubagentStop` hook cannot launch an agent itself, and its
       context lands in the stopped agent), the main session starts `coder-reviewer` by hand after
-      every coder stops — `CLAUDE.md` now says so (2026-09-21). Idea, untested: a `Stop` hook on
-      the *main* session that blocks finishing while unreviewed code exists.
+      every coder stops — `CLAUDE.md` now says so (2026-09-21). **Still open** — the wrong
+      recipient itself is not fixed, only its worst consequence (below). Idea, untested: a `Stop`
+      hook on the *main* session that blocks finishing while unreviewed code exists.
+- [x] **The wrong-recipient bug could make the stopped coder loop infinitely, not just miss the
+      review.** Hit for real on 2026-09-22: a coder-backend agent, told by the hook to "launch
+      coder-reviewer" (impossible), tried, failed, stopped again — which re-matched
+      `coder-mobile|coder-backend` and re-fired the same hook, forever. It got stuck over an hour,
+      100+ tool calls, after its actual file edits were already correct and complete on disk.
+      **Fixed 2026-09-22** in `.claude/hooks/review-after-coder.sh`: it now checks the payload's
+      `stop_hook_active` field (the harness's own guard for exactly this — true means this stop is
+      already a continuation of a previous stop-hook's `additionalContext`) and exits immediately
+      without re-injecting. Also softened the injected text itself so even the *first* fire tells
+      the coder plainly not to attempt the impossible task or retry, rather than instructing it to
+      try. Verified with hand-built payloads for all four branches (looping/not, coder-reviewer
+      exclusion, coder-mobile/backend match). Not yet proven against a real stuck-loop scenario in
+      the wild — worth re-checking after the next coder that would have looped.
 
 ## Standing
 

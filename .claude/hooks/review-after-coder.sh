@@ -7,9 +7,21 @@
 # SubagentStop hook cannot launch an agent itself. It can only hand the main
 # session an instruction, which is what additionalContext below does.
 #
-# LOOP GUARD: coder-reviewer is itself a subagent, so its own SubagentStop
+# LOOP GUARD 1: coder-reviewer is itself a subagent, so its own SubagentStop
 # fires this hook too. Without the coder-reviewer exclusion below, every
 # review would trigger another review, forever.
+#
+# LOOP GUARD 2 (added 2026-09-22, after a real incident): additionalContext on
+# SubagentStop lands in the agent that just stopped, not the main session (see
+# TODO.md's "Process" item) — so a coder-mobile/coder-backend agent that gets
+# told to "launch coder-reviewer" cannot do it (no agent-spawning tool). If it
+# tries, fails, and then stops again, THAT stop still matches
+# coder-mobile|coder-backend below and re-fires this same hook — which is
+# exactly what got a coder-backend agent stuck retrying for over an hour, 100+
+# tool calls, on 2026-09-22. The harness's own fix for this class of problem is
+# the `stop_hook_active` field on the hook payload: true means this stop is
+# already a continuation caused by a previous stop-hook's additionalContext,
+# so exit quietly instead of injecting (and re-triggering) again.
 
 set -uo pipefail
 
@@ -28,6 +40,13 @@ payload="$(cat)"
 # the agent match above tightened from text-matching to a precise field.
 mkdir -p "$hooks_dir" 2>/dev/null || true
 printf '%s\n' "$payload" >"$hooks_dir/last-subagent-stop.json" 2>/dev/null || true
+
+# --- Already looping? -------------------------------------------------------
+# See LOOP GUARD 2 above. Checked before anything else: if this stop is a
+# continuation of a stop-hook's own additionalContext, do not inject again.
+if printf '%s' "$payload" | jq -e '.stop_hook_active == true' >/dev/null 2>&1; then
+  exit 0
+fi
 
 # --- Which agent finished? -------------------------------------------------
 # The payload field naming for SubagentStop is not documented, so match on the
@@ -80,18 +99,17 @@ if [ -n "$skip_reason" ]; then
 fi
 
 jq -n '{
-  systemMessage: "Coding agent finished — requesting an automatic code review.",
+  systemMessage: "Coding agent finished — a code review is needed before this is done.",
   hookSpecificOutput: {
     hookEventName: "SubagentStop",
     additionalContext: (
-      "A coder-mobile or coder-backend agent just finished. Before reporting its result to the user, "
-      + "launch the coder-reviewer agent on the changes it made (git diff HEAD plus untracked files), "
-      + "then present the findings to the user as a MARKDOWN TABLE with these columns: "
-      + "Prio | Severity | Where (file:line) | What is wrong (short, plain words) | Why it matters. "
-      + "Order rows by importance, most important first. "
-      + "Any MUST FIX / critical finding ranks above everything else and is highlighted in bold with a leading warning sign. "
-      + "Keep each cell to one short sentence in simple language — no code blocks inside the table. "
-      + "If there are no findings, say so in one line instead of printing an empty table."
+      "This message reaches YOU, the coder-mobile/coder-backend agent that just finished — not "
+      + "the main session or the user (a current limitation of SubagentStop hooks; see the "
+      + "Process item in TODO.md). You have no agent-spawning tool, so do NOT attempt to launch "
+      + "coder-reviewer or any other agent, and do not retry or keep working to satisfy this "
+      + "message. Simply mention in your normal final report that a coder-reviewer pass is still "
+      + "needed (the main session starts it by hand after every coder), then finish exactly as "
+      + "you otherwise would."
     )
   }
 }'
