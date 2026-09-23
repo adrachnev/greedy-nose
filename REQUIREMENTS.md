@@ -54,17 +54,15 @@ strongest identifier the charge carries, in order:
 
 1. **Normalized creditor account identification** — the IBAN, where the charge carries one
 2. **Normalized name** (uppercase, strip digits and extra whitespace), plus the **creditor
-   agent** where it helps separate two payees that would otherwise collide
+   agent** — the creditor's own bank, typically identified by BIC, as reported (inconsistently)
+   by the ASPSP alongside a charge — where it helps separate two payees that would otherwise
+   collide
 
 The resolved key is stored on the payee, together with the raw strings seen for it.
 
-**The SEPA creditor ID is not available and the key is therefore best-effort.** Asked Enable
-Banking support directly on 2026-08-14; answered 2026-08-17. Their normalized `Transaction` model
-has **no SEPA creditor identifier and no mandate ID**, and they could not confirm any passthrough,
-enablement option or roadmap item that would expose one. Their own recommendation is the two-tier
-key above, explicitly as best-effort grouping. N26's PSD2 interface does publish `creditorID` and
-`mandateID`, so the data exists at the bank and dies in the aggregator's model — noted in case
-that ever changes.
+**The SEPA creditor ID is confirmed unreachable** — the two-tier key above is Enable Banking's own
+recommended best-effort fallback. Investigation detail (what was asked, N26's own interface
+publishing the field anyway) is in `ARCHITECTURE.md`'s "Payee identity".
 
 Two consequences of losing the exact key:
 
@@ -77,6 +75,12 @@ Also from the same answer: `reference_number` is meant for credit-transfer refer
 **not** be used as a payee key. Payee grouping and debit de-duplication (R10b) are separate
 problems with separate keys; do not let one leak into the other.
 
+**Exception, accepted:** when `entry_reference` is absent, R10b's fallback key is composed partly
+from this section's resolved payee key (see `ARCHITECTURE.md`'s "Refining these from real data") —
+a deliberate, scoped coupling for that one case only, not a loophole in the rule above. A future
+payee-key re-tuning pass must re-derive any de-dup key built on the old payee key; the two are not
+independent there.
+
 **R3b — When matching is uncertain, split rather than merge.** Splitting one payee into two
 shows a known payee as unknown → a false alert: annoying but safe. Merging two payees into one
 lets an unknown payee inherit "good" → a missed alert, which breaks R1.
@@ -86,7 +90,9 @@ lets an unknown payee inherit "good" → a missed alert, which breaks R1.
 - an optional **amount**, which only has meaning when the classification is *good*
 
 **R4a** — The amount is **empty by default**, and empty means **no limit** — every charge from
-that payee is good, whatever its size.
+that payee is good, whatever its size. A non-empty amount must be a **positive number, at most
+two decimal places**; zero or negative is rejected — a zero limit would mean "always bad", which
+marking the payee bad already does directly, so it is not a second way to say the same thing.
 
 **R4b** — "Payee has a rule" is what **reviewed** means (settled 2026-08-14, was `O8`). A payee
 marked bad has a rule record; an untouched payee has none. Both classify as bad, so no extra
@@ -177,17 +183,15 @@ date is recent (settled 2026-08-14, was `O4`). Banks deliver late, and a charge 
 ago still deserves an alert.
 
 **The identifier is `(connected account, entry_reference)`** (**revised 2026-08-17**, was "the
-bank transaction ID"). Per Enable Banking support: `entry_reference` is documented as unique and
-immutable for the same account, and matches across authentication sessions. It is **not** globally
-unique, hence the account scope. `transaction_id` must **not** be used — it exists to fetch
-transaction details, is not guaranteed to identify a transaction uniquely, and **may change
-between fetches**.
+bank transaction ID") — never `transaction_id`, which may change between fetches and is not
+guaranteed unique. Full evidence and rationale for both halves of that correction are in
+`ARCHITECTURE.md`'s "Debit identity".
 
 **R10c — Only booked debits notify** (settled 2026-08-17). There is **no identifier that survives
 pending → booked** across banks: for most ASPSPs `entry_reference` only exists once the charge is
 booked. So pending charges may appear in the list as provisional, but the alert fires when the
 charge books. The cost is latency — typically under a day, which the "same-day notification is
-fine" decision already accepted. The alternative, alerting on pending, would double-alert on every
+acceptable" decision already accepted. The alternative, alerting on pending, would double-alert on every
 bank that re-keys a charge at booking, and a false "you were charged twice" is worse than an alert
 arriving a few hours later.
 
@@ -234,7 +238,10 @@ the payee good again and the previous limit is back.
 **R22 — The app is bank-agnostic** (settled 2026-08-14). Any ASPSP reachable through Enable
 Banking is a valid target; **N26 is simply the first one integrated**, chosen for its free tier,
 with ING-DiBa and DKB as likely next. Nothing in the product — copy, data model, or rule logic —
-may assume a particular bank.
+may assume a particular bank. **This currently assumes a eurozone ASPSP**: R15 hard-assumes EUR,
+so a non-EUR bank is out of scope until a currency model exists (see `CLAUDE.md`'s Open/deferred)
+— not yet a contradiction in practice since every bank named above is in the eurozone, but R22 as
+written does not itself carve that out.
 
 **R22a** — v1 connects **one account at a time**. Supporting several banks simultaneously, and
 labelling which bank a debit came from, stays deferred (see `CLAUDE.md`). "Bank-agnostic" means
@@ -296,7 +303,7 @@ may show on the lock screen), and the onboarding classify flow's details.
 
 ## Follow-ups — bringing the code in line
 
-*(`mocks/` is done: renamed to payee/Good and transaction/debit, per-debit classification in the
+*(`mocks/` is done: renamed to payee / good+bad / debit, per-debit classification in the
 list, the amount field split across 04b/04d, R12a notification wording, the reconnect summary
 05b, the disconnected banner folded into 01d, and the good-payee-over-limit case drawn in 03b +
 05c.)*
@@ -324,24 +331,16 @@ matching screen is coded):
 
    **Wider than recorded** (2026-08-17): N26 is hardcoded in **eight** files, not two —
    `01`, `01b`, `01bb`, `01d`, `01e`, `02b`, `06` and `06b`. So this is not only a missing
-   screen: connect, consent, syncing, the expired banner, the empty list and both settings
-   screens all name one bank in body copy. Whatever the bank-selection screen ends up being,
+   screen: connect, consent, syncing, the expired banner, the connect-error screen, the empty
+   list and both settings screens all name one bank in body copy. Whatever the bank-selection
+   screen ends up being,
    the fix is a *placeholder* everywhere the connected institution is mentioned, and none of
    those files may keep a literal bank name.
 
 ### ~~Do this first — reconcile `ARCHITECTURE.md`~~ — done 2026-08-17
 
-Reviewed against this file on 2026-08-14 and found to diverge in ten places (`A1`–`A10`).
-Reconciled on 2026-08-17: both contradictions are fixed (`A1`, the rule engine evaluating the
-amount for **bad** payees, now follows R5's table; `A2`, the ruled-out consent-expiry push, is
-back per R19), the stale terminology is renamed to R0, and the six missing designs are written —
-the `DBIT` filter, derived classification, the reconnect ingestion mode, R18's data lifecycle and
-the bank-agnostic consequences. See "Reconciliation with `REQUIREMENTS.md`" at the top of that
-document for the map.
-
-`A6` (payee identity) was left open that morning and closed the same day, once Enable Banking
-answered — see R3a. Their reply also corrected R10b and added R10c, which no one had asked about.
-All ten divergences are now closed.
+Done — see `ARCHITECTURE.md`'s "Reconciliation with `REQUIREMENTS.md`" for the full `A1`–`A10`
+map, including `A6` (closed the same day once Enable Banking answered — see R3a).
 
 ### ~~Then — the `app/` code rework~~ — done 2026-08-17
 

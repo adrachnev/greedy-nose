@@ -290,3 +290,7 @@ It still has to be replaced by real data (see Open/deferred below).
 - Offline state handling for the main list (only the initial-connect error state exists).
 - Notification grouping/bundling (a "Group multiple alerts" toggle exists in the Settings mock
   but defaults Off — one notification per charge is the current decision).
+- Non-EUR bank accounts: `R15` hard-assumes EUR ("no currency picker anywhere"), which
+  contradicts `R22`'s bank-agnostic promise the moment a non-eurozone ASPSP is connected. Needs
+  a currency model (store and compare per-currency) that doesn't exist yet — found by
+  `bmad-review` 2026-09-23, not yet decided.

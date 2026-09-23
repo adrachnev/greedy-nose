@@ -9,6 +9,90 @@ Rules for this file: an item is either done and deleted, or it says why it is st
 let it become a graveyard — anything nobody has touched in months is not a TODO, it is a decision
 to not do it, and should be recorded as such or dropped.
 
+## From a `bmad-review` pass over REQUIREMENTS.md/ARCHITECTURE.md — 2026-09-23
+
+Adversarial + Edge-Case Hunter lenses, run together over both documents. All real, all about
+components this project has explicitly not built yet — no code exists for any of these today, so
+nothing here is urgent; each is a design decision to make when that piece is actually built.
+
+### Health Monitor (not built — deliberately out of scope for the notification bullet)
+
+- [ ] **R19's expiry-push latency has no stated bound.** Composing the actual mechanism (a poll
+      only fails after expiry, the Health Monitor only flags staleness past 20h, the Health
+      Monitor itself runs daily) gives a worst case around 44h — unlike every other latency claim
+      in the docs, this one isn't written down anywhere. Decide the bound when the Health Monitor
+      is built, and state it.
+- [ ] **Nothing monitors notification *dispatch* failure, only ingestion staleness.** A correctly
+      detected bad debit whose FCM send keeps coming back `Transient`/`Rejected` has no alerting
+      path — though it isn't silent forever: the real `IngestionRunner` only writes
+      `NotificationLog` on `Sent`, so an unset row means the debit is retried next poll by
+      construction. What's missing is *alerting a human* if that never succeeds, not a missing
+      retry.
+- [ ] **The Health Monitor's staleness query needs to exclude user-initiated Disconnect**, or
+      Disconnect's "no expiry push" promise breaks the first time the daily job runs against a
+      disconnected consent.
+- [ ] **Expiry-push dedup should key on `(consent id, expiry occurrence)`, not consent id alone**
+      — otherwise a consent that expires, gets reconnected, and expires again later has its
+      second expiry silently suppressed as "already sent," recreating the exact silence R19
+      exists to prevent.
+
+### Account deletion (not built)
+
+- [ ] **No stated fallback if the Enable Banking revoke call fails during deletion.** Decide
+      between a bounded retry-then-proceed-anyway vs. blocking deletion — the reliable-deletion
+      promise (`06c`, "gone, not undoable") argues for the former.
+- [ ] **Deletion racing an in-flight ingestion tick or Health Monitor push for the same user**
+      needs a lock/transaction that also cancels or waits on the in-flight job, or a concurrent
+      job could write orphaned rows after "deletion" completes.
+
+### Reconnect mode (not built for this bullet)
+
+- [ ] Reconnect summary push behavior on a **zero-new-debits gap** (reconnected within minutes) is
+      unspecified — likely just suppress the push.
+- [ ] **Reconnect-mode's trigger only names explicit re-auth/reconnect events**, not a plain
+      multi-day technical-outage gap. Without an explicit "gap exceeds N hours" trigger too, a
+      backlog from an outage could run as steady-state and fire the exact per-charge burst R20
+      exists to prevent.
+
+### Tap-to-open (not built — `R12`'s navigation half, deliberately deferred)
+
+- [ ] **No fallback screen specified for a deep link to a debit/payee that no longer exists**
+      (tapped an old push after deleting the account). Needs a generic "no longer available"
+      screen once tap-to-open is built.
+
+### Multi-account / multi-user (v1 is single-account, single-user)
+
+- [ ] **The payee identity key (`R3a`) is never scoped to an account or user.** Harmless today
+      (one seeded user, one connected account); once multi-user exists, two users' identically
+      named merchants would resolve to the same `Payee` row — a cross-tenant classification leak.
+      Scope the key to `(user, resolved key)` before multi-user lands, not after.
+- [ ] **No server-side guard against starting a second consent while one is already active**
+      (`R22a`) — enforced today only by the mobile client having no UI path to it. Any second path
+      to the API (retry, future admin tool, bug) has undefined behavior. Add the guard when real
+      auth/multi-account work starts.
+- [ ] **Two ingestion paths can race on the same consent** once the on-demand "app is open" fetch
+      is actually built alongside the 6h timer poll — a per-consent lock/lease is needed so a
+      concurrent fetch is a no-op, or the same new bad debit could be evaluated twice (breaking
+      `R11`).
+
+### Payee identity, no decision needed yet
+
+- [ ] **`R3b`'s "split rather than merge" has no way to fix a bad split later.** A merchant whose
+      charges inconsistently carry an IBAN (plausible per the aggregator-prefix findings) could
+      re-split and re-notify every time its matching tier flips, with no way for the user to
+      silence it permanently. No merge/consolidation UI exists; note as deferred, not a bug.
+
+### Pending debits (zero observed so far, sandbox or production)
+
+- [ ] **Whether a pending (not-yet-booked) debit is classified and shown like any other row, or
+      held back until booking, isn't stated anywhere** — `R9` implies every listed debit is
+      labeled good/bad unconditionally, while "Debit identity" separately excludes pending items
+      from identifier matching. Resolve once a real pending transaction is actually observed.
+- [ ] **A debit pending at onboarding (first-run) time has no reliable key yet; if it books later
+      under a different key, first-run's "never notifies" guarantee may not hold for it.** Same
+      reason as above — untested because unobserved. State it as an accepted exception once it's
+      confirmed to actually happen.
+
 ## From the `app/` rework review — 2026-08-17
 
 Two review passes over the R0/R4/R5/R8 rework. The first found a critical inverted-copy bug

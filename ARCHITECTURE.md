@@ -1,36 +1,9 @@
 # Architecture
 
 Status: decided at a high level; not yet implemented. Written after the mocks settled, per the
-project's mocks-first ordering, then **reconciled with `REQUIREMENTS.md` on 2026-08-17**.
-
-## Reconciliation with `REQUIREMENTS.md`
-
-All ten divergences found on 2026-08-14 are folded into the text below:
-
-| | What was wrong or missing | Where it now lives |
-|---|---|---|
-| `A1` | Rule engine evaluated the amount for **bad** payees | "Rule engine" — the amount applies to **good** payees only (R5) |
-| `A2` | Consent-expiry push explicitly ruled out | "Consent lifecycle" — Health Monitor → dispatcher → FCM (R19) |
-| `A3` | Frequency/count thresholds | removed everywhere; amount is the only threshold |
-| `A4` | `debitor` / `Trusted`+`Bad` / `Transactions` | renamed to payee / good+bad / debits (R0) |
-| `A5` | Nothing filtered incoming money | "What counts as a debit" — keep `DBIT` (R2a) |
-| `A6` | Payee identity was one phrase | "Payee identity" — two-tier best-effort key (R3a) |
-| `A7` | Derived-vs-stored classification unstated | "Classification is derived, never stored" (R6/R7) |
-| `A8` | Reconnect-after-a-gap unhandled | "Ingestion modes" — the third mode (R20) |
-| `A9` | No data lifecycle for R18 | "Data lifecycle" |
-| `A10` | N26 treated as *the* bank | "Bank-agnostic design" (R22) |
-
-`A6` was still open when the rest was reconciled; Enable Banking's support answered on 2026-08-17
-and closed it. The same answer forced a change nobody asked for: **the de-duplication key was
-wrong**, so "Debit identity" is rewritten around `(account, entry_reference)` on booked charges —
-see that section and R10b/R10c.
-
-Both keys are documentation-and-support answers, not observed behavior. They get a tuning pass
-against real data — see "Refining this from real data".
-
-`A4` deliberately stops at the product vocabulary. Bank-facing names keep their own: Enable
-Banking's **transaction feed** and its `transaction_id` field are not renamed (R0) — though note
-that field turned out to be unusable as an identifier.
+project's mocks-first ordering, then **reconciled with `REQUIREMENTS.md` on 2026-08-17** — all
+`A1`–`A10` divergences are closed; see "Reconciliation with `REQUIREMENTS.md`" near the end for
+the map.
 
 ## Component diagram
 
@@ -102,7 +75,7 @@ one push" --> Notify
 | Rule Engine | C# | Cloud backend | Resolves payee → applies that payee's rule (R5) → hands bad debits to the dispatcher **with the reason** (R12a) |
 | Notification Dispatcher | C# | Cloud backend | Words the notification from the reason and sends it via FCM; the alert decision belongs to the Rule Engine only |
 | Key Vault | Azure Key Vault | Cloud backend | Holds the encryption key for BankConsent tokens |
-| Data Store | Postgres (free tier, e.g. Supabase/Neon) | Third party | Users, BankConsents (encrypted), Payees, Rules, Debits, NotificationLog, poll status per consent |
+| Data Store | Postgres (free tier, e.g. Supabase/Neon) | Third party | Users, BankConsents (encrypted), Payees, Rules, Debits, NotificationLog, DeviceTokens, poll status per consent |
 | Enable Banking API | PSD2/XS2A aggregator | Third party | Consent flow, transaction feed |
 | Connected ASPSP | Any bank Enable Banking reaches | Third party | Source of truth for the account's transactions. N26 is the first one integrated, not a fixed dependency (R22) |
 | Firebase Cloud Messaging | Push service | Third party | Push delivery to APNs + Android |
@@ -209,6 +182,7 @@ The key is two-tier, matching their own recommendation:
 
 1. **Normalized creditor account identification** — the IBAN, where the charge carries one.
 2. **Normalized name** (uppercase, strip digits and extra whitespace), plus the **creditor agent**
+   (the creditor's own bank, typically by BIC, as reported — inconsistently — by the ASPSP)
    where it separates two payees that would otherwise collide.
 
 `reference_number` is explicitly not usable here: it is intended for credit-transfer references.
@@ -217,7 +191,7 @@ Consequences for the design:
 
 - **Store every raw string ever seen for a payee**, alongside the resolved key (R3a). This is not
   bookkeeping — it is the only way to re-tune matching later against what banks actually sent,
-  instead of guessing. See "Refining this from real data".
+  instead of guessing. See "Refining these from real data".
 - **When matching is uncertain, split rather than merge** (R3b). A split shows a known payee as
   unknown → a false alert: annoying but safe. A merge lets an unknown payee inherit "good" → a
   missed alert, which breaks R1. With a fuzzy key, ambiguity is the normal case, so this rule
@@ -238,6 +212,11 @@ The field is `credit_debit_indicator`, whose only values are `CRDT` and `DBIT`; 
 Without this, the user's first salary payment creates a payee with no rule, which classifies bad
 (R5) and fires a notification.
 
+**This is an allowlist, not a `CRDT` denylist** (verified against `TransactionMapper.cs`, step 7
+findings): a row proceeds only when the indicator is exactly `DBIT`. A missing, null, or any
+future unrecognized third value is dropped along with `CRDT` — never lets an unexpected value
+through by default.
+
 Accepted side effect, straight from R2a: a refund from a bad payee is invisible in the app.
 
 ## Transaction ingestion: polling, not webhooks
@@ -252,8 +231,9 @@ The binding constraint is on the bank side, not Enable Banking's own limits: mos
 per day**, backing off 6 hours on `ASPSP_RATE_LIMIT_EXCEEDED`.
 
 **That cap is per-ASPSP and will differ between banks** (R22). The 6h cadence below is a safe
-default, not a constant: the poll interval is configuration held per ASPSP, so a stricter bank
-can be slowed down without touching the worker. `ASPSP_RATE_LIMIT_EXCEEDED` is handled as a
+default, not a constant: the poll interval is a configuration value held per ASPSP, so a
+stricter bank can be slowed down without touching the worker. `ASPSP_RATE_LIMIT_EXCEEDED` is
+handled as a
 normal backoff signal for any bank rather than treated as a bug.
 
 Given the product owner's call that same-day notification is an acceptable user experience
@@ -298,6 +278,15 @@ with no UI, because the classify-screen itself is out of scope for that bullet
 backend restart mid-session: the bootstrap/steady-state check reads real state (do any `Debits`
 rows exist for this account?), not a flag, so it did not re-fire and did not double-insert.
 
+**Two concurrency risks a design like this table implies are already closed in the real
+implementation**, not just designed around (`IngestionRunner.cs`, step 6 review findings): a tick
+cut short after inserting some debits but before classifying them cannot strand an
+already-committed, unclassified debit — one debit's insert and its classify/notify outcome commit
+atomically, so a cutoff leaves it entirely uncommitted and it is retried next tick like one never
+fetched (a regression test reproduces and proves this). And two debits in one batch resolving to
+the same brand-new payee cannot poison the rest of that tick's writes — the payee-upsert race is
+caught and the tracked entity cleared before continuing.
+
 ## Debit identity — never alert twice for one charge
 
 Rewritten 2026-08-17, after Enable Banking's support answered. The previous design keyed debits
@@ -334,9 +323,12 @@ and a charge booked three days ago still deserves its alert the first time the a
 
 **When the key is unreliable, risk the duplicate, never the miss.** Some ASPSPs omit entry
 references entirely, some hand out duplicates, and Enable Banking generates synthetic references
-only under certain conditions. Where the key cannot be trusted, the worker treats the charge as
-new. Note this is the *opposite* direction from payee identity above, and for the same reason:
-there, merging two payees loses an alert; here, merging two charges loses one.
+only under certain conditions. Where `entry_reference` itself cannot be trusted, the worker still
+computes and uses the best available fallback — the composite key in "Refining these from real
+data" — rather than abandon matching altogether; "risk the duplicate" means that fallback can
+occasionally miscount, not that the charge is unconditionally flagged new on every poll. Note the
+bias here is the *opposite* direction from payee identity above, and for the same reason: there,
+merging two payees loses an alert; here, merging two charges loses one.
 
 ## Reliability: poll health monitoring
 
@@ -382,29 +374,25 @@ writes while a consent is dead.
 
 ## Data lifecycle
 
-R18 gives the connection three ways to end, and they are **not** the same operation underneath:
-
-| How it ends | Rules | History | Connection |
-|---|---|---|---|
-| Consent expires on its own (~90 days) | kept | kept | re-authorize to resume |
-| User taps Disconnect (`06b`) | kept | kept | reconnect anytime |
-| User deletes the account (`06c`) | wiped | wiped | gone, not undoable |
-
-Consequences for the backend:
+R18's table applies unchanged (see `REQUIREMENTS.md`) — the three ways a connection ends are
+**not** the same operation underneath. Consequences for the backend:
 
 - **Expiry and Disconnect differ only in intent**, not in data: both revoke the consent and stop
   polling, and both leave Payees, Rules and Debits intact. Disconnect additionally means "do not
   nag me" — no expiry push for a connection the user switched off themselves.
 - **Account deletion is a real delete**, not a soft-delete flag: Users, BankConsents (and their
-  Key Vault-encrypted tokens), Payees, Rules, Debits and NotificationLog entries all go. The mock
-  (`06c`) states it is not undoable, so there is no recovery path to design and no orphaned
-  consent to leave behind at Enable Banking — revoke there too, before deleting locally.
+  Key Vault-encrypted tokens), Payees, Rules, Debits, NotificationLog and DeviceTokens entries
+  all go. The mock (`06c`) states it is not undoable, so there is no recovery path to design and
+  no orphaned consent to leave behind at Enable Banking — revoke there too, before deleting
+  locally.
 
 ## Bank-agnostic design
 
 R22: any ASPSP Enable Banking reaches is a valid target. **N26 is the first bank integrated, not
 a dependency** — nothing in the data model, rule logic or copy may assume it. v1 still connects
-one account at a time (R22a); simultaneous multi-bank support stays deferred.
+one account at a time (R22a); simultaneous multi-bank support stays deferred. **This currently
+assumes a eurozone ASPSP** (R15 hard-assumes EUR); a non-EUR bank needs a currency model that
+doesn't exist yet, and is out of scope until one does (see `CLAUDE.md`'s Open/deferred).
 
 What this costs the design, concretely:
 
@@ -437,6 +425,35 @@ cost even serverless, which is why the data store moved to a free-tier Postgres 
   Premium plan, to keep costs at zero) — the syncing screen's UI should be designed to feel
   intentional during this wait rather than stuck.
 
+## Reconciliation with `REQUIREMENTS.md`
+
+All ten divergences found on 2026-08-14 are folded into the text above:
+
+| | What was wrong or missing | Where it now lives |
+|---|---|---|
+| `A1` | Rule engine evaluated the amount for **bad** payees | "Rule engine" — the amount applies to **good** payees only (R5) |
+| `A2` | Consent-expiry push explicitly ruled out | "Consent lifecycle" — Health Monitor → dispatcher → FCM (R19) |
+| `A3` | Frequency/count thresholds | removed everywhere; amount is the only threshold |
+| `A4` | `debitor` / `Trusted`+`Bad` / `Transactions` | renamed to payee / good+bad / debits (R0) |
+| `A5` | Nothing filtered incoming money | "What counts as a debit" — keep `DBIT` (R2a) |
+| `A6` | Payee identity was one phrase | "Payee identity" — two-tier best-effort key (R3a) |
+| `A7` | Derived-vs-stored classification unstated | "Classification is derived, never stored" (R6/R7) |
+| `A8` | Reconnect-after-a-gap unhandled | "Ingestion modes" — the third mode (R20) |
+| `A9` | No data lifecycle for R18 | "Data lifecycle" |
+| `A10` | N26 treated as *the* bank | "Bank-agnostic design" (R22) |
+
+`A6` was still open when the rest was reconciled; Enable Banking's support answered on 2026-08-17
+and closed it. The same answer forced a change nobody asked for: **the de-duplication key was
+wrong**, so "Debit identity" is rewritten around `(account, entry_reference)` on booked charges —
+see that section and R10b/R10c.
+
+Both keys are documentation-and-support answers, not observed behavior. They get a tuning pass
+against real data — see "Refining these from real data", below.
+
+`A4` deliberately stops at the product vocabulary. Bank-facing names keep their own: Enable
+Banking's **transaction feed** and its `transaction_id` field are not renamed (R0) — though note
+that field turned out to be unusable as an identifier.
+
 ## Open questions
 
 - ~~Confirm the "4x/day background" limit **per bank**~~ — confirmed for N26 2026-09-16: three
@@ -465,7 +482,7 @@ cost even serverless, which is why the data store moved to a free-tier Postgres 
   documentation. The two-tier key is designed to survive either way, so this is worth a human
   confirmation only if we ever want the exact key back.
 
-## Refining this from real data
+## Refining these from real data
 
 **Settled 2026-09-16 against a real N26 account** — full evidence in `TRACER-BULLET.md`, "What
 real N26 data said." R3a's payee key and R10b's de-dup key held up under evidence rather than
@@ -475,6 +492,12 @@ guesswork:
   that omit `entry_reference`: on this account, 63 of 91 real debits still needed it even though
   the field exists and is populated on the other 28. Any ASPSP integration should expect to use
   both keys, per row, indefinitely — not treat the fallback as something later data retires.
+  **Unverified assumption this key rests on:** the `ordinal` that disambiguates same-day/
+  same-amount/same-payee charges assumes the feed returns them in stable order across separate
+  polls — never tested. If ordering isn't stable, a previously-seen debit's key could change
+  between polls (duplicate alert), or a genuinely new charge could collide with an old ordinal
+  and never notify. Worth testing directly (re-fetch the same window twice, diff ordinals)
+  before hardening this key further — it is the majority path, not an edge case.
 - The account-holder's-own-IBAN trap (a credit row's `creditor_account` equal to the connected
   account's own IBAN) reproduces on live data exactly as the curated test fixture modeled it —
   confirms R2a's filter belongs before payee resolution, at the earliest point in the pipeline.
