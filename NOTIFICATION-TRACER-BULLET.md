@@ -75,7 +75,7 @@ OS notification text.
 | 4 Rules sync | **done, verified on the device 2026-09-22** — marking a payee creates both the `Payees` and `Rules` row; `coder-backend`/`coder-mobile` in parallel, two `coder-reviewer` passes on the backend half, no MUST FIX left |
 | 5 Rule engine, ported and tested | **done, verified 2026-09-22** — `RuleEngine.cs`, 210/210 backend tests pass |
 | 6 Ingestion worker — steady state | **done, verified on the device 2026-09-22** — a bootstrap tick silently seeded 92 historical debits, then two genuinely new debits for unclassified payees each produced exactly one real push (FCM `Sent`), a second poll tick did not resend either, and marking one of those payees Good in the app made its next debit produce zero pushes; three `coder-reviewer` passes, all MUST FIX resolved |
-| 7 Record findings | not started |
+| 7 Record findings | **done, 2026-09-23** — `ARCHITECTURE.md` updated in three places (see step 7 below); this bullet is complete |
 
 ## Steps
 
@@ -520,6 +520,27 @@ Same spirit as the first tracer bullet's step 7 — update `REQUIREMENTS.md`/`AR
 with anything the sandbox run actually taught (e.g., whether Mock ASPSP's added transactions
 carry `entry_reference`, timing behavior of the configurable poll, anything about the
 bootstrap/steady-state boundary that surprised us).
+
+**Done, 2026-09-23.** No `REQUIREMENTS.md` changes — nothing built in steps 1–6 contradicted a
+numbered requirement. Three additions to `ARCHITECTURE.md`, each checked against code or the dev
+database rather than asserted:
+
+- The Ingestion Worker's component-table row still names Azure Functions; what's actually running
+  is an in-process `BackgroundService` in the API host (deliberate, deferred — the bullet's own
+  scope note already said so, the architecture doc didn't yet).
+- The "First run" ingestion-mode row promises onboarding-classify routing that step 6 deliberately
+  didn't build (silent bootstrap only) — and, as a positive finding, a mid-session backend restart
+  confirmed the bootstrap/steady-state check reads real state, not a flag.
+- Mock ASPSP's control-panel-added transactions do carry `entry_reference`, confirmed by querying
+  the dev `Debits` table directly (short-suffix ids on the two test transactions vs. the composite
+  fallback on the imported historical dump). Sandbox-only evidence, doesn't reopen the
+  already-answered real-N26 question.
+
+Also while checking: `TODO.md`'s fallback-debit-id item had a stale qualifier ("step 6 decides
+whether that is ever the case in production") — the first tracer bullet's step 7 had already
+confirmed it (63 of 91 real debits), so the qualifier is corrected, not the open item itself. And
+one small pitfall found during step 6's device verification (a missing `adb reverse` tunnel for
+Metro looking identical to "Metro is down") is now in `AGENTS.md`'s Known pitfalls.
 
 ## Deliberately out of scope
 

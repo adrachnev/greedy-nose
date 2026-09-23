@@ -108,6 +108,13 @@ one push" --> Notify
 | Firebase Cloud Messaging | Push service | Third party | Push delivery to APNs + Android |
 | Email Alerts | e.g. SendGrid | Third party | Notifies the operator when ingestion is failing for a non-consent reason |
 
+**Current state vs. this table (2026-09-23, notification bullet step 7):** the Ingestion Worker
+row above is the target design. What actually runs today, built and device-verified in the
+notification tracer bullet's step 6, is a `BackgroundService`/`PeriodicTimer` **in-process inside
+the same ASP.NET Core host as the API** — not a separate Azure Function. Deliberate and scoped
+("the worker stays in-process for this bullet," `NOTIFICATION-TRACER-BULLET.md` step 6): moving it
+to its own Azure Function is deferred, not decided against.
+
 ## Client
 
 **React Native.** Considered .NET MAUI and Flutter.
@@ -281,6 +288,15 @@ The alternative shapes were rejected for the same reason each time: a separate "
 component would duplicate the Enable Banking fetch logic, and suppressing the burst in the
 dispatcher (rather than making the mode explicit) would hide a rule the spec states outright. The
 cost is a worker with three modes to keep straight, which is worth an explicit test each.
+
+**"First run" above is the target design; step 6 built a narrower stand-in (2026-09-23, step 7
+findings).** The table's "routed to the onboarding classify screen" is not yet true: the bootstrap
+case built and device-verified in the notification tracer bullet inserts everything as already
+seen with no rule evaluation and no notification — matching R10b's consequence — but is silent,
+with no UI, because the classify-screen itself is out of scope for that bullet
+(`NOTIFICATION-TRACER-BULLET.md`, "Deliberately out of scope"). Verified on the device across a
+backend restart mid-session: the bootstrap/steady-state check reads real state (do any `Debits`
+rows exist for this account?), not a flag, so it did not re-fire and did not double-insert.
 
 ## Debit identity — never alert twice for one charge
 
@@ -469,3 +485,13 @@ guesswork:
 Still unobserved from any account, sandbox or production: a non-EUR charge and a pending
 transaction. R10c's booked-vs-pending split and the currency-skip path remain built from the
 requirement's wording, not from evidence, and should stay conservative until one actually arrives.
+
+**Sandbox-only, not real-bank evidence (2026-09-23, notification bullet step 7).** Verified
+directly against the dev Postgres `Debits` table while confirming step 6: the two transactions
+added through Mock ASPSP's control panel to trigger a real push **do** carry `entry_reference`
+(short-suffix debit ids, e.g. `<account>:6cx37`) — unlike the 92-row historical dump imported into
+the same sandbox account, which carries none (composite-fallback ids). This is a fact about Mock
+ASPSP's control panel, not about any real bank, and doesn't reopen the question above: whether
+`entry_reference` is reliably present on real N26 debits was already answered against production
+(63 of 91 still needed the fallback despite the field existing — see above). It matters only for
+writing a realistic device test against the sandbox.

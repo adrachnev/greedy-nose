@@ -62,6 +62,9 @@ the single source of truth for product behavior; where anything else disagrees, 
   JDK 25 — both trip a build failure) and the Microsoft Visual C++ Redistributable installed (RN's
   native build uses CMake, which fails with `STATUS_DLL_NOT_FOUND` without it). The device
   connects over wireless `adb` (`adb pair`/`adb connect`), not USB.
+- Wireless `adb` pairing lapses and needs redoing periodically. Separately, a missing
+  `adb reverse` tunnel for Metro's port (8081) looks identical on the device to "Metro isn't
+  running" even when Metro is healthy — check the tunnel before assuming the bundler is down.
 
 ## Conventions that differ from defaults
 

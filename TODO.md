@@ -138,8 +138,9 @@ The four below are left open on purpose.
 
 - [ ] **The payee key is part of the fallback debit id** (`ResolveDebitId`). One spelling change at
       the bank re-keys the payee *and* every debit under it at once, which R10b reads as an
-      entirely new history. Only reachable while `entry_reference` is missing — step 6 decides
-      whether that is ever the case in production.
+      entirely new history. Only reachable while `entry_reference` is missing — confirmed a live
+      concern, not a hypothetical: 63 of 91 real debits still needed the fallback despite the
+      field existing (`ARCHITECTURE.md`'s "Refining this from real data", settled 2026-09-16).
 - ~~**91 of 92 debits now have an empty `reference`**~~ — **done 2026-08-19.** Checked when step 5
       landed, and it did render an empty labelled row. Both the Reference *and* the Payee IBAN row
       on `DebitDetailScreen` now appear only when the bank sent the field, and the card they sit

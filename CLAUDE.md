@@ -7,11 +7,24 @@
 **`NOTIFICATION-TRACER-BULLET.md` is the live document for the notification work; read its
 Progress section first.** Scoped and started 2026-09-17, right after the first tracer bullet
 closed — Postgres, FCM push, the polling worker, the rule engine and rules-sync are all new
-ground it covers step by step. **Steps 0–6 are done (0 Firebase 2026-09-18, 1 Postgres schema
+ground it covers step by step. **All steps 0–7 are done (0 Firebase 2026-09-18, 1 Postgres schema
 2026-09-20, 2 device token registration and 3 the backend sends a push both 2026-09-21, 4 rules
-sync, 5 the rule engine port and 6 the ingestion worker all 2026-09-22); step 7 (record findings,
-docs-only) is next.** **The backend is on the Sandbox application until the bullet ends** (to
-spare N26's daily quota); the switch-back procedure is at the end of that file.
+sync, 5 the rule engine port and 6 the ingestion worker all 2026-09-22, 7 record findings
+2026-09-23) — this tracer bullet is complete.** **The backend is still on the Sandbox application**
+(to spare N26's daily quota); the switch-back procedure is at the end of that file, and switching
+back is the one remaining real-world step, deliberately not done inside this docs-only pass (see
+`AUTOMATED-RUN.md`'s stop conditions — it spends real N26 quota).
+
+**2026-09-23 — step 7 (record findings) done, docs-only.** No `REQUIREMENTS.md` change; three
+additions to `ARCHITECTURE.md`, each checked against code or the dev database rather than
+asserted: the Ingestion Worker's component-table row still names Azure Functions, but what
+actually runs is an in-process `BackgroundService` in the API host (deliberate, deferred); the
+"First run" ingestion-mode row promises onboarding-classify routing that step 6 deliberately
+didn't build (silent bootstrap only), confirmed by a mid-session backend restart to still read
+real state, not a flag; and Mock ASPSP's control-panel-added test transactions do carry
+`entry_reference` (verified by querying the dev `Debits` table directly), sandbox-only evidence
+that doesn't reopen the already-answered real-N26 question. Full detail in
+`NOTIFICATION-TRACER-BULLET.md`'s step 7.
 
 **2026-09-22 — step 6 (the ingestion worker) done, verified on the device.** A bootstrap tick
 silently seeded 92 historical debits with no notifications; two later mock transactions for
