@@ -32,3 +32,11 @@ app/android/app/google-services.json
 # server-side send access to the whole Firebase project. Same class as the Enable Banking .pem:
 # the entire credential, no token endpoint, stays server-side forever.
 *firebase-adminsdk*.json
+/.vs
+
+# BMAD skills toolkit. Personal installer answers (user_name, etc.) live in *.user.toml —
+# _bmad/custom/.gitignore already covers that directory, this extends the same rule repo-wide
+# so the top-level _bmad/config.user.toml doesn't slip in too. _bmad/render/ is regenerated
+# scratch output (has its own self-contained .gitignore, kept here as a second line of defense).
+**/*.user.toml
+_bmad/render/
