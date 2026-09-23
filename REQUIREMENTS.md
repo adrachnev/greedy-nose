@@ -368,8 +368,9 @@ error/empty/disconnected states.
   the SEPA creditor ID is absent and unreachable, so R3a is now a two-tier best-effort key and
   `A6` is unblocked. The same answer changed R10b's identifier and added R10c (booked-only
   alerting) — a bigger correction than the question that prompted it.
-- `CLAUDE.md`'s "Product decisions" section must be trimmed to point here for anything about
-  classification.
+- ~~`CLAUDE.md`'s "Product decisions" section must be trimmed to point here for anything about
+  classification.~~ — done 2026-09-23, via the new `AGENTS.md` (`bmad-project-context` adoption
+  run).
 
 ### Refining these from real data
 
