@@ -15,6 +15,25 @@ sync, 5 the rule engine port and 6 the ingestion worker all 2026-09-22, 7 record
 back is the one remaining real-world step, deliberately not done inside this docs-only pass (see
 `AUTOMATED-RUN.md`'s stop conditions — it spends real N26 quota).
 
+**2026-09-24 — `REQUIREMENTS.md` validated and revised, docs-only.** `bmad-prd`'s validate intent
+(rubric walker) plus `bmad-review` (edge-case-hunter, verification-gap) plus a manual first-use/
+normal-use walkthrough — three independent passes, cross-converging on several findings — found
+the doc's one real hole: the onboarding classify flow was load-bearing for R4b/R10c but had no
+requirement of its own, which had already caused the step-6 divergence CLAUDE.md's 2026-09-22
+entry records. Fixed by adding **R25** (a connection starts with a first sync; an interrupted
+pull is still the same first sync) and **R26/R26a** (onboarding, sourced from the already-settled
+`01c-classify-payees` mock: not gated on full review — an unreviewed payee stays bad and alerts
+normally on its next charge). Also fixed: **R20a/R20b** (the reconnect summary now has a stated
+zero-bad-debit floor, so it can't fire a no-op push that would violate R1, and post-deletion
+reconnect is explicitly routed to R25's silent bootstrap, not R20); **R13a** (the Save-commits/
+Back-discards mechanic R24a always assumed but that no requirement actually stated); R12a's "no
+rule" wording (no longer claims an unreviewed-but-seen payee is unfamiliar); R23b extended to the
+Rules-list search round trip; R10b/R10c tightened (the composite fallback key is now stated as
+the common case, not the exception; provisional rows classify and get replaced in place once
+booked). Full detail and the validation report (with three code-level findings intentionally left
+out of `REQUIREMENTS.md` — they're implementation gaps against already-correct requirements, not
+doc issues) are in `_bmad-output/planning-artifacts/prds/prd-greedy-nose-2026-09-24/`.
+
 **2026-09-23 — step 7 (record findings) done, docs-only.** No `REQUIREMENTS.md` change; three
 additions to `ARCHITECTURE.md`, each checked against code or the dev database rather than
 asserted: the Ingestion Worker's component-table row still names Azure Functions, but what

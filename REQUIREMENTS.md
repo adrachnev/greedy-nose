@@ -55,8 +55,10 @@ strongest identifier the charge carries, in order:
 1. **Normalized creditor account identification** — the IBAN, where the charge carries one
 2. **Normalized name** (uppercase, strip digits and extra whitespace), plus the **creditor
    agent** — the creditor's own bank, typically identified by BIC, as reported (inconsistently)
-   by the ASPSP alongside a charge — where it helps separate two payees that would otherwise
-   collide
+   by the ASPSP (account servicing payment service provider — the bank, in PSD2's own term)
+   alongside a charge. It is folded into the key whenever the ASPSP reports one for that charge,
+   not only once a collision between two payees is detected — there is no separate
+   collision-detection step, just whatever the ASPSP gives us
 
 The resolved key is stored on the payee, together with the raw strings seen for it.
 
@@ -96,8 +98,9 @@ marking the payee bad already does directly, so it is not a second way to say th
 
 **R4b** — "Payee has a rule" is what **reviewed** means (settled 2026-08-14, was `O8`). A payee
 marked bad has a rule record; an untouched payee has none. Both classify as bad, so no extra
-flag is needed to tell them apart. Only onboarding uses the distinction, for its progress; it
-is invisible everywhere else in the app.
+flag is needed to tell them apart. Only onboarding uses the distinction (R26) — it's what
+separates a payee still worth a look from one already decided; it is invisible everywhere else
+in the app.
 
 ## Classification
 
@@ -153,9 +156,10 @@ matched against the **unformatted** value, not the rendered string, so `R17`'s l
 cannot break search.
 
 **R23b — The query is scoped to the visit, not the screen.** It survives list → debit detail →
-Back, so several hits can be worked through without retyping, and it is **cleared when the tab
-is left**, so a tab always hands back the full list. Anything else leaves the user staring at a
-short list with no visible cause.
+Back on the Debits tab, and equally list → Edit Rule → Back **or** Save on the Rules tab — both
+searchable screens (R23) get the same guarantee, not just the one with a "detail" screen. It is
+**cleared when the tab is left**, so a tab always hands back the full list. Anything else leaves
+the user staring at a short list with no visible cause.
 
 ## Navigation
 
@@ -164,7 +168,7 @@ lands on its list, never on a detail or edit screen left open from a previous vi
 **Re-tapping the tab you are already on does nothing** — it is not a "go back" gesture.
 
 **R24a** — Leaving a tab mid-edit **discards an unsaved rule draft**, silently. Back already
-discards on that screen (`R4`'s single-commit form), so a tab tap behaving differently would be
+discards on that screen (`R13a`'s single-commit form), so a tab tap behaving differently would be
 the inconsistency, and a confirm dialog fired by a tab press is not a gesture Android users
 expect.
 
@@ -187,6 +191,12 @@ bank transaction ID") — never `transaction_id`, which may change between fetch
 guaranteed unique. Full evidence and rationale for both halves of that correction are in
 `ARCHITECTURE.md`'s "Debit identity".
 
+This is not a rare edge case: real data confirms it, even within a single connected account — 28
+of 91 real N26 debits carried an `entry_reference`, the rest fell back to the composite key below
+(full detail in "Refining these from real data" below). Treat the fallback as a permanent,
+load-bearing path for a large share of any bank's debits, not a stopgap for banks that omit the
+field entirely.
+
 **R10c — Only booked debits notify** (settled 2026-08-17). There is **no identifier that survives
 pending → booked** across banks: for most ASPSPs `entry_reference` only exists once the charge is
 booked. So pending charges may appear in the list as provisional, but the alert fires when the
@@ -197,11 +207,24 @@ arriving a few hours later.
 
 Consequences:
 - Everything pulled during the first sync (onboarding) is stored as already-seen and never
-  notifies.
+  notifies (R25).
 - Some banks omit entry references or hand out duplicates. **When the identifier is unreliable,
   risk the duplicate alert, never the missed one** — the mirror of R3b, in the opposite direction:
   for identity, merging is the dangerous move; for de-duplication, it is treating two charges as
   one.
+- A **provisional row still classifies** — R6 derives good/bad at read time regardless of booking
+  status, so a pending charge shows its good/bad label like any other debit. What R10c withholds
+  is only the **notification**, not the list marking.
+- Once the same charge arrives **booked** with its own `entry_reference`, it should **replace**
+  the provisional row in place — matched by connected account, amount and payee, plus date on a
+  best-effort basis only (a pending report's date can shift once the same charge books, so date
+  alone isn't a safe match key). This is the intended rule, not a confirmed one: no pending
+  transaction has been observed on any account pulled so far (see "Refining these from real data"
+  below), so the match heuristic is unverified. Until it is, "never shown as a second row" is the
+  goal, not a guarantee — the same conservative posture the rest of this section already takes.
+- A charge still pending at the moment of a reconnect-gap resync (R20) isn't booked yet, so it
+  isn't counted in that gap's summary either — it rolls into an ordinary per-charge notification
+  once it books on a later poll, never into the gap summary. Neither double-counted nor dropped.
 
 **R11** — One notification per bad debit. Grouping stays deferred (see `CLAUDE.md`).
 
@@ -214,9 +237,14 @@ notification says which:
 - **Title**: `«Payee» · «amount»`, e.g. `ScamyLoans GmbH · 49,00 €`. The OS already shows the app
   name above the title, so repeating "Greedy Nose" there would waste the most valuable line.
 - **Body**, depending on why the debit is bad:
-  - no rule → *"New payee — you haven't seen this one before."*
+  - no rule → *"You haven't reviewed this payee yet."*
   - rule is bad → *"You marked this payee as bad."*
   - over the limit → *"Over your limit of «limit»."*
+
+The "no rule" wording deliberately doesn't claim the payee itself is unfamiliar — "no rule" covers
+both a genuinely new payee and one the user chose not to review during onboarding (R26a), and the
+second case has visible history in the user's own Debits list, so claiming it's never been seen
+would be false.
 
 No minus sign on the amount (R17a).
 
@@ -228,6 +256,13 @@ Settings, which is not specified yet.
 **R13** — A rule cannot be deleted (settled 2026-08-14, was `O6`). Deleting one would leave the
 payee at "no rule" = bad, which the user already reaches by marking them bad. The only edits
 are: switch good ↔ bad, and set or clear the amount.
+
+**R13a — Save commits, Back discards.** The Edit Rule screen is a single-commit form: **Save**
+writes the classification and amount together as one rule and returns to the previous screen;
+**Back** discards any change to either field without writing anything. **Clear alert limit**
+(`04b`, shown only once a limit is already set) is the one exception: a shortcut that writes an
+emptied amount by itself, classification unchanged — still one field written at once, not a
+general per-field save path alongside Save.
 
 **R14** — The amount field is **hidden while the payee is marked bad**, since it has no effect
 there (R5). It appears when the payee is good. A hidden amount is kept, not wiped (R8a) — mark
@@ -268,6 +303,14 @@ whole app — decided while reworking the mocks on 2026-08-14.)
 
 ## Bank connection
 
+**R25 — A connection starts with a first sync.** Granting consent triggers one bulk pull of the
+account's available history — as much as the ASPSP returns; there is no separate "how far back"
+setting. Every debit that pull produces is **already-seen** the moment it's fetched (R10c) and
+feeds directly into onboarding (R26); none of it can notify, no matter how many app launches or
+network retries it takes to finish pulling. If the pull is interrupted partway through, resuming
+it is still the **same first sync**, never a gap (R20) — there is no prior "seen" state yet for
+R20's summary to diff against.
+
 **R18** — The connection ends in three ways, with different consequences (settled 2026-08-14):
 
 | How it ends | Rules | History | Connection |
@@ -279,27 +322,75 @@ whole app — decided while reworking the mocks on 2026-08-14.)
 **R19 — A dead connection is never silent.** No alerts arriving looks exactly like "nothing bad
 happened", which is the one failure that breaks R1. So: a persistent banner on the debit list
 whenever the connection is expired or disconnected (`01d-connection-expired`), **plus one
-push** when the consent expires by itself — the user may not open the app for days.
+push** when the consent expires by itself — the user may not open the app for days. **Title**:
+`Bank connection expired`. **Body**: `Reconnect to keep getting alerts.` Tapping it opens the
+debit list, same as the banner underneath it.
 
-**R20 — Reconnecting after a gap sends one summary notification**, e.g. "12 new charges while
-you were disconnected, 3 bad" — not one push per bad debit. The charges from the gap carry IDs
-the app has never seen, so R10b would otherwise fire a burst all at once. Deliberate exception
-to R11; normal per-charge alerts resume afterwards.
+**R20 — Reconnecting after a gap sends one summary notification** — not one push per bad debit.
+The charges from the gap carry identifiers the app has never seen, so R10b would otherwise fire a
+burst of alerts all at once. Deliberate exception to R11; normal per-charge alerts resume
+afterwards. **Title**: `«N» new debits while you were disconnected`. **Body**: `«M» of them are
+bad. Tap to review them.` Tapping opens the debit list — not a single debit, since no one debit
+is what this notification is about. Wording matches the `05b` mock.
+
+**R20a — The summary fires only when the gap contains at least one bad debit.** R20 exists
+specifically to prevent a burst of *bad-debit* alerts; a gap with zero bad debits has no burst to
+prevent, so nothing is sent. Silence here is correct, not a bug — it matches R1's "notifies...
+nothing else." A gap that turned up new but entirely good debits stays exactly as quiet as an
+ordinary day. A gap with exactly **one** bad debit still uses R20's summary wording, not R12a's —
+the replacement is unconditional for any reconnect gap, not only once there'd otherwise be a
+literal burst of more than one push.
+
+**R20b — Reconnecting right after deleting the account is never R20's path.** R18's deletion
+wipes both rules and history, so there is no prior "seen" state left for a gap summary to diff
+against. That reconnect re-enters R25's silent first sync instead, identical to a brand-new
+install — not a summary, and not silence-by-accident either.
 
 **R21** — Rules stay **editable while disconnected**. Harmless, and it lets the user prepare
 before reconnecting.
 
+## Onboarding
+
+**R26 — Onboarding.** Right after the first sync (R25), the user sees every payee that sync
+turned up, each starting as **bad** (R5's "no rule" row). Tapping good or bad on a card writes
+that payee's rule **immediately** — unlike the Edit Rule screen (R13a), there is no separate Save
+step and no per-payee Back to discard; each tap is its own commit (`01c-classify-payees`). This is
+the only point where classifying happens in bulk instead of one payee at a time.
+
+**Mark all Good** writes good for every visible payee in one tap, the same immediate write as an
+individual toggle. This is a deliberate, accepted trade-off, not an oversight: bulk-review
+convenience against the risk of sweeping a genuinely bad payee (the mock's own example,
+ScamyLoans GmbH) into good without individually looking at it — and a good-classified payee never
+alerts (R5), so there's no automatic second chance beyond the user separately noticing it later on
+the Rules tab. Accepted for the same reason R3a and R3b accept their own best-effort gaps: the one
+person using Mark all Good is the same person about to rely on this app's alerts, doing so on
+their own history, in one deliberate extra tap beyond letting the bad default stand.
+
+**R26a** — Onboarding is **not gated on full review**. The user can leave at any point ("Start
+Monitoring"); a payee they didn't get to simply has no rule, which R4b/R5 already make bad. That
+payee's **next** new charge — after the first sync, not any of the historical debits it pulled —
+notifies normally (R10), worded per R12a's "no rule" case. Onboarding only ever suppresses alerts
+for the history R25 pulled, never for anything that arrives afterward.
+
 ## Open points
 
-**None.** All nine points raised on 2026-08-14 are settled and folded into the requirements
-above: `O1` → R8/R8a, `O2` → R5a, `O3` → R10a, `O4` → R10b, `O5` → R3a/R3b, `O6` → R13/R14,
-`O7` → R2a, `O8` → R4b, `O9` → R0.
+**None of the original nine.** All nine points raised on 2026-08-14 are settled and folded into
+the requirements above: `O1` → R8/R8a, `O2` → R5a, `O3` → R10a, `O4` → R10b, `O5` → R3a/R3b, `O6`
+→ R13/R14, `O7` → R2a, `O8` → R4b, `O9` → R0.
 
-Currency (R15–R17), notification wording (R12a) and bank-connection handling (R18–R21) were
-settled in the same session.
+Currency (R15–R17) and the original shape of notification wording (R12a) and bank-connection
+handling (R18–R21) were settled in the same 2026-08-14 session. Onboarding (R25/R26/R26a) was
+settled 2026-09-24, closing what used to sit in this section unnumbered as "still unspecified" —
+and the same 2026-09-24 pass revised R12a's "no rule" wording, added R20's threshold (R20a) and
+the post-deletion reconnect routing (R20b), so those three no longer read exactly as they did on
+2026-08-14.
 
-Still unspecified, but not blocking: the Settings screen's contents (including whether amounts
-may show on the lock screen), and the onboarding classify flow's details.
+**Currently open, tracked here so neither hides in an unrelated section:**
+- R22's self-flagged tension: the app is bank-agnostic (R22) but R15 hard-assumes EUR — not a
+  contradiction in practice yet (every bank named so far is eurozone), but R22 doesn't itself
+  carve out the exception. Needs a currency model before a non-EUR ASPSP is connected (see
+  `CLAUDE.md`'s Open/deferred).
+- The Settings screen's contents, including whether amounts may show on the lock screen.
 
 ## Follow-ups — bringing the code in line
 
@@ -318,8 +409,9 @@ matching screen is coded):
 1. R19 covers expired **and** disconnected, but only expired is drawn (`01d`). After the user
    taps Disconnect there is no mock of the debit list in that state, and Settings still shows an
    "Active" pill.
-2. R19's "one push when the consent expires by itself" has no mock. That push is what reaches a
-   user who has not opened the app in a week.
+2. R19's "one push when the consent expires by itself" has no mock (wording is now specified in
+   R19 itself, settled 2026-09-24). That push is what reaches a user who has not opened the app
+   in a week.
 3. ~~`03` shows the payee's **IBAN** for a direct debit, but R3a keys on the SEPA creditor ID~~ —
    resolved 2026-08-17: there is no creditor ID, and the IBAN *is* R3a's tier 1. The mock was
    right by accident; nothing to change.
@@ -394,7 +486,7 @@ real N26 data said." Headline results:
   fix.
 
 Two things still have **zero evidence** from any account pulled so far, sandbox or production: a
-non-EUR charge, and a pending (not-yet-booked) transaction. R10c's booked-vs-pending split and the
+non-EUR charge, and a pending (not-yet-booked) debit. R10c's booked-vs-pending split and the
 currency-skip path added after the Enable Banking C# sample review remain untested by real data.
 
 Until those are observed, keep the same conservative defaults R1 demands: split rather than merge

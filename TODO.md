@@ -9,6 +9,38 @@ Rules for this file: an item is either done and deleted, or it says why it is st
 let it become a graveyard — anything nobody has touched in months is not a TODO, it is a decision
 to not do it, and should be recorded as such or dropped.
 
+## From the `REQUIREMENTS.md` validation pass — 2026-09-24
+
+`bmad-review`'s verification-gap lens, run against `REQUIREMENTS.md` adapted to check the actual
+`app/` and `backend/GreedyNose.Api` code against what each `R`-numbered requirement specifies.
+All three are implementation gaps against requirements that are already worded correctly — the
+doc needed no change for any of these; the code does.
+
+- [ ] **`R4a`'s "at most two decimal places" is not enforced by the backend rule-amount validator**
+      (`backend/GreedyNose.Api/Rules/RulesValidation.cs:62-65`). `TryValidate` only checks
+      `AmountEUR <= 0`; `POST /rules` accepts e.g. `amountEUR: 12.999`, which Postgres then
+      silently rounds via the `numeric(12,2)` column rather than rejecting as `R4a` implies. Add a
+      decimal-scale check next to the existing positivity check.
+- [ ] **`R3a`'s "raw strings stored alongside the resolved key" is asserted by the doc and
+      `ARCHITECTURE.md` but not implemented** (`backend/GreedyNose.Api/Data/Payee.cs:15`). `Payee`
+      has one `Name` field, unconditionally overwritten — not appended to — on every ingestion
+      tick (`IngestionRunner.cs`'s `UpsertPayeesAsync`) and every `POST /rules` save
+      (`RulesEndpoint.cs`'s `HandleAsync`). Once a real bank sends two spellings of the same
+      creditor over time (already observed in `TransactionMapperTests.cs`'s branch-number and
+      aggregator-prefix cases), every spelling but the most recent is permanently discarded — the
+      exact data `R3a` says is needed for "a future payee-key re-tuning pass." Either add raw-name
+      history or strike the claim from `R3a`/`ARCHITECTURE.md`.
+- [ ] **`R24`/`R24a`'s entire tab-navigation behavior rides on one untested navigator option**
+      (`app/src/navigation/AppNavigator.tsx:160`, `popToTopOnBlur: true`, applied to the Debits and
+      Rules `Tab.Screen` entries at lines 189/195). No render/integration test exercises it —
+      `AppNavigator.test.ts` only unit-tests `listTabListeners` against a hand-built `{ isFocused }`
+      stub and never mounts `AppNavigator`/`MainTabs`. Dropping the option, or a react-navigation
+      upgrade changing its semantics, would silently break both requirements (tab always lands on
+      its list; an unsaved rule draft discards on tab switch) while `npx jest` stays green — the
+      `tabPress`/`listTabListeners` re-tap guard is tested separately and would still pass, masking
+      the regression. Add a render test that mounts the tab navigator, pushes DebitList → PayeeEdit
+      with draft state, fires the Debits tab's blur, and asserts the reset + discarded draft.
+
 ## From a `bmad-review` pass over REQUIREMENTS.md/ARCHITECTURE.md — 2026-09-23
 
 Adversarial + Edge-Case Hunter lenses, run together over both documents. All real, all about
