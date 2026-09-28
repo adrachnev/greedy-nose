@@ -4,6 +4,30 @@
 
 ## Status
 
+**2026-09-28 — `ARCHITECTURE.md` validated against `REQUIREMENTS.md` via `bmad-architecture`, all
+findings fixed and committed (`b844bb7`).** Two independent reviewers found ARCHITECTURE.md had
+drifted from the 2026-09-24 REQUIREMENTS.md revision (stale R12a wording, R20a/R20b uncited, R25's
+first-sync signal unspecified in a way that could misfire) and that three component boundaries
+were described inconsistently enough for two builders to diverge (payee-resolution-vs-dedup
+ordering, the composite dedup key's ambiguous fields, reconnect-summary ownership). All fixed: one
+canonical pipeline stated once, the composite key's `day`/`payee`/`ordinal` fields pinned down, the
+reconnect summary now explicitly owned by the Ingestion Worker, and `FirstSyncCompletedAt`
+replaces "do any Debits rows exist" as the real mode signal — that row-existence check's gap
+against a partial-first-sync-resume is now tracked in `TODO.md` against the real running code, not
+just the doc.
+
+Also folded in the owner's polling-quota proposal: real-device testing confirmed on-demand "app is
+open" fetch is **not** exempt from the bank's 4x/day cap (hit `ASPSP_RATE_LIMIT_EXCEEDED` through
+the real PSU-header path), closing an open question flagged since 2026-09-16. It's removed
+entirely except one narrow exception — the first sync, still triggered immediately by the API
+right after consent. Swipe-to-refresh needed no new backend contract, just a client-side re-read
+of the existing debit list.
+
+Five tech-currency claims web-verified: Azure Functions' in-process model retires 10 Nov 2026
+(isolated worker forced anyway on net10.0); Postgres free tiers pause/suspend on idle but never
+lose data, and aren't a practical risk given the worker's own cadence; SendGrid's free tier ended
+May 2025 — swapped for Brevo (300/day, free forever).
+
 **`NOTIFICATION-TRACER-BULLET.md` is the live document for the notification work; read its
 Progress section first.** Scoped and started 2026-09-17, right after the first tracer bullet
 closed — Postgres, FCM push, the polling worker, the rule engine and rules-sync are all new
