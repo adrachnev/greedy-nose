@@ -312,6 +312,15 @@ The four below are left open on purpose.
       same account, which this tracer bullet does not deploy (`IngestionWorker` runs one tick at a
       time, one process). Self-heals: FCM keeps answering `TokenNoLongerValid` for that token on
       every later bad debit until it is actually pruned. Third review pass, 2026-09-22.
+- [ ] **The bootstrap/steady-state check is "do any `Debits` rows exist?", not a dedicated flag —
+      a first sync interrupted *after* it has written some rows would misclassify its remaining
+      history as a reconnect gap on the next tick, firing a spurious summary push (breaks R25).**
+      Device-verified only for a restart *before* any row was written (`NOTIFICATION-TRACER-BULLET.md`
+      step 6), which this gap doesn't exercise. `ARCHITECTURE.md`'s target design (found by
+      `bmad-architecture` validation, 2026-09-28) now specifies `FirstSyncCompletedAt` on the
+      consent/account record instead — set only once the full historical pull finishes, independent
+      of row count. Fix before a first sync can realistically span more than one tick (e.g. once
+      pagination is turned on, see above).
 
 ## From notification tracer-bullet step 4 — rules sync, 2026-09-22
 
