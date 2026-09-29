@@ -30,6 +30,13 @@ the single source of truth for product behavior; where anything else disagrees, 
 - Commit directly to `main` (no feature branches); commit only when asked; never push unless asked.
 - When the user says "automated run" plus named steps: read `AUTOMATED-RUN.md` in full before
   doing anything else — it replaces plan mode and the rules above with its own opt-in ones.
+- BMAD skills (decided 2026-09-29): use `bmad-create-epics-and-stories` to slice larger work into
+  epics and stories (the input is `REQUIREMENTS.md`, `ARCHITECTURE.md` and the UX documents in
+  `_bmad-output/`). Each story is then built **exactly as before** — plan mode, `coder-backend`/
+  `coder-mobile`, `coder-reviewer` started by hand, findings back to the same coder. Do **not** use
+  `bmad-build` (or any other BMAD skill) to write or review code: its own implementation and review
+  loop would bypass the rules above. Other BMAD skills stay available for documents (`bmad-prd`,
+  `bmad-architecture`, `bmad-review`, `bmad-ux`) as they were used so far.
 
 ## Where things are
 
