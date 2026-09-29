@@ -4,6 +4,27 @@
 
 ## Status
 
+**2026-09-29 (latest) — the R20/R20a reconnect summary push is built (backend), uncommitted at
+time of writing.** A Reconnect tick no longer runs like Steady: it classifies each new debit
+*without* sending, counts N (all new) and M (bad), sends **one** push with R20's text if M > 0,
+and only then commits every new debit, any token prune and the new session hash in **one**
+`SaveChangesAsync`. Send-before-save is the point: a tick that dies in between leaves nothing
+stored and the hash old, so the retry counts the same N/M (worst case one duplicate summary, never
+a lost or miscounted one). A failed send or a missing device token still commits — owner's decision,
+recorded as a shared gap with the per-debit path in `TODO.md`. No new sender shape was needed:
+`PushMessage` is plain text, `ReconnectSummary` builds R20's title/body. Review found one real
+hole (a duplicate debit id within one fetch failed the whole all-or-nothing tick on every retry,
+silently — fixed for all modes with `if (!seen.Add(id)) continue`) and one test gap (good payee
+over its limit); two review passes, then clean; 271 tests pass. Verified live on the dev DB and the
+real Firebase path: five recent debits deleted and the hash forced wrong → log `Reconnect detected:
+3 new debits, 2 bad`, hash healed, NotificationLog untouched, a second start silent. Whether the
+banner really appeared on the phone is the owner's to confirm — `adb` had no device (pairing
+lapsed). Toolchain: a Windows Application Control policy blocks freshly built *deterministic*
+test DLLs (`FileLoadException … 0x800711C7`); run `dotnet test GreedyNose.Api.Tests
+-p:Deterministic=false` and every build is fresh. Still to do, each its own plan: runtime
+consent-death detection (`ExpiresAt` per tick + a bank "session invalid" error), then the client
+contract + onboarding classify (R26).
+
 **2026-09-29 (later) — reconnect *detection* built (backend), uncommitted at time of writing;
 the R20 summary push is not.** `AccountSyncStates` gained a nullable `LastSessionIdHash` (SHA-256 of
 the consent session id — a hash on purpose: the session id reads the real account, so it never goes

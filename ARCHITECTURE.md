@@ -76,7 +76,7 @@ one push" --> Notify
 | Ingestion Worker | Azure Functions (Timer), C# | Cloud backend | Polls every 6h per consent (retries transient failures); also invoked once, immediately, by the API right after a consent is granted (the one-time first-sync exception — see "Transaction ingestion"). No other on-demand trigger; records success/failure per consent. Drops credits (R2a). Runs in one of three modes — see "Ingestion modes" |
 | Health Monitor | Azure Functions (Timer), C# | Cloud backend | Daily check for consents stuck failing 20h+; expired consents get a user-facing banner **and one push**, everything else an email alert to the operator |
 | Rule Engine | C# | Cloud backend | Resolves payee → applies that payee's rule (R5) → returns each debit's good/bad result **with the reason** (R12a). Mode-agnostic: it classifies the same way regardless of which ingestion mode the tick is running — it does not decide whether or how anything gets sent |
-| Notification Dispatcher | C# | Cloud backend | Sends via FCM. Takes two request shapes: one bad debit + reason (Steady state, worded per R12a), or one gap summary with N/M counts (Reconnect, worded per R20); never decides which to send, only renders and delivers what it's given |
+| Notification Dispatcher | C# | Cloud backend | Sends via FCM. In the built code this is `INotificationSender` taking a plain `PushMessage(Token, Title, Body)`: the runner supplies R12a's reason text for one bad debit (Steady state) or R20's summary text with N/M counts (Reconnect, built by `ReconnectSummary`); the sender never decides which to send, only delivers what it's given |
 | Key Vault | Azure Key Vault | Cloud backend | Holds the encryption key for BankConsent tokens |
 | Data Store | Postgres (free tier, e.g. Supabase/Neon — both idle-pause on their free tier, see "Cost") | Third party | Users, BankConsents (encrypted), Payees, Rules, Debits, NotificationLog, DeviceTokens, poll status per consent |
 | Enable Banking API | PSD2/XS2A aggregator | Third party | Consent flow, transaction feed |
@@ -388,9 +388,18 @@ does not re-run its first sync). What is still not true is the table's "routed t
 classify screen": the first sync inserts everything as already seen with no rule evaluation and no
 notification — matching R10b's consequence — but is silent, with no UI, because the classify
 screen is not built yet (R26, `NOTIFICATION-TRACER-BULLET.md`, "Deliberately out of scope"). The
-Reconnect mode is **detected but not acted on** (2026-09-29): the runner derives it from the session
-hash and logs it, but still processes the tick exactly like Steady state — one push per bad debit,
-no summary — because R20's summary needs a different tick shape (see `TODO.md`).
+Reconnect mode is built (2026-09-29): the runner derives it from the session hash, classifies each
+new debit **without** sending, counts N (all new) and M (bad), sends **one** R20 summary push if
+M > 0 — **before** saving — and then commits every new debit, any token prune and the new session
+hash in **one** write. Sending first is deliberate: a tick that dies between send and save leaves
+nothing stored and the hash old, so the retry finds the same debits and counts the same N/M — worst
+case one duplicate summary, never a lost one and never a wrong count. A failed send (`Rejected`/
+`Transient`) or a missing device token still commits (owner's decision, 2026-09-29; the alert is
+then lost, the same gap the per-debit path has, see `TODO.md`). There are no `NotificationLog`
+rows for the summary — that log is per debit. A repeated debit id within one fetch is skipped and
+counted once in every mode, since in the all-or-nothing modes one duplicate would otherwise fail the
+whole tick on every retry. There is no separate Dispatcher class: the runner sends a `PushMessage`,
+and the summary is that same message with R20's text (`ReconnectSummary`).
 
 **Two concurrency risks a design like this table implies are already closed in the real
 implementation**, not just designed around (`IngestionRunner.cs`, step 6 review findings): a tick

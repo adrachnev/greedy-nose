@@ -712,27 +712,285 @@ public class IngestionRunnerTests
         Assert.Equal(hash, (await verify.AccountSyncStates.SingleAsync()).LastSessionIdHash);
     }
 
-    /// <summary>
-    /// A reconnect is currently processed exactly like steady state: the new bad debit pushes normally.
-    /// When the R20 summary notification is built this changes (one summary instead of per-debit
-    /// pushes) and this test's push assertion has to change with it — that is intended.
-    /// </summary>
+    private static async Task SeedRuleAsync(string dbName, TimeProvider clock, string payeeName, Classification classification, decimal? limit = null)
+    {
+        await using var db = NewInMemoryContext(dbName);
+        var payeeId = $"name:{payeeName}";
+        db.Payees.Add(new Payee { UserId = SeedData.UserId, Id = payeeId, Name = payeeName, Initials = "XX", FirstSeenAt = clock.GetUtcNow() });
+        db.Rules.Add(new Rule { UserId = SeedData.UserId, PayeeId = payeeId, Classification = classification, AmountEUR = limit, UpdatedAt = clock.GetUtcNow() });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedReconnectAsync(string dbName, TimeProvider clock)
+    {
+        await SeedBootstrappedAsync(dbName, clock, SessionFingerprint.Of("old-session"));
+        await SeedTokenAsync(dbName, clock);
+    }
+
+    private static async Task AssertCommittedAsync(string dbName, int newDebits)
+    {
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Equal(SessionFingerprint.Of("session-1"), (await verify.AccountSyncStates.SingleAsync()).LastSessionIdHash);
+        Assert.Equal(1 + newDebits, await verify.Debits.CountAsync()); // the seeded one plus the new ones
+        Assert.Empty(await verify.NotificationLog.ToListAsync()); // the summary belongs to no single debit
+    }
+
+    // --- Reconnect summary (R20/R20a) ---------------------------------------------------------------
+
     [Fact]
-    public async Task A_different_session_updates_the_hash_after_the_tick_and_processes_like_steady_state()
+    public async Task A_reconnect_with_bad_debits_sends_one_summary_and_commits_everything()
     {
         var dbName = Guid.NewGuid().ToString();
         var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
-        await SeedBootstrappedAsync(dbName, clock, SessionFingerprint.Of("old-session"));
-        await SeedTokenAsync(dbName, clock);
+        await SeedReconnectAsync(dbName, clock);
+        await SeedRuleAsync(dbName, clock, "BAD SHOP", Classification.Bad);
+        await SeedRuleAsync(dbName, clock, "GOOD SHOP", Classification.Good, limit: 50m);
+
+        var mapped = Mapped(
+            Booked("2026-09-20", "NO RULE SHOP", entryReference: "R1"),
+            Booked("2026-09-21", "BAD SHOP", entryReference: "R2"),
+            Booked("2026-09-22", "GOOD SHOP", entryReference: "R3"));
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(mapped), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        var push = Assert.Single(sender.Sent);
+        Assert.Equal("3 new debits while you were disconnected", push.Title);
+        Assert.Equal("2 of them are bad. Tap to review them.", push.Body);
+        await AssertCommittedAsync(dbName, newDebits: 3);
+    }
+
+    [Fact]
+    public async Task A_reconnect_with_only_good_debits_sends_nothing_but_commits()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedReconnectAsync(dbName, clock);
+        await SeedRuleAsync(dbName, clock, "GOOD SHOP", Classification.Good, limit: 50m);
+
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(Mapped(Booked("2026-09-22", "GOOD SHOP"))), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Empty(sender.Sent);
+        await AssertCommittedAsync(dbName, newDebits: 1);
+    }
+
+    [Fact]
+    public async Task A_reconnect_with_exactly_one_bad_debit_still_uses_the_summary_wording()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedReconnectAsync(dbName, clock);
 
         var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
         await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(Mapped(Booked("2026-09-22", "NEW SHOP"))), sender, clock)
             .RunOnceAsync(CancellationToken.None);
 
-        Assert.Single(sender.Sent);
+        var push = Assert.Single(sender.Sent);
+        Assert.Equal("1 new debits while you were disconnected", push.Title);
+        Assert.Equal("1 of them are bad. Tap to review them.", push.Body);
+        await AssertCommittedAsync(dbName, newDebits: 1);
+    }
+
+    [Fact]
+    public async Task A_reconnect_with_no_new_debits_sends_nothing_and_updates_the_hash()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedReconnectAsync(dbName, clock);
+
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(Mapped()), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Empty(sender.Sent);
+        await AssertCommittedAsync(dbName, newDebits: 0);
+    }
+
+    [Fact]
+    public async Task A_reconnect_tick_aborted_after_the_send_commits_nothing_and_the_next_tick_sends_the_same_summary()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        var oldHash = SessionFingerprint.Of("old-session");
+        await SeedReconnectAsync(dbName, clock);
+
+        var mapped = Mapped(
+            Booked("2026-09-21", "SHOP A", entryReference: "R1"),
+            Booked("2026-09-22", "SHOP B", entryReference: "R2"));
+        var fetcher = new FakeDebitsFetcher(mapped);
+        var consent = NewConsentStore(clock);
+        using var cts = new CancellationTokenSource();
+        var cancelling = new FakeSender(_ =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            NewRunner(new InMemoryDbContextFactory(dbName), consent, fetcher, cancelling, clock).RunOnceAsync(cts.Token));
+
+        await using (var verify = NewInMemoryContext(dbName))
+        {
+            Assert.Equal(oldHash, (await verify.AccountSyncStates.SingleAsync()).LastSessionIdHash);
+            Assert.Equal(1, await verify.Debits.CountAsync()); // only the seeded one: no new debit was committed
+        }
+
+        var retry = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), consent, fetcher, retry, clock).RunOnceAsync(CancellationToken.None);
+
+        var push = Assert.Single(retry.Sent);
+        Assert.Equal("2 new debits while you were disconnected", push.Title);
+        Assert.Equal("2 of them are bad. Tap to review them.", push.Body);
+        await AssertCommittedAsync(dbName, newDebits: 2);
+    }
+
+    /// <summary>The same fetch with its first debit repeated (same id), as a misbehaving bank page could deliver.</summary>
+    private static MappedDebits WithFirstDebitDuplicated(MappedDebits m) =>
+        m with { Payload = m.Payload with { Debits = [.. m.Payload.Debits, m.Payload.Debits[0]] } };
+
+    [Fact]
+    public async Task A_reconnect_with_a_duplicate_id_in_one_fetch_counts_it_once_and_still_completes()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedReconnectAsync(dbName, clock);
+
+        var mapped = WithFirstDebitDuplicated(Mapped(
+            Booked("2026-09-21", "SHOP A", entryReference: "R1"),
+            Booked("2026-09-22", "SHOP B", entryReference: "R2")));
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(mapped), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        var push = Assert.Single(sender.Sent);
+        Assert.Equal("2 new debits while you were disconnected", push.Title);
+        Assert.Equal("2 of them are bad. Tap to review them.", push.Body);
+        await AssertCommittedAsync(dbName, newDebits: 2);
+    }
+
+    [Fact]
+    public async Task A_first_sync_with_a_duplicate_id_in_one_fetch_stores_it_once_and_writes_the_marker()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedTokenAsync(dbName, clock);
+
+        var mapped = WithFirstDebitDuplicated(Mapped(Booked("2026-09-21", "SHOP A", entryReference: "R1")));
+        var sender = new FakeSender(_ => throw new InvalidOperationException("must not be called"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(mapped), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
         await using var verify = NewInMemoryContext(dbName);
-        Assert.Equal(SessionFingerprint.Of("session-1"), (await verify.AccountSyncStates.SingleAsync()).LastSessionIdHash);
-        Assert.True(await verify.Debits.AnyAsync(d => d.PayeeId == "name:NEW SHOP"));
+        Assert.Single(await verify.AccountSyncStates.ToListAsync());
+        Assert.Equal(1, await verify.Debits.CountAsync());
+    }
+
+    [Fact]
+    public async Task A_reconnect_debit_over_a_good_payees_limit_counts_as_bad_and_uses_the_summary_wording()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedReconnectAsync(dbName, clock);
+        await SeedRuleAsync(dbName, clock, "LIMIT SHOP", Classification.Good, limit: 30m);
+
+        var mapped = Mapped(
+            Booked("2026-09-21", "LIMIT SHOP", amount: "45.00", entryReference: "R1"),
+            Booked("2026-09-22", "LIMIT SHOP", amount: "10.00", entryReference: "R2"));
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(mapped), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        var push = Assert.Single(sender.Sent);
+        Assert.Equal("2 new debits while you were disconnected", push.Title);
+        Assert.Equal("1 of them are bad. Tap to review them.", push.Body);
+        await AssertCommittedAsync(dbName, newDebits: 2);
+    }
+
+    [Theory]
+    [InlineData(SendOutcome.Rejected)]
+    [InlineData(SendOutcome.Transient)]
+    public async Task A_failed_summary_send_still_commits_debits_and_hash(SendOutcome outcome)
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedReconnectAsync(dbName, clock);
+
+        var sender = new FakeSender(_ => SendResult.Failed(outcome, "boom"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(Mapped(Booked("2026-09-22", "NEW SHOP"))), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Single(sender.Sent);
+        await AssertCommittedAsync(dbName, newDebits: 1);
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Equal(1, await verify.DeviceTokens.CountAsync()); // never pruned
+    }
+
+    [Fact]
+    public async Task A_reconnect_summary_prunes_only_the_dead_token_in_the_same_save()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedBootstrappedAsync(dbName, clock, SessionFingerprint.Of("old-session"));
+        await using (var db = NewInMemoryContext(dbName))
+        {
+            db.DeviceTokens.Add(new DeviceToken { Id = Guid.NewGuid(), UserId = SeedData.UserId, Token = "dead-token", UpdatedAt = clock.GetUtcNow() });
+            db.DeviceTokens.Add(new DeviceToken { Id = Guid.NewGuid(), UserId = SeedData.UserId, Token = "live-token", UpdatedAt = clock.GetUtcNow() });
+            await db.SaveChangesAsync();
+        }
+
+        var sender = new FakeSender(token => token == "dead-token"
+            ? SendResult.Failed(SendOutcome.TokenNoLongerValid, "gone")
+            : SendResult.Accepted("msg-1"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(Mapped(Booked("2026-09-22", "NEW SHOP"))), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(2, sender.Sent.Count);
+        await AssertCommittedAsync(dbName, newDebits: 1);
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Equal("live-token", (await verify.DeviceTokens.SingleAsync()).Token);
+    }
+
+    [Fact]
+    public async Task A_reconnect_with_bad_debits_and_no_device_token_still_commits()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedBootstrappedAsync(dbName, clock, SessionFingerprint.Of("old-session")); // no token on purpose
+
+        var sender = new FakeSender(_ => throw new InvalidOperationException("must not be called"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(Mapped(Booked("2026-09-22", "NEW SHOP"))), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Empty(sender.Sent);
+        await AssertCommittedAsync(dbName, newDebits: 1);
+    }
+
+    [Fact]
+    public async Task After_the_reconnect_tick_the_same_session_is_steady_and_a_new_bad_debit_pushes_individually()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedReconnectAsync(dbName, clock);
+        var consent = NewConsentStore(clock);
+
+        var first = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), consent, new FakeDebitsFetcher(Mapped(Booked("2026-09-21", "SHOP A", entryReference: "R1"))), first, clock)
+            .RunOnceAsync(CancellationToken.None);
+        Assert.Single(first.Sent);
+
+        var second = new FakeSender(_ => SendResult.Accepted("msg-2"));
+        var mapped = Mapped(
+            Booked("2026-09-21", "SHOP A", entryReference: "R1"),
+            Booked("2026-09-23", "SHOP B", entryReference: "R2"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), consent, new FakeDebitsFetcher(mapped), second, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        var push = Assert.Single(second.Sent);
+        Assert.StartsWith("SHOP B", push.Title);
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Equal(1, await verify.NotificationLog.CountAsync());
     }
 
     [Fact]

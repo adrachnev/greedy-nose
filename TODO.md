@@ -326,19 +326,30 @@ The four below are left open on purpose.
       consent/account record instead — set only once the full historical pull finishes, independent
       of row count. Fix before a first sync can realistically span more than one tick (e.g. once
       pagination is turned on, see above).
-- [ ] **Reconnect is detected but not acted on (R20/R20a not built)** (`IngestionRunner.cs`,
+- [x] **Fixed 2026-09-29 (R20/R20a built)** — a Reconnect tick now sends one summary push and
+      commits debits, token prunes and the new session hash in one `SaveChangesAsync`, after the
+      send. Original finding and constraints follow; all were met (no separate dispatcher shape was
+      needed, `PushMessage` is plain text).
+      **Reconnect is detected but not acted on (R20/R20a not built)** (`IngestionRunner.cs`,
       `DetermineMode`, 2026-09-29). A changed session hash is logged and the tick still runs as
       Steady state, so a re-authorization after a gap fires one push per bad debit, all at once —
-      the burst R20 exists to prevent. Design constraints found while building the detection, for
-      whoever builds the summary:
-      - Per-debit commit (`ClassifyInsertAndNotifyAsync`) makes an interrupted Reconnect tick
-        under-count N/M on retry, because debits already committed are no longer "new". The
-        Reconnect tick has to collect all results, send the summary **first**, then commit debits
-        and the new hash in **one** `SaveChangesAsync` (the first-sync shape).
-      - Even so, the end-of-tick hash write is a separate save today; if it fails after the debits
-        committed, the next tick sees the reconnect again but finds no new debits. The summary must
-        not depend on "debits inserted this tick".
-      - The dispatcher needs a second request shape (N/M counts, R20 wording, mock `05b`).
+      the burst R20 exists to prevent.
+- [ ] **A failed send loses the notification, in the per-debit and the summary path alike**
+      (`IngestionRunner.SendToAllTokensAsync`, 2026-09-29). `Rejected`/`Transient` (and "no device
+      token") still commit the debits, so the alert is never retried: once a debit is stored it is
+      "seen". Owner decision 2026-09-29: accept for now, same as before. Options if it bites: hold
+      the tick uncommitted on `Transient` only (but a permanently rejected push would then block
+      ingestion for the account), or bounded retries with a counter in the database.
+- [ ] **R20's wording at N = 1** — "1 new debits while you were disconnected" / "1 of them are bad"
+      (`ReconnectSummary.cs`, pinned by tests). Verbatim from `REQUIREMENTS.md` R20; owner decision
+      whether to pluralise, and it belongs in `REQUIREMENTS.md` first.
+- [ ] **A gap wider than one fetched page undercounts N/M** (`EnableBankingDebitsFetcher`,
+      2026-09-29). `continuation_key` is ignored (see the pagination item above), so a Reconnect
+      after a long gap sees only the first page's debits. Tie to the pagination fix.
+- [ ] **The 5 newest dev-DB debits deleted for the live test were not all re-fetched** (2026-09-29):
+      3 of 5 came back from the Mock ASPSP, 2 did not — probably control-panel test debits the
+      sandbox no longer returns. Dev data only, but worth knowing that the sandbox's fetch is not a
+      superset of an old dev DB.
 - [ ] **No test pins "one debit committed, a later one fails → old session hash stays"**
       (`IngestionRunnerTests`). The abort test fails on the first and only debit, so the
       partial-commit case is safe in the code but unpinned. Reviewer suggestion 2026-09-29: one

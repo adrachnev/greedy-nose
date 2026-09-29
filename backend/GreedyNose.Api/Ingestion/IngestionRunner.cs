@@ -10,9 +10,11 @@ using Npgsql;
 namespace GreedyNose.Api.Ingestion;
 
 /// <summary>
-/// One poll tick (NOTIFICATION-TRACER-BULLET.md, step 6): the silent first sync (R25) or steady
-/// state. Fetches, upserts payees, inserts new debits, classifies and — for a bad debit not
-/// already logged — sends and logs. Depends only on interfaces and the DB context factory, so it is what
+/// One poll tick (NOTIFICATION-TRACER-BULLET.md, step 6): the silent first sync (R25), steady
+/// state, or a reconnect after a gap (R20). Fetches, upserts payees, inserts new debits, classifies
+/// and — for a bad debit not already logged — sends and logs. A reconnect tick instead sends one
+/// summary push (only if any new debit is bad) and commits all new debits with the session hash in
+/// one save. Depends only on interfaces and the DB context factory, so it is what
 /// <c>IngestionRunnerTests</c> exercises with an in-memory database, a fake <see cref="IDebitsFetcher"/>
 /// and a fake <see cref="INotificationSender"/> — no network, no real Postgres.
 ///
@@ -65,26 +67,30 @@ public sealed class IngestionRunner(
         var mode = DetermineMode(syncState, sessionHash);
         var isBootstrap = mode == IngestionMode.FirstSync;
 
-        if (mode == IngestionMode.Reconnect)
-        {
-            // Detected and remembered only; the one summary push (R20) is a later step, so this tick
-            // is processed exactly like steady state. Never log the session id or its hash.
-            logger.LogInformation(
-                "Reconnect detected for account {AccountKey} (the summary notification is not built yet); processing as steady state.",
-                AccountKeyPreview(account.Key));
-        }
+        var isReconnect = mode == IngestionMode.Reconnect;
 
         var existingIds = await db.Debits
             .Where(d => d.UserId == SeedData.UserId && d.AccountKey == account.Key)
             .Select(d => d.Id)
             .ToListAsync(ct);
-        var seen = new HashSet<string>(existingIds, StringComparer.Ordinal);
+        var stored = new HashSet<string>(existingIds, StringComparer.Ordinal);
+        var seen = new HashSet<string>(stored, StringComparer.Ordinal);
+        var duplicatesInFetch = 0;
 
         var insertedCount = 0;
+        var badCount = 0; // reconnect only: M of R20's summary
         foreach (var dto in mapped.Payload.Debits)
         {
-            if (seen.Contains(dto.Id))
+            // Also guards a duplicate id within this one fetch: the reconnect and first-sync ticks
+            // commit only at the end, so a second Add of the same key would throw on every retry and
+            // the tick could never finish.
+            if (!seen.Add(dto.Id))
             {
+                if (!stored.Contains(dto.Id))
+                {
+                    duplicatesInFetch++;
+                }
+
                 continue;
             }
 
@@ -93,6 +99,20 @@ public sealed class IngestionRunner(
             if (isBootstrap)
             {
                 // Only tracked here, committed below together with the AccountSyncState row.
+                db.Debits.Add(debit);
+            }
+            else if (isReconnect)
+            {
+                // Classify and count, never send per debit (R20); tracked only, committed below in
+                // one save together with the hash. Nothing in this loop clears the ChangeTracker.
+                var rule = await db.Rules.SingleOrDefaultAsync(
+                    r => r.UserId == SeedData.UserId && r.PayeeId == debit.PayeeId, ct);
+                var classification = RuleEngine.Classify(debit.AmountEUR, rule?.Classification, rule?.AmountEUR);
+                if (classification.Classification != Classification.Good)
+                {
+                    badCount++;
+                }
+
                 db.Debits.Add(debit);
             }
             else
@@ -106,6 +126,11 @@ public sealed class IngestionRunner(
             }
 
             insertedCount++;
+        }
+
+        if (duplicatesInFetch > 0)
+        {
+            logger.LogWarning("Skipped {Count} duplicate debit id(s) within one fetch.", duplicatesInFetch);
         }
 
         if (isBootstrap)
@@ -128,10 +153,46 @@ public sealed class IngestionRunner(
                 "Bootstrap tick for account {AccountKey}: inserted {Count} debits as seen, no notifications.",
                 AccountKeyPreview(account.Key), insertedCount);
         }
+        else if (isReconnect)
+        {
+            // R20: one summary push, only when at least one new debit is bad (R20a), sent BEFORE the
+            // save. A tick that dies anywhere up to the save leaves no debit and the old hash, so the
+            // next tick finds the same new debits and counts the same N/M — a duplicate summary beats
+            // a lost one. No NotificationLog row: that log is per debit.
+            if (badCount > 0)
+            {
+                var tokens = await db.DeviceTokens.Where(t => t.UserId == SeedData.UserId).ToListAsync(ct);
+                if (tokens.Count == 0)
+                {
+                    logger.LogWarning("No device token registered; cannot send the reconnect summary.");
+                }
+                else
+                {
+                    var (title, body) = ReconnectSummary.Build(insertedCount, badCount);
+                    var anySent = await SendToAllTokensAsync(db, tokens, title, body, ct);
+                    if (!anySent)
+                    {
+                        // Owner decision 2026-09-29: commit anyway, same as the per-debit path; the
+                        // summary is lost without a retry (TODO.md).
+                        logger.LogWarning("The reconnect summary reached no device; committing the debits regardless.");
+                    }
+                }
+            }
+
+            logger.LogInformation(
+                "Reconnect detected for account {AccountKey}: {NewDebits} new debits, {BadDebits} bad.",
+                AccountKeyPreview(account.Key), insertedCount, badCount);
+
+            // Freshly loaded, as in the steady branch below; one save for debits, token prunes and hash.
+            var syncRow = await db.AccountSyncStates.SingleAsync(
+                s => s.UserId == SeedData.UserId && s.AccountKey == account.Key, ct);
+            syncRow.LastSessionIdHash = sessionHash;
+            await db.SaveChangesAsync(ct);
+        }
         else if (syncState?.LastSessionIdHash != sessionHash)
         {
-            // Null hash (silent adoption) or a reconnect. Only now, after the whole loop: a tick that
-            // dies midway leaves the old hash, so the next tick detects the reconnect again. A freshly
+            // Null hash (silent adoption). Only now, after the whole loop: a tick that
+            // dies midway leaves the old hash. A freshly
             // loaded row, not `syncState` — that one is untracked, and the tracker may have been
             // cleared since. No ExecuteUpdateAsync: the tests' in-memory provider does not support it.
             var row = await db.AccountSyncStates.SingleAsync(
@@ -355,30 +416,7 @@ public sealed class IngestionRunner(
             return;
         }
 
-        var anySent = false;
-        foreach (var token in tokens)
-        {
-            var result = await sender.SendAsync(new PushMessage(token.Token, title, reason), ct);
-
-            switch (result.Outcome)
-            {
-                case SendOutcome.Sent:
-                    anySent = true;
-                    break;
-                case SendOutcome.TokenNoLongerValid:
-                    // The only outcome that may prune, and it prunes just this one token,
-                    // independent of how the others answered (decided 2026-09-22).
-                    db.DeviceTokens.Remove(token);
-                    logger.LogInformation(
-                        "Pruned a token that FCM reported as no longer valid — {TokenPreview}", TokenPreview.Of(token.Token));
-                    break;
-                case SendOutcome.Rejected:
-                case SendOutcome.Transient:
-                    // Needs a human, or needs a later retry — either way, never pruned, never logged
-                    // as sent here. FirebaseNotificationSender already logged the detail.
-                    break;
-            }
-        }
+        var anySent = await SendToAllTokensAsync(db, tokens, title, reason, ct);
 
         if (anySent)
         {
@@ -415,6 +453,42 @@ public sealed class IngestionRunner(
             db.Debits.Add(debit);
             await db.SaveChangesAsync(ct);
         }
+    }
+
+    /// <summary>
+    /// Sends one message to every token; returns whether any got <see cref="SendOutcome.Sent"/>. Only
+    /// <see cref="SendOutcome.TokenNoLongerValid"/> prunes (tracked removal, committed by the caller's
+    /// next save). Shared by the per-debit push and the reconnect summary.
+    /// </summary>
+    private async Task<bool> SendToAllTokensAsync(
+        GreedyNoseDbContext db, IReadOnlyList<DeviceToken> tokens, string title, string body, CancellationToken ct)
+    {
+        var anySent = false;
+        foreach (var token in tokens)
+        {
+            var result = await sender.SendAsync(new PushMessage(token.Token, title, body), ct);
+
+            switch (result.Outcome)
+            {
+                case SendOutcome.Sent:
+                    anySent = true;
+                    break;
+                case SendOutcome.TokenNoLongerValid:
+                    // The only outcome that may prune, and it prunes just this one token,
+                    // independent of how the others answered (decided 2026-09-22).
+                    db.DeviceTokens.Remove(token);
+                    logger.LogInformation(
+                        "Pruned a token that FCM reported as no longer valid — {TokenPreview}", TokenPreview.Of(token.Token));
+                    break;
+                case SendOutcome.Rejected:
+                case SendOutcome.Transient:
+                    // Needs a human, or needs a later retry — either way, never pruned, never logged
+                    // as sent here. FirebaseNotificationSender already logged the detail.
+                    break;
+            }
+        }
+
+        return anySent;
     }
 
     private static string DebitIdPreview(string debitId) => debitId.Length > 10 ? $"{debitId[..10]}…" : debitId;
