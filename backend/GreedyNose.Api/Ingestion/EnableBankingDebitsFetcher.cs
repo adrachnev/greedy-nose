@@ -24,7 +24,7 @@ public sealed class EnableBankingDebitsFetcher(
 
     public async Task<MappedDebits> FetchAsync(ConnectedAccount account, CancellationToken ct)
     {
-        var httpClient = httpClientFactory.CreateClient(nameof(EnableBankingClient));
+        var client = EnableBankingClient.Create(httpClientFactory, signer, clock);
 
         // Once per process, not once per tick: cheap enough to always run, and it is exactly the
         // sanity check the plan asked for — a silently wrong client name would otherwise send
@@ -33,22 +33,21 @@ public sealed class EnableBankingDebitsFetcher(
         {
             _baseAddressChecked = true;
             var expected = new Uri(options.BaseUrl);
-            if (httpClient.BaseAddress != expected)
+            if (client.BaseAddress != expected)
             {
                 logger.LogError(
                     "The named HttpClient {Name} has BaseAddress {Actual}, expected {Expected} — " +
                     "the ingestion worker would be calling the wrong host or none at all.",
-                    nameof(EnableBankingClient), httpClient.BaseAddress, expected);
+                    nameof(EnableBankingClient), client.BaseAddress, expected);
             }
         }
 
-        var client = new EnableBankingClient(httpClient, signer, clock);
         var result = await client.GetAsync($"/accounts/{account.Uid}/transactions", ct);
 
         if (!result.IsSuccess)
         {
-            throw new InvalidOperationException(
-                $"Enable Banking answered {result.StatusCode} fetching transactions for the connected account.");
+            // Typed, so the runner can tell a bank abort (401 + error code) from our own failures.
+            throw EnableBankingRequestException.FromResponse(result);
         }
 
         var response = JsonSerializer.Deserialize<EbTransactionsResponse>(result.Body, EnableBankingClient.Json)

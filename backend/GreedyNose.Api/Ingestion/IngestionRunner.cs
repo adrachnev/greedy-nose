@@ -25,6 +25,7 @@ public sealed class IngestionRunner(
     IDbContextFactory<GreedyNoseDbContext> dbContextFactory,
     ConsentStore consent,
     IDebitsFetcher fetcher,
+    ISessionStatusChecker sessionStatus,
     INotificationSender sender,
     TimeProvider clock,
     ILogger<IngestionRunner> logger)
@@ -33,15 +34,53 @@ public sealed class IngestionRunner(
     {
         // One consistent read for the whole tick: account and session from the same instant, so a
         // /callback landing mid-tick cannot pair one login's account with another's session.
-        if (consent.Current is not var (sessionId, account))
+        var state = consent.GetState(clock.GetUtcNow());
+        if (state.Status == ConsentStatus.None)
         {
             logger.LogInformation("No active consent; skipping this tick.");
             return;
         }
 
+        var sessionId = state.SessionId!;
+        var account = state.Account!;
+
+        if (state.Status == ConsentStatus.Expired)
+        {
+            // Time signal (R19): valid_until is reached. No fetch — the bank would only answer 401.
+            await NotifyConsentDeadAsync(sessionId, account, "expired", ct);
+            return;
+        }
+
         var sessionHash = SessionFingerprint.Of(sessionId);
 
-        var mapped = await fetcher.FetchAsync(account, ct);
+        MappedDebits mapped;
+        try
+        {
+            mapped = await fetcher.FetchAsync(account, ct);
+        }
+        catch (EnableBankingRequestException exception) when (exception is { StatusCode: 401, ErrorCode: not null })
+        {
+            // Bank signal (R19): a 401 that names an error (CLOSED_SESSION, ...) is a candidate only.
+            // A 401 without one is our own key ("Wrong signature") and never gets here. The bank must
+            // also confirm the session is no longer AUTHORIZED, so a misbehaving 401 cannot cost the
+            // user a false "Bank connection expired". Anything else rethrows the original exception.
+            var status = await GetSessionStatusOrNullAsync(sessionId, ct);
+            if (status is null || string.Equals(status, "AUTHORIZED", StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogWarning(
+                    "Fetch answered 401 ({ErrorCode}) but the session status is {Status}; not treating the consent as dead.",
+                    exception.ErrorCode, status ?? "unknown");
+                throw;
+            }
+
+            // The status value is logged on purpose: it is how EXPIRED/REVOKED get discovered.
+            logger.LogWarning(
+                "Fetch answered 401 ({ErrorCode}) and the session status is {Status}; the bank ended the consent.",
+                exception.ErrorCode, status);
+            await NotifyConsentDeadAsync(sessionId, account, "closed by the bank", ct);
+            return;
+        }
+
         foreach (var skipped in mapped.Skipped)
         {
             logger.LogWarning("Skipped a debit the mapper could not represent — {Detail}", skipped);
@@ -200,6 +239,72 @@ public sealed class IngestionRunner(
             row.LastSessionIdHash = sessionHash;
             await db.SaveChangesAsync(ct);
         }
+    }
+
+    /// <summary>An unreadable or failing check is "unknown" (null), never "dead"; a caller cancellation still propagates.</summary>
+    private async Task<string?> GetSessionStatusOrNullAsync(string sessionId, CancellationToken ct)
+    {
+        try
+        {
+            return await sessionStatus.GetStatusAsync(sessionId, ct);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogWarning("The session status check failed ({ExceptionType}); treating it as unknown.", exception.GetType().Name);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// R19: the consent is dead (<paramref name="reason"/> says how) — push once per session. Guarded by
+    /// <c>AccountSyncState.ExpiryNotifiedSessionHash</c>, which is set only when at least one device took
+    /// the push: unlike the debit path, nothing waits behind a retry here (a dead connection has no
+    /// debits), and a lost R19 push is the worst silence, so Rejected/Transient/no token leave the guard
+    /// empty and the next tick tries again. Send before the one save, so a crash in between costs at most
+    /// a duplicate push. No row for the account (the consent died before its first sync finished): log and
+    /// return — there is nowhere to keep the guard, and the push would repeat every tick.
+    /// </summary>
+    private async Task NotifyConsentDeadAsync(string sessionId, ConnectedAccount account, string reason, CancellationToken ct)
+    {
+        var sessionHash = SessionFingerprint.Of(sessionId);
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        var row = await db.AccountSyncStates.SingleOrDefaultAsync(
+            s => s.UserId == SeedData.UserId && s.AccountKey == account.Key, ct);
+        if (row is null)
+        {
+            logger.LogWarning(
+                "The consent for account {AccountKey} is dead ({Reason}) before its first sync finished; no expiry push (no state row).",
+                AccountKeyPreview(account.Key), reason);
+            return;
+        }
+
+        if (row.ExpiryNotifiedSessionHash == sessionHash)
+        {
+            logger.LogDebug("The consent for account {AccountKey} is dead ({Reason}); the expiry push was already sent.", AccountKeyPreview(account.Key), reason);
+            return;
+        }
+
+        var tokens = await db.DeviceTokens.Where(t => t.UserId == SeedData.UserId).ToListAsync(ct);
+        if (tokens.Count == 0)
+        {
+            logger.LogWarning("The consent for account {AccountKey} is dead ({Reason}) but no device token is registered; will retry next tick.", AccountKeyPreview(account.Key), reason);
+            return;
+        }
+
+        var anySent = await SendToAllTokensAsync(db, tokens, ConnectionExpiredNotice.Title, ConnectionExpiredNotice.Body, ct);
+        if (anySent)
+        {
+            row.ExpiryNotifiedSessionHash = sessionHash;
+            logger.LogInformation("The consent for account {AccountKey} is dead ({Reason}); sent the expiry push.", AccountKeyPreview(account.Key), reason);
+        }
+        else
+        {
+            logger.LogWarning("The consent for account {AccountKey} is dead ({Reason}) but the expiry push reached no device; will retry next tick.", AccountKeyPreview(account.Key), reason);
+        }
+
+        // One save for the guard and any token prunes. Nothing on this path clears the ChangeTracker.
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>What this tick is, derived from stored state — never a flag someone has to set and clear.</summary>

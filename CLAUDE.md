@@ -4,6 +4,34 @@
 
 ## Status
 
+**2026-09-29 (newest) — R19's push is built: a dead consent is detected and pushed once (backend),
+uncommitted at time of writing; the in-app banner is not.** The Ingestion Worker now decides on every
+tick whether the consent is dead — *by time* (`ConsentStore.GetState(now)`: `valid_until` reached,
+evaluated at runtime; an expired consent is no longer dropped by `Restore`, it loads as `Expired`)
+or *because the bank ended it* (a fetch answers 401 **with an `error` field** and `GET
+/sessions/{id}` confirms a status other than `AUTHORIZED`; both together, nothing less). A 401
+without `error` (our own bad signature), a 429, a 500, a timeout or a failed status check rethrow
+and never push, so a fault in our own JWT cannot cause a false "Bank connection expired". The push
+(`Bank connection expired` / `Reconnect to keep getting alerts.`) fires once per session:
+`AccountSyncStates.ExpiryNotifiedSessionHash` is set only if a token returned `Sent`, otherwise the
+next tick retries (deliberately unlike the debit path — nothing sits behind this retry). What made
+this safe to build is a sandbox experiment done first: a throwaway session closed via `DELETE
+/sessions/{id}` showed `error=CLOSED_SESSION` on fetch and `status=CLOSED` on read, while a bad
+signature shows `Wrong signature` with no `error` — the two are distinguishable; the original
+session was never touched. Also learned: a new authorization does **not** end the old session (it
+stays `AUTHORIZED` until `valid_until`) — closing it on reconnect is a hygiene TODO. Built by
+`coder-backend`, one `coder-reviewer` pass (no MUST FIX; the one SHOULD FIX is the documented "dies
+before the first sync finishes" case, now in `TODO.md`); 310 tests pass. **Verified live, both
+signals, with the push confirmed on the phone each time:** an `ExpiresAt` in the past gave exactly
+one push over six ticks; a real closed session logged `401 (CLOSED_SESSION)`, status `CLOSED`, "closed
+by the bank; sent the expiry push". Consent file, session hash and guard restored afterwards. Note
+for later sessions: the sandbox tick interval here is short (production's is 6 h, `appsettings.json`),
+so a tick can slip in between manual steps and write a throwaway session's hash — reset it after
+every live experiment. Toolchain: `dotnet test GreedyNose.Api.Tests -p:Deterministic=false` (Windows
+Application Control blocks fresh deterministic DLLs). **Next, each its own plan:** the client
+contract (banner `01d`, "first sync done", Disconnect/delete endpoints — the app cannot read the
+connection state at all yet) and the onboarding classify screen (R26).
+
 **2026-09-29 (latest) — the R20/R20a reconnect summary push is built (backend), uncommitted at
 time of writing.** A Reconnect tick no longer runs like Steady: it classifies each new debit
 *without* sending, counts N (all new) and M (bad), sends **one** push with R20's text if M > 0,

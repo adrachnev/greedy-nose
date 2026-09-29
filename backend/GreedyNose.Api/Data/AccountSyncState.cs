@@ -28,4 +28,13 @@ public sealed class AccountSyncState
     /// consent file).
     /// </summary>
     public string? LastSessionIdHash { get; set; }
+
+    /// <summary>
+    /// Hash of the dead session R19's "Bank connection expired" push was last accepted for. The push
+    /// goes out only while this differs from the dead session's hash, so a dead consent is announced
+    /// once; a fresh login has a fresh hash, so a later death announces again — no reset needed, the
+    /// same derived-not-flagged shape as <see cref="LastSessionIdHash"/>. Set only once at least one
+    /// device took the push. Null = never notified (no backfill).
+    /// </summary>
+    public string? ExpiryNotifiedSessionHash { get; set; }
 }

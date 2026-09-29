@@ -140,7 +140,12 @@ public class PayeeIdentitySeenSetsTests
     }
 
     private static IngestionRunner NewRunner(string dbName, ConsentStore consent, IDebitsFetcher fetcher, TimeProvider clock) =>
-        new(new InMemoryDbContextFactory(dbName), consent, fetcher, new FakeSender(), clock, NullLogger<IngestionRunner>.Instance);
+        new(new InMemoryDbContextFactory(dbName), consent, fetcher, new FakeSessionStatusChecker(), new FakeSender(), clock, NullLogger<IngestionRunner>.Instance);
+
+    private sealed class FakeSessionStatusChecker : ISessionStatusChecker
+    {
+        public Task<string?> GetStatusAsync(string sessionId, CancellationToken ct) => Task.FromResult<string?>(null);
+    }
 
     /// <summary>A card debit carrying a creditor IBAN, for the cases IngestionRunnerTests' own
     /// <c>Booked</c> helper does not need (it always sets <c>CreditorAccount: null</c>).</summary>

@@ -74,7 +74,7 @@ one push" --> Notify
 | Mobile App | React Native | Mobile device | UI (debit list/detail, rules, settings), receives push, in-app classification |
 | API | ASP.NET Core / Azure Functions (HTTP), C# | Cloud backend | Auth, payee/rule CRUD, debit history, brokers Enable Banking consent flow |
 | Ingestion Worker | Azure Functions (Timer), C# | Cloud backend | Polls every 6h per consent (retries transient failures); also invoked once, immediately, by the API right after a consent is granted (the one-time first-sync exception — see "Transaction ingestion"). No other on-demand trigger; records success/failure per consent. Drops credits (R2a). Runs in one of three modes — see "Ingestion modes" |
-| Health Monitor | Azure Functions (Timer), C# | Cloud backend | Daily check for consents stuck failing 20h+; expired consents get a user-facing banner **and one push**, everything else an email alert to the operator |
+| Health Monitor | Azure Functions (Timer), C# | Cloud backend | Daily check for consents stuck failing 20h+; everything that isn't an expired consent gets an email alert to the operator. **Not built.** The user-facing half of an expired consent (the one push, R19) is already done by the Ingestion Worker itself on every tick, so this component is now only the operator-email path (see "Consent lifecycle") |
 | Rule Engine | C# | Cloud backend | Resolves payee → applies that payee's rule (R5) → returns each debit's good/bad result **with the reason** (R12a). Mode-agnostic: it classifies the same way regardless of which ingestion mode the tick is running — it does not decide whether or how anything gets sent |
 | Notification Dispatcher | C# | Cloud backend | Sends via FCM. In the built code this is `INotificationSender` taking a plain `PushMessage(Token, Title, Body)`: the runner supplies R12a's reason text for one bad debit (Steady state) or R20's summary text with N/M counts (Reconnect, built by `ReconnectSummary`); the sender never decides which to send, only delivers what it's given |
 | Key Vault | Azure Key Vault | Cloud backend | Holds the encryption key for BankConsent tokens |
@@ -510,7 +510,9 @@ chance:
    - **Expired/revoked consent** — user-fixable, not a bug. It reaches the user two ways
      (R19), and no operator alert: the consent state is written to the data store, which the
      app reads to show the persistent banner over the debit list
-     (`01d-connection-expired.html`), **and** the Health Monitor hands the dispatcher one push.
+     (`01d-connection-expired.html`), **and** one push goes out. As built (2026-09-29) the push is
+     sent by the Ingestion Worker as soon as it sees the dead consent, not by this job; see
+     "Consent lifecycle".
    - **Anything else** (API error, unexpected exception) — this means monitoring is broken
      for reasons the user can't fix themselves, so it emails the operator directly.
 
@@ -530,7 +532,47 @@ gets both channels:
 - **One push**, when the consent expires by itself. This is the half that was ruled out here
   until 2026-08-17 (`A2`): the banner only reaches a user who opens the app, and a user who has
   not opened it in a week is exactly the one who needs telling. It is sent once per expiry, not
-  per failed poll — the NotificationLog is what keeps it from repeating every day.
+  per failed poll.
+
+**Built 2026-09-29 (the push half; the banner is still the client's to build).** The Ingestion
+Worker itself detects a dead consent on every tick — no separate Health Monitor is needed for the
+user-facing case — and pushes `Bank connection expired` / `Reconnect to keep getting alerts.` once
+per session:
+
+- **Two signals.** (1) *Time*: `valid_until` reached (`ConsentStore.GetState(now)` returns
+  `Expired`, evaluated at runtime, `>=`, falling back to `ConnectedAt + ConsentValidity`); the
+  fetch is skipped entirely. (2) *The bank ended it early*: a fetch answers **401 with an `error`
+  field**, **and** `GET /sessions/{id}` confirms a status other than `AUTHORIZED`. Only both
+  together count. A 401 *without* `error` (our own bad signature), a 429, a 500, a timeout or a
+  failed status check rethrow the original exception and never push, so a fault in our own
+  credentials cannot produce a false "expired" alert.
+- **Once per session, not per failure.** `AccountSyncStates.ExpiryNotifiedSessionHash` holds the
+  hash of the session the push was accepted for; the push fires only when it differs from the dead
+  session's hash. A reconnect brings a new session hash, so a later death pushes again — nothing
+  to reset. It is set **only if at least one token returned `Sent`**; `Rejected`/`Transient`, no
+  device token, or only a stale token leave it empty and the next tick retries. That is
+  deliberately different from the per-debit push (which commits anyway): here nothing sits behind
+  the retry, the connection is dead and there are no debits to block. A stale token
+  (`TokenNoLongerValid`) is pruned regardless. Send happens before the single save.
+- **A consent that dies before the first sync finishes** has no `AccountSyncStates` row to hold
+  the guard, so it only logs (a push would repeat every tick); see `TODO.md`.
+- `ConsentStore.Restore` no longer drops an expired consent — it loads it as `Expired`, otherwise
+  nobody would know after a restart which session died and the push would be lost.
+
+**Verified in the Enable Banking sandbox, 2026-09-29** (a throwaway session created, closed with
+`DELETE /sessions/{id}`, then read back — the original session was never touched):
+
+| Case | Answer |
+|---|---|
+| Live session, `GET /sessions/{id}` | 200, `status=AUTHORIZED`, `access.valid_until`, also a `closed` field |
+| **Our own bad signature** | 401, `code=401`, `message="Wrong signature"`, **no** `error` field |
+| Fetch on a **closed** session | 401, `error=CLOSED_SESSION`, `message="Session is closed"` |
+| Closed session, `GET /sessions/{id}` | 200, `status=CLOSED` (stays readable) |
+| Old session after a **new** one is authorized | stays `AUTHORIZED` until `valid_until` |
+
+`EXPIRED`/`REVOKED` were never observed (the natural 90-day expiry cannot be forced); the time
+signal covers that case, and the status value is logged so the first real one can be learned. In
+production a self-expiring consent is noticed at most one poll (6 h) after `valid_until`.
 
 Re-authorizing puts the worker into **reconnect** mode, so the backlog arrives as R20's single
 summary rather than a burst. Rules stay editable throughout (R21) — nothing in the API refuses

@@ -23,6 +23,18 @@ public sealed class EnableBankingClient(HttpClient http, EnableBankingSigner sig
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
 
+    /// <summary>
+    /// A fresh client per call from <see cref="IHttpClientFactory"/>, for the singletons that cannot
+    /// hold a typed <see cref="HttpClient"/> for the process lifetime (the ingestion worker and its
+    /// helpers). <c>AddHttpClient&lt;EnableBankingClient&gt;</c> registers under the type's short name,
+    /// carrying <c>Program.cs</c>'s BaseAddress/Timeout.
+    /// </summary>
+    public static EnableBankingClient Create(IHttpClientFactory factory, EnableBankingSigner signer, TimeProvider clock) =>
+        new(factory.CreateClient(nameof(EnableBankingClient)), signer, clock);
+
+    /// <summary>What the underlying client was configured with — for a one-time sanity check by the caller.</summary>
+    public Uri? BaseAddress => http.BaseAddress;
+
     public Task<EnableBankingResponse> GetAsync(string pathAndQuery, CancellationToken ct) =>
         SendAsync(new HttpRequestMessage(HttpMethod.Get, pathAndQuery), ct);
 

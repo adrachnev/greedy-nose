@@ -350,6 +350,40 @@ The four below are left open on purpose.
       3 of 5 came back from the Mock ASPSP, 2 did not — probably control-panel test debits the
       sandbox no longer returns. Dev data only, but worth knowing that the sandbox's fetch is not a
       superset of an old dev DB.
+## From the R19 dead-consent work, 2026-09-29
+
+R19's push is built (`IngestionRunner.NotifyConsentDeadAsync`): the worker detects a dead consent
+by time (`valid_until`) or by a bank abort (401 with an `error` field, confirmed via `GET
+/sessions/{id}` showing a status other than `AUTHORIZED`), and pushes `Bank connection expired`
+once per session. Measured in the sandbox: a fetch on a closed session answers 401
+`error=CLOSED_SESSION`; our own bad signature answers 401 `Wrong signature` with no `error`.
+
+- [ ] **A consent that dies before the first sync finishes stays silent** (`IngestionRunner`,
+      `NotifyConsentDeadAsync`). There is no `AccountSyncState` row to hold the once-only guard, so
+      the worker logs a warning every tick and never pushes (pushing would repeat forever). Very
+      narrow: the first sync runs right after consent. Fix when the onboarding flow (R26) exists —
+      the client-facing "first sync done" state is the natural home.
+- [ ] **Close the old session when a reconnect completes** (`DELETE /sessions/{id}`). Measured: a
+      new authorization does **not** end the old session, it stays `AUTHORIZED` until `valid_until`.
+      Hygiene, not urgent. Same call is what Disconnect and account deletion need (R18); whether
+      `DELETE` also revokes the consent at a real bank is unchecked (sandbox only).
+- [ ] **No warning *before* expiry.** Enable Banking's docs recommend one; R19 only requires the
+      push at expiry. Product decision. In production a self-expiring consent is noticed at most one
+      poll (6 h) after `valid_until`.
+- [ ] **The app has no way to read the connection state yet** (banner `01d`, R19's first half).
+      Needs an endpoint (`ConsentStore.GetState` is the source) — belongs to the client-contract
+      plan. `/debits` and `/raw` now pass the bank's 401 through for an expired consent (they used
+      to answer 409) and `/health` still says `connected: true` next to its new `state` field.
+- [ ] **`EXPIRED`/`REVOKED` were never observed, only `CLOSED`.** Any status other than
+      `AUTHORIZED` after a 401-with-`error` counts as dead, and the actual value is logged — read the
+      log the first time a real consent dies and tighten the classification if needed.
+- [ ] **A dead session keeps costing calls** until the user reconnects: every tick after the bank
+      killed the session still makes a fetch and a status call before hitting the guard. Check the
+      guard first on a closed-session 401 to save the status call.
+- [ ] **Untested R19 edges** (`IngestionRunnerTests`): a status-check timeout
+      (`TaskCanceledException` with the caller's token not cancelled), caller cancellation
+      propagating, and the bank-signal path with no row or no device token. Correct by reading,
+      unpinned by tests. `ErrorCode` and the status string are logged unbounded.
 - [ ] **No test pins "one debit committed, a later one fails → old session hash stays"**
       (`IngestionRunnerTests`). The abort test fails on the first and only debit, so the
       partial-commit case is safe in the code but unpinned. Reviewer suggestion 2026-09-29: one

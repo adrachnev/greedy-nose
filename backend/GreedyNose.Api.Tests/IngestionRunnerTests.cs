@@ -30,7 +30,7 @@ public class IngestionRunnerTests
         public override DateTimeOffset GetUtcNow() => now;
     }
 
-    private static ConsentStore NewConsentStore(TimeProvider clock, bool connected = true, ConnectedAccount? account = null, string sessionId = "session-1")
+    private static ConsentStore NewConsentStore(TimeProvider clock, bool connected = true, ConnectedAccount? account = null, string sessionId = "session-1", DateTimeOffset? expiresAt = null)
     {
         // ConsentStore has no test seam — it is a concrete sealed class with real file I/O in
         // Save(). A temp path keeps tests off the repo's real consent.local.json. Complete() sets
@@ -43,7 +43,7 @@ public class IngestionRunnerTests
 
         if (connected)
         {
-            store.Complete(sessionId, [account ?? Account], clock.GetUtcNow(), null);
+            store.Complete(sessionId, [account ?? Account], clock.GetUtcNow(), expiresAt);
         }
 
         return store;
@@ -108,8 +108,19 @@ public class IngestionRunnerTests
 
     private static IngestionRunner NewRunner(
         IDbContextFactory<GreedyNoseDbContext> dbFactory, ConsentStore consent, IDebitsFetcher fetcher,
-        INotificationSender sender, TimeProvider clock) =>
-        new(dbFactory, consent, fetcher, sender, clock, NullLogger<IngestionRunner>.Instance);
+        INotificationSender sender, TimeProvider clock, ISessionStatusChecker? checker = null) =>
+        new(dbFactory, consent, fetcher, checker ?? new FakeSessionStatusChecker(() => null), sender, clock, NullLogger<IngestionRunner>.Instance);
+
+    private sealed class FakeSessionStatusChecker(Func<string?> respond) : ISessionStatusChecker
+    {
+        public int CallCount { get; private set; }
+
+        public Task<string?> GetStatusAsync(string sessionId, CancellationToken ct)
+        {
+            CallCount++;
+            return Task.FromResult(respond());
+        }
+    }
 
     // Without a registered token the runner returns before sending, so a "sends nothing" assertion
     // would hold even if the tick wrongly ran as steady state. Every silence test needs one.
@@ -1147,5 +1158,335 @@ public class IngestionRunnerTests
         await using var verify = NewInMemoryContext(dbName);
         Assert.True(await verify.Debits.AnyAsync(d => d.PayeeId == "name:NO TOKEN YET"));
         Assert.Empty(await verify.NotificationLog.ToListAsync());
+    }
+
+    // --- Dead consent (R19): the time signal ---------------------------------------------------------
+
+    private static readonly string Session1Hash = SessionFingerprint.Of("session-1");
+
+    /// <summary>A store whose session-1 consent died at <paramref name="clock"/>'s "now" (>= counts as expired).</summary>
+    private static ConsentStore NewExpiredConsentStore(TimeProvider clock, string sessionId = "session-1") =>
+        NewConsentStore(clock, sessionId: sessionId, expiresAt: clock.GetUtcNow());
+
+    private static async Task<string?> ExpiryGuardAsync(string dbName)
+    {
+        await using var verify = NewInMemoryContext(dbName);
+        return (await verify.AccountSyncStates.SingleAsync()).ExpiryNotifiedSessionHash;
+    }
+
+    private static void AssertExpiryPush(PushMessage push)
+    {
+        Assert.Equal("Bank connection expired", push.Title);
+        Assert.Equal("Reconnect to keep getting alerts.", push.Body);
+    }
+
+    [Fact]
+    public async Task An_expired_consent_pushes_once_without_fetching_and_sets_the_guard()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash);
+        await SeedTokenAsync(dbName, clock);
+        var fetcher = new FakeDebitsFetcher(Mapped(Booked("2026-09-22", "NEW SHOP")));
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewExpiredConsentStore(clock), fetcher, sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        AssertExpiryPush(Assert.Single(sender.Sent));
+        Assert.Equal(0, fetcher.CallCount);
+        Assert.Equal(Session1Hash, await ExpiryGuardAsync(dbName));
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Equal(1, await verify.Debits.CountAsync()); // only the seeded one: nothing was ingested
+        Assert.Empty(await verify.NotificationLog.ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_second_tick_on_the_same_dead_session_does_not_push_again()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash);
+        await SeedTokenAsync(dbName, clock);
+        var consent = NewExpiredConsentStore(clock);
+        var factory = new InMemoryDbContextFactory(dbName);
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped()), sender, clock).RunOnceAsync(CancellationToken.None);
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped()), sender, clock).RunOnceAsync(CancellationToken.None);
+
+        AssertExpiryPush(Assert.Single(sender.Sent));
+    }
+
+    [Theory]
+    [InlineData(SendOutcome.Rejected)]
+    [InlineData(SendOutcome.Transient)]
+    public async Task A_failed_expiry_push_leaves_the_guard_empty_and_the_next_tick_sends_again(SendOutcome outcome)
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash);
+        await SeedTokenAsync(dbName, clock);
+        var consent = NewExpiredConsentStore(clock);
+        var factory = new InMemoryDbContextFactory(dbName);
+
+        var failing = new FakeSender(_ => SendResult.Failed(outcome, "boom"));
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped()), failing, clock).RunOnceAsync(CancellationToken.None);
+
+        Assert.Single(failing.Sent);
+        Assert.Null(await ExpiryGuardAsync(dbName));
+        await using (var verify = NewInMemoryContext(dbName))
+        {
+            Assert.Equal(1, await verify.DeviceTokens.CountAsync()); // never pruned
+        }
+
+        var working = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped()), working, clock).RunOnceAsync(CancellationToken.None);
+
+        AssertExpiryPush(Assert.Single(working.Sent));
+        Assert.Equal(Session1Hash, await ExpiryGuardAsync(dbName));
+    }
+
+    [Fact]
+    public async Task A_dead_token_is_pruned_while_the_live_one_sends_and_sets_the_guard()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash);
+        await using (var db = NewInMemoryContext(dbName))
+        {
+            db.DeviceTokens.Add(new DeviceToken { Id = Guid.NewGuid(), UserId = SeedData.UserId, Token = "dead-token", UpdatedAt = clock.GetUtcNow() });
+            db.DeviceTokens.Add(new DeviceToken { Id = Guid.NewGuid(), UserId = SeedData.UserId, Token = "live-token", UpdatedAt = clock.GetUtcNow() });
+            await db.SaveChangesAsync();
+        }
+
+        var sender = new FakeSender(token => token == "dead-token"
+            ? SendResult.Failed(SendOutcome.TokenNoLongerValid, "gone")
+            : SendResult.Accepted("msg-1"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewExpiredConsentStore(clock), new FakeDebitsFetcher(Mapped()), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(2, sender.Sent.Count);
+        Assert.Equal(Session1Hash, await ExpiryGuardAsync(dbName));
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Equal("live-token", (await verify.DeviceTokens.SingleAsync()).Token);
+    }
+
+    [Fact]
+    public async Task Only_a_dead_token_is_pruned_and_the_guard_stays_empty()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash);
+        await SeedTokenAsync(dbName, clock);
+
+        var sender = new FakeSender(_ => SendResult.Failed(SendOutcome.TokenNoLongerValid, "gone"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewExpiredConsentStore(clock), new FakeDebitsFetcher(Mapped()), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Single(sender.Sent);
+        Assert.Null(await ExpiryGuardAsync(dbName));
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Empty(await verify.DeviceTokens.ToListAsync());
+    }
+
+    [Fact]
+    public async Task With_no_device_token_the_guard_stays_empty_and_a_later_registration_gets_the_push()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash); // no token on purpose
+        var consent = NewExpiredConsentStore(clock);
+        var factory = new InMemoryDbContextFactory(dbName);
+
+        var silent = new FakeSender(_ => throw new InvalidOperationException("must not be called"));
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped()), silent, clock).RunOnceAsync(CancellationToken.None);
+
+        Assert.Empty(silent.Sent);
+        Assert.Null(await ExpiryGuardAsync(dbName));
+
+        await SeedTokenAsync(dbName, clock);
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped()), sender, clock).RunOnceAsync(CancellationToken.None);
+
+        AssertExpiryPush(Assert.Single(sender.Sent));
+        Assert.Equal(Session1Hash, await ExpiryGuardAsync(dbName));
+    }
+
+    [Fact]
+    public async Task An_expired_consent_with_no_sync_state_row_sends_nothing_and_does_not_crash()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedTokenAsync(dbName, clock); // a token, so a wrongly sent push would show
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewExpiredConsentStore(clock), new FakeDebitsFetcher(Mapped()), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Empty(sender.Sent);
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Empty(await verify.AccountSyncStates.ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_new_session_after_the_death_reconnects_and_its_own_later_death_pushes_again()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash);
+        await SeedTokenAsync(dbName, clock);
+        var factory = new InMemoryDbContextFactory(dbName);
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+
+        await NewRunner(factory, NewExpiredConsentStore(clock), new FakeDebitsFetcher(Mapped()), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+        Assert.Single(sender.Sent);
+
+        // The user logs in again: a new session, live. The tick takes the reconnect path (hash moves).
+        var session2Hash = SessionFingerprint.Of("session-2");
+        var fetcher = new FakeDebitsFetcher(Mapped());
+        await NewRunner(factory, NewConsentStore(clock, sessionId: "session-2"), fetcher, sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(1, fetcher.CallCount);
+        Assert.Single(sender.Sent); // an empty reconnect sends no summary (R20a)
+        await using (var verify = NewInMemoryContext(dbName))
+        {
+            var row = await verify.AccountSyncStates.SingleAsync();
+            Assert.Equal(session2Hash, row.LastSessionIdHash);
+            Assert.Equal(Session1Hash, row.ExpiryNotifiedSessionHash);
+        }
+
+        // The new session dies in its turn: its hash differs from the guard, so it announces again.
+        await NewRunner(factory, NewExpiredConsentStore(clock, sessionId: "session-2"), new FakeDebitsFetcher(Mapped()), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(2, sender.Sent.Count);
+        AssertExpiryPush(sender.Sent[1]);
+        Assert.Equal(session2Hash, await ExpiryGuardAsync(dbName));
+    }
+
+    // --- Dead consent (R19): the bank signal ---------------------------------------------------------
+
+    private sealed class FailingDebitsFetcher(Exception exception) : IDebitsFetcher
+    {
+        public Task<MappedDebits> FetchAsync(ConnectedAccount account, CancellationToken ct) => throw exception;
+    }
+
+    private static async Task<(string DbName, FixedTimeProvider Clock, InMemoryDbContextFactory Factory)> SeedLiveSessionAsync()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash);
+        await SeedTokenAsync(dbName, clock);
+        return (dbName, clock, new InMemoryDbContextFactory(dbName));
+    }
+
+    [Fact]
+    public async Task A_401_with_an_error_code_and_a_CLOSED_session_pushes_once_and_sets_the_guard()
+    {
+        var (dbName, clock, factory) = await SeedLiveSessionAsync();
+        var fetcher = new FailingDebitsFetcher(new EnableBankingRequestException(401, "CLOSED_SESSION"));
+        var checker = new FakeSessionStatusChecker(() => "CLOSED");
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+
+        await NewRunner(factory, NewConsentStore(clock), fetcher, sender, clock, checker).RunOnceAsync(CancellationToken.None);
+
+        AssertExpiryPush(Assert.Single(sender.Sent));
+        Assert.Equal(1, checker.CallCount);
+        Assert.Equal(Session1Hash, await ExpiryGuardAsync(dbName));
+
+        // The next tick fails the same way and must stay quiet.
+        await NewRunner(factory, NewConsentStore(clock), fetcher, sender, clock, checker).RunOnceAsync(CancellationToken.None);
+        Assert.Single(sender.Sent);
+    }
+
+    [Fact]
+    public async Task A_401_with_an_error_code_but_an_AUTHORIZED_session_pushes_nothing_and_rethrows_the_original()
+    {
+        var (dbName, clock, factory) = await SeedLiveSessionAsync();
+        var original = new EnableBankingRequestException(401, "CLOSED_SESSION");
+        var checker = new FakeSessionStatusChecker(() => "AUTHORIZED");
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+
+        var thrown = await Assert.ThrowsAsync<EnableBankingRequestException>(() =>
+            NewRunner(factory, NewConsentStore(clock), new FailingDebitsFetcher(original), sender, clock, checker).RunOnceAsync(CancellationToken.None));
+
+        Assert.Same(original, thrown);
+        Assert.Equal(1, checker.CallCount);
+        Assert.Empty(sender.Sent);
+        Assert.Null(await ExpiryGuardAsync(dbName));
+    }
+
+    [Fact]
+    public async Task A_401_without_an_error_code_our_own_key_never_asks_the_checker_and_never_pushes()
+    {
+        var (dbName, clock, factory) = await SeedLiveSessionAsync();
+        var original = new EnableBankingRequestException(401, null);
+        var checker = new FakeSessionStatusChecker(() => "CLOSED"); // would say dead, if it were asked
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+
+        var thrown = await Assert.ThrowsAsync<EnableBankingRequestException>(() =>
+            NewRunner(factory, NewConsentStore(clock), new FailingDebitsFetcher(original), sender, clock, checker).RunOnceAsync(CancellationToken.None));
+
+        Assert.Same(original, thrown);
+        Assert.Equal(0, checker.CallCount);
+        Assert.Empty(sender.Sent);
+        Assert.Null(await ExpiryGuardAsync(dbName));
+    }
+
+    [Theory]
+    [InlineData(429, "ASPSP_RATE_LIMIT_EXCEEDED")]
+    [InlineData(429, null)]
+    [InlineData(500, null)]
+    [InlineData(500, "SOME_ERROR")]
+    public async Task Other_statuses_never_count_as_dead_even_with_an_error_code(int status, string? errorCode)
+    {
+        var (dbName, clock, factory) = await SeedLiveSessionAsync();
+        var original = new EnableBankingRequestException(status, errorCode);
+        var checker = new FakeSessionStatusChecker(() => "CLOSED");
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+
+        var thrown = await Assert.ThrowsAsync<EnableBankingRequestException>(() =>
+            NewRunner(factory, NewConsentStore(clock), new FailingDebitsFetcher(original), sender, clock, checker).RunOnceAsync(CancellationToken.None));
+
+        Assert.Same(original, thrown);
+        Assert.Equal(0, checker.CallCount);
+        Assert.Empty(sender.Sent);
+        Assert.Null(await ExpiryGuardAsync(dbName));
+    }
+
+    [Fact]
+    public async Task An_unknown_status_from_the_checker_pushes_nothing_and_rethrows_the_original()
+    {
+        var (dbName, clock, factory) = await SeedLiveSessionAsync();
+        var original = new EnableBankingRequestException(401, "CLOSED_SESSION");
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+
+        var thrown = await Assert.ThrowsAsync<EnableBankingRequestException>(() =>
+            NewRunner(factory, NewConsentStore(clock), new FailingDebitsFetcher(original), sender, clock, new FakeSessionStatusChecker(() => null))
+                .RunOnceAsync(CancellationToken.None));
+
+        Assert.Same(original, thrown);
+        Assert.Empty(sender.Sent);
+        Assert.Null(await ExpiryGuardAsync(dbName));
+    }
+
+    [Fact]
+    public async Task A_checker_that_throws_pushes_nothing_and_the_original_exception_still_surfaces()
+    {
+        var (dbName, clock, factory) = await SeedLiveSessionAsync();
+        var original = new EnableBankingRequestException(401, "CLOSED_SESSION");
+        var checker = new FakeSessionStatusChecker(() => throw new HttpRequestException("unreachable"));
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+
+        var thrown = await Assert.ThrowsAsync<EnableBankingRequestException>(() =>
+            NewRunner(factory, NewConsentStore(clock), new FailingDebitsFetcher(original), sender, clock, checker).RunOnceAsync(CancellationToken.None));
+
+        Assert.Same(original, thrown);
+        Assert.Equal(1, checker.CallCount);
+        Assert.Empty(sender.Sent);
+        Assert.Null(await ExpiryGuardAsync(dbName));
     }
 }

@@ -78,6 +78,7 @@ var ingestion = builder.Configuration.GetSection(IngestionOptions.SectionName).G
                 ?? new IngestionOptions();
 builder.Services.AddSingleton(ingestion);
 builder.Services.AddSingleton<IDebitsFetcher, EnableBankingDebitsFetcher>();
+builder.Services.AddSingleton<ISessionStatusChecker, EnableBankingSessionStatusChecker>();
 builder.Services.AddSingleton<IngestionRunner>();
 builder.Services.AddHostedService<IngestionWorker>();
 
@@ -93,12 +94,14 @@ app.Services.GetRequiredService<INotificationSender>();
 // Pick up a consent left by an earlier run, so restarting the backend does not cost a click.
 app.Services.GetRequiredService<ConsentStore>().Restore(TimeProvider.System.GetUtcNow());
 
-app.MapGet("/health", (ConsentStore consent) => Results.Ok(new
+app.MapGet("/health", (ConsentStore consent, TimeProvider clock) => Results.Ok(new
 {
     status = "ok",
     applicationId = options.ApplicationId,
     baseUrl = options.BaseUrl,
     connected = consent.SessionId is not null,
+    // active / expired / none, judged now (R19) — `connected` only says a session id is remembered.
+    state = consent.GetState(clock.GetUtcNow()).Status.ToString().ToLowerInvariant(),
     aspsp = consent.AspspName,
     account = consent.PrimaryAccount,
     connectedAt = consent.ConnectedAt,

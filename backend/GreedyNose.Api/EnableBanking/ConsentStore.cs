@@ -38,6 +38,27 @@ public sealed record ConnectedAccount(
     };
 }
 
+public enum ConsentStatus
+{
+    None,
+    Active,
+    Expired,
+}
+
+/// <summary>
+/// A consistent read of the consent (see <see cref="ConsentStore.GetState"/>). Session and account are
+/// set unless <see cref="Status"/> is <see cref="ConsentStatus.None"/>; <see cref="ValidUntil"/> is when
+/// the consent dies (or died), null when neither the bank nor our own validity gave one.
+/// </summary>
+public sealed record ConsentState(
+    ConsentStatus Status,
+    string? SessionId,
+    ConnectedAccount? Account,
+    DateTimeOffset? ValidUntil)
+{
+    public static readonly ConsentState None = new(ConsentStatus.None, null, null, null);
+}
+
 /// <summary>What survives a restart. The session id is the whole point; the rest is context.</summary>
 public sealed record ConsentSnapshot(
     string SessionId,
@@ -90,21 +111,31 @@ public sealed class ConsentStore(string filePath, TimeSpan consentValidity, ILog
     public ConnectedAccount? PrimaryAccount => Accounts.Count > 0 ? Accounts[0] : null;
 
     /// <summary>
-    /// The session and the account it belongs to, read together under <c>_gate</c> — the same lock
-    /// <see cref="Complete"/> writes both under. The plain getters above read without it, so a
-    /// <c>/callback</c> landing mid-read could pair the old account with the new session. Null when
-    /// not connected.
+    /// Where the consent stands right now, read under <c>_gate</c> — the same lock
+    /// <see cref="Complete"/> writes session and account under. The plain getters above read without
+    /// it, so a <c>/callback</c> landing mid-read could pair the old account with the new session.
+    ///
+    /// Expiry is judged here, at call time, not once at startup: a backend that stays up past
+    /// <c>valid_until</c> must notice (R19). The bank's own <c>valid_until</c> wins; the validity we
+    /// requested is only the fallback when the bank did not say — the requested window can be longer
+    /// than the granted one, which would keep a dead session alive here.
     /// </summary>
-    public (string SessionId, ConnectedAccount PrimaryAccount)? Current
+    public ConsentState GetState(DateTimeOffset now)
     {
-        get
+        lock (_gate)
         {
-            lock (_gate)
+            if (SessionId is not { } sessionId || PrimaryAccount is not { } account)
             {
-                return SessionId is { } sessionId && PrimaryAccount is { } account
-                    ? (sessionId, account)
-                    : null;
+                return ConsentState.None;
             }
+
+            var validUntil = ExpiresAt ?? ConnectedAt + consentValidity;
+
+            return new ConsentState(
+                validUntil is { } end && now >= end ? ConsentStatus.Expired : ConsentStatus.Active,
+                sessionId,
+                account,
+                validUntil);
         }
     }
 
@@ -148,11 +179,9 @@ public sealed class ConsentStore(string filePath, TimeSpan consentValidity, ILog
     /// <summary>
     /// Reads back a consent left by an earlier run. Call once at startup.
     ///
-    /// An expired consent is dropped rather than offered: the bank would reject it anyway, and a
-    /// stale session id turns every later call into a confusing 401 instead of an honest "not
-    /// connected". Expiry is the bank's own <c>valid_until</c> where it gave one, and only falls
-    /// back to the validity we requested where it did not — the requested window can be longer
-    /// than the granted one, which would keep a dead session alive here.
+    /// An expired consent is loaded like any other and reads back as <see cref="ConsentStatus.Expired"/>
+    /// from <see cref="GetState"/>: dropping it would leave nobody knowing which session died, and
+    /// R19's one push would be lost across the restart.
     /// </summary>
     public void Restore(DateTimeOffset now)
     {
@@ -169,19 +198,6 @@ public sealed class ConsentStore(string filePath, TimeSpan consentValidity, ILog
                 return;
             }
 
-            var expired = snapshot.ExpiresAt is { } expiresAt
-                ? now >= expiresAt
-                : now - snapshot.ConnectedAt > consentValidity;
-
-            if (expired)
-            {
-                logger.LogInformation(
-                    "Stored consent from {ConnectedAt} has expired ({ExpiresAt}); ignoring it.",
-                    snapshot.ConnectedAt, snapshot.ExpiresAt);
-
-                return;
-            }
-
             lock (_gate)
             {
                 SessionId = snapshot.SessionId;
@@ -191,8 +207,8 @@ public sealed class ConsentStore(string filePath, TimeSpan consentValidity, ILog
                 ExpiresAt = snapshot.ExpiresAt;
             }
 
-            logger.LogInformation("Restored the consent for {Aspsp}, connected {ConnectedAt}.",
-                snapshot.AspspName, snapshot.ConnectedAt);
+            logger.LogInformation("Restored the consent for {Aspsp}, connected {ConnectedAt}, state {Status}.",
+                snapshot.AspspName, snapshot.ConnectedAt, GetState(now).Status);
         }
         catch (Exception exception) when (exception is IOException or JsonException)
         {
