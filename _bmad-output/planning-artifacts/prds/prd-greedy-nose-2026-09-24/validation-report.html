@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PRD Validation: REQUIREMENTS.md</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e7e5e4;
+    --text: #1c1917;
+    --muted: #78716c;
+
+    --verdict-strong: #16a34a;
+    --verdict-adequate: #65a30d;
+    --verdict-thin: #d97706;
+    --verdict-broken: #dc2626;
+
+    --sev-low: #64748b;
+    --sev-medium: #ca8a04;
+    --sev-high: #ea580c;
+    --sev-critical: #dc2626;
+
+    --grade-exc: #16a34a;
+    --grade-good: #65a30d;
+    --grade-fair: #d97706;
+    --grade-poor: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  header.report-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .title h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .title .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .grade {
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-weight: 600;
+    color: white;
+    font-size: 15px;
+    white-space: nowrap;
+  }
+  .grade-excellent { background: var(--grade-exc); }
+  .grade-good { background: var(--grade-good); }
+  .grade-fair { background: var(--grade-fair); }
+  .grade-poor { background: var(--grade-poor); }
+
+  .synthesis {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--muted);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin-bottom: 24px;
+    font-size: 15.5px;
+  }
+  .synthesis p { margin: 0 0 10px; }
+  .synthesis p:last-child { margin-bottom: 0; }
+
+  .dimension-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .dim-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .dim-card .dim-name { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .dim-card .dim-verdict { font-size: 14px; font-weight: 600; }
+
+  section.dimension, section.reviewer-section { margin-bottom: 14px; }
+  section.dimension details, section.reviewer-section details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  section summary {
+    padding: 14px 20px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  section summary::-webkit-details-marker { display: none; }
+  section summary::before {
+    content: "▸";
+    display: inline-block;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  section details[open] summary::before { transform: rotate(90deg); }
+  section summary h2 {
+    display: inline;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    flex: 1;
+  }
+  .verdict-pill {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: white;
+  }
+  .verdict-strong { background: var(--verdict-strong); }
+  .verdict-adequate { background: var(--verdict-adequate); }
+  .verdict-thin { background: var(--verdict-thin); }
+  .verdict-broken { background: var(--verdict-broken); }
+
+  .dim-body { padding: 4px 20px 18px; }
+  .dim-judgment { color: var(--text); font-size: 14.5px; }
+  .dim-judgment p { margin: 0 0 10px; }
+
+  .findings-list { padding: 0 20px 4px; }
+  article.finding {
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+  }
+  article.finding:first-child { border-top: none; }
+  article.finding header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .badge {
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+  }
+  .badge-conv { background: rgba(22, 163, 74, 0.12); color: var(--verdict-strong); }
+  .badge-sev-low { background: rgba(100, 116, 139, 0.12); color: var(--sev-low); }
+  .badge-sev-medium { background: rgba(202, 138, 4, 0.14); color: var(--sev-medium); }
+  .badge-sev-high { background: rgba(234, 88, 12, 0.14); color: var(--sev-high); }
+  .badge-sev-critical { background: rgba(220, 38, 38, 0.14); color: var(--sev-critical); }
+  .finding-title { margin: 0; font-size: 15px; font-weight: 500; flex: 1; min-width: 200px; }
+  .finding-location { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  .finding-note, .finding-fix { margin-top: 6px; font-size: 14px; }
+  .finding-fix strong { color: var(--muted); font-weight: 500; }
+
+  .reviewer-source {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  .mechanical {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    font-size: 14px;
+  }
+  .mechanical h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .mechanical ul { margin: 0; padding-left: 20px; }
+  .mechanical li { margin-bottom: 4px; color: var(--text); }
+
+  footer.report-footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  footer .meta { display: flex; gap: 24px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="report-header">
+      <div class="title">
+        <h1>REQUIREMENTS.md — Validation Report</h1>
+        <div class="subtitle">C:\Workspace\greedy-nose\REQUIREMENTS.md</div>
+      </div>
+      <div class="grade grade-fair">Fair</div>
+    </header>
+
+    <div class="synthesis">
+      <p>REQUIREMENTS.md is a well-run requirements doc for its scope: dated decisions, named
+      trade-offs, disciplined terminology, honest self-correction against real bank data. All
+      three reviewers converge on one root problem: the onboarding classify/bulk-review flow is
+      load-bearing for two requirements (R4b, R10c) but was never itself specified — and this
+      already caused a real divergence between <code>ARCHITECTURE.md</code>'s promise and what the
+      ingestion worker actually built (per <code>CLAUDE.md</code>'s 2026-09-23 entry).</p>
+      <p>The two scenario-focused reviewers (a manual first-use/normal-use walkthrough and
+      <code>bmad-review</code>'s edge-case-hunter + verification-gap lenses) independently converged
+      on further problems — most notably that R20's reconnect-summary push has no floor for a
+      zero-bad-debit gap, which both flagged unprompted as a direct conflict with R1's "nothing
+      else" purpose statement. Independent convergence on the same finding, not just the same
+      theme, is a strong signal these are real.</p>
+    </div>
+
+    <div class="dimension-summary">
+      <div class="dim-card"><div class="dim-name">Decision-readiness</div><div class="dim-verdict" style="color: var(--verdict-strong)">Strong</div></div>
+      <div class="dim-card"><div class="dim-name">Substance over theater</div><div class="dim-verdict" style="color: var(--verdict-strong)">Strong</div></div>
+      <div class="dim-card"><div class="dim-name">Strategic coherence</div><div class="dim-verdict" style="color: var(--verdict-strong)">Strong</div></div>
+      <div class="dim-card"><div class="dim-name">Done-ness clarity</div><div class="dim-verdict" style="color: var(--verdict-strong)">Strong (1 high hole)</div></div>
+      <div class="dim-card"><div class="dim-name">Scope honesty</div><div class="dim-verdict" style="color: var(--verdict-strong)">Strong</div></div>
+      <div class="dim-card"><div class="dim-name">Downstream usability</div><div class="dim-verdict" style="color: var(--verdict-strong)">Strong</div></div>
+      <div class="dim-card"><div class="dim-name">Shape fit</div><div class="dim-verdict" style="color: var(--verdict-strong)">Strong</div></div>
+    </div>
+
+    <section class="dimension">
+      <details open>
+        <summary><h2>Done-ness clarity</h2><span class="verdict-pill verdict-strong">Strong, one high hole</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>Most requirements carry a directly
+        testable consequence (R5's table, R5a's tie-break, R4a's validation rule, R12a's verbatim
+        strings, R18's consequence table, R23a's fold examples). A grep for vague-adjective tells
+        ("gracefully," "reasonable," "user-friendly") returns nothing.</p></div></div>
+        <div class="findings-list">
+          <article class="finding"><header><span class="badge badge-sev-high">high</span><h3 class="finding-title">Onboarding classify flow referenced as load-bearing but never specified</h3><span class="finding-location">§R4b, §R10c</span></header>
+          <div class="finding-note">R4b's justification for reviewed/unreviewed is "only onboarding uses the distinction, for its progress"; R10c depends on it too. No R-number defines the flow itself. Already caused a real divergence per <code>CLAUDE.md</code>'s 2026-09-23 status entry.</div>
+          <div class="finding-fix"><strong>Fix:</strong> give onboarding its own R-number(s): what "classify" means, what triggers it, completion criteria, and what "skip" means for R10c's bootstrap.</div></article>
+          <article class="finding"><header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">R19's self-triggered push has no wording spec</h3><span class="finding-location">§R19</span></header>
+          <div class="finding-note">R12a gives verbatim strings for every bad-debit reason; R19's "one push when consent expires" gives none. The doc's own Follow-ups already flags two related undrawn mock states.</div>
+          <div class="finding-fix"><strong>Fix:</strong> extend R12a's wording table to this push.</div></article>
+          <article class="finding"><header><span class="badge badge-sev-low">low</span><h3 class="finding-title">R3a's tier-2 trigger condition is soft</h3><span class="finding-location">§R3a</span></header>
+          <div class="finding-note">"Creditor agent... where it helps separate two payees" doesn't say when it's actually included. Low severity — R3a already labels itself best-effort.</div>
+          <div class="finding-fix"><strong>Fix:</strong> state when creditor agent is included (always when present, or only on detected collision).</div></article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Decision-readiness</h2><span class="verdict-pill verdict-strong">Strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>Decisions read as decisions, dated,
+        with trade-offs named honestly (R3b, R10c, R22's self-flagged EUR tension). No findings
+        against the dimension itself.</p></div></div>
+        <div class="findings-list">
+          <article class="finding"><header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">"Open points" section is not actually exhaustive</h3><span class="finding-location">§ Open points</span></header>
+          <div class="finding-note">"None. All nine points... settled" is true of the original O1–O9 list, but misses R22's self-flagged EUR contradiction and the closing paragraph's two "still unspecified" items — both real, both easy to miss since they live in unrelated sections.</div>
+          <div class="finding-fix"><strong>Fix:</strong> rename the section, or add a "currently open" pool for the live items.</div></article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Substance over theater</h2><span class="verdict-pill verdict-strong">Strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>No personas, Vision statement, or NFR
+        boilerplate — none of it was needed. R1's purpose line is sharp and specific, not
+        swappable. No findings — no furniture to flag.</p></div></div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Strategic coherence</h2><span class="verdict-pill verdict-strong">Strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>R1's thesis (alert integrity, biased
+        toward false-alert-over-missed-alert) is carried through consistently, cross-referencing
+        itself (R3b ↔ R10c). Section order reads as an argument, not a backlog. No findings.</p></div></div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Scope honesty</h2><span class="verdict-pill verdict-strong">Strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>Close to a model example — omissions
+        are stated, not left to inference (R2a, R3a's "accepted, not solved," the "zero evidence"
+        admissions). The Follow-ups list is honest, dated, specific de-scoping.</p></div></div>
+        <div class="findings-list">
+          <article class="finding"><header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Open-items bucket thinner than the doc's own house style</h3><span class="finding-location">§ closing paragraph</span></header>
+          <div class="finding-note">"Still unspecified, but not blocking: ... the onboarding classify flow's details" is one bare sentence, unlike the numbered, specific "Known mock gaps" list elsewhere — despite this item's demonstrated downstream cost.</div>
+          <div class="finding-fix"><strong>Fix:</strong> expand into a short numbered list naming what's actually undecided.</div></article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Downstream usability</h2><span class="verdict-pill verdict-strong">Strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>The Glossary (R0) is real and enforced.
+        ID continuity is clean (R0–R24, O1–O9, no gaps/dupes/orphans). Cross-references to
+        <code>ARCHITECTURE.md</code> and mock IDs all resolve.</p></div></div>
+        <div class="findings-list">
+          <article class="finding"><header><span class="badge badge-sev-low">low</span><h3 class="finding-title">One glossary-discipline slip</h3><span class="finding-location">§ Refining these from real data</span></header>
+          <div class="finding-note">"a pending (not-yet-booked) transaction" uses the term R0 retires, outside its two named exceptions.</div>
+          <div class="finding-fix"><strong>Fix:</strong> "…debit."</div></article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Shape fit</h2><span class="verdict-pill verdict-strong">Strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>Capability-spec shape correctly matches
+        a solo/hobby, single-operator product — not under- or over-formalized. <code>mocks/</code>
+        does the job UJs would do for a consumer product, cited by ID rather than re-narrated. No
+        findings.</p></div></div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details open>
+        <summary><h2>Use-case walkthrough — first use &amp; normal ongoing use</h2><span class="reviewer-source">review-usecase.md</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>Two step-by-step walkthroughs citing
+        the governing R-number at each step. 9 findings total (4 contradictions, 5 gaps); none
+        duplicate an item the doc already names in its own Open points / Follow-ups. Checked and
+        found <em>no</em> conflict: R7 ("rule edit re-labels existing debits") vs R10a
+        ("re-labeling never re-notifies") — R10a's own text already resolves this.</p></div></div>
+        <div class="findings-list">
+          <article class="finding"><header><span class="badge badge-sev-high">contradiction</span><span class="badge badge-conv">convergent</span><h3 class="finding-title">R20 unconditional even at zero new/bad debits — conflicts with R1</h3><span class="finding-location">§R20 vs §R1</span></header>
+          <div class="finding-note">A reconnect gap with 5 new charges, all good, under limit → R20 as written still fires a summary push. "5 new, 0 bad" is not a bad-debit alert; R1 says "nothing else." Neither sending nor suppressing is stated as the rule. Independently found by the bmad-review edge-case-hunter lens too.</div>
+          <div class="finding-fix"><strong>Fix:</strong> state explicitly whether the summary is suppressed below some new-charge or bad-charge count.</div></article>
+          <article class="finding"><header><span class="badge badge-sev-medium">gap</span><h3 class="finding-title">R20's summary notification has no wording or tap target</h3><span class="finding-location">§R20 vs §R12/R12a</span></header>
+          <div class="finding-note">R12a's table is exhaustive for a single payee/amount pair; R20's aggregate case ("12 new, 3 bad") has no title/body spec, and R12's "opens the debit detail" (singular) doesn't say which of N debits.</div>
+          <div class="finding-fix"><strong>Fix:</strong> define wording and a tap target (e.g. opens a filtered list) for the summary push.</div></article>
+          <article class="finding"><header><span class="badge badge-sev-medium">contradiction</span><h3 class="finding-title">R24a cites R4 for a commit mechanic R4 never defines</h3><span class="finding-location">§R24a vs §R4, §R13/R14</span></header>
+          <div class="finding-note">"Back already discards on that screen (R4's single-commit form)" — but R4 only defines the rule's data shape, not Save/Back semantics. No R-number actually states Save commits classification+amount together while Back discards.</div>
+          <div class="finding-fix"><strong>Fix:</strong> add the missing commit-semantics requirement, likely in R13/R14.</div></article>
+          <article class="finding"><header><span class="badge badge-sev-medium">gap</span><h3 class="finding-title">R5/R9's unconditional binary doesn't reconcile with R10c's "provisional" state</h3><span class="finding-location">§R5, §R9 vs §R10c</span></header>
+          <div class="finding-note">Undefined whether a provisional (pending) row carries a good/bad marking, and whether the booked version replaces it in place or appends alongside — untested by real data per the doc's own admission.</div>
+          <div class="finding-fix"><strong>Fix:</strong> state whether provisional rows classify, and add a replace-not-append merge rule.</div></article>
+          <article class="finding"><header><span class="badge badge-sev-medium">gap</span><span class="badge badge-conv">convergent</span><h3 class="finding-title">R23b's persistence rule only names the debit-detail round trip</h3><span class="finding-location">§R23b vs §R23, §R13/R14</span></header>
+          <div class="finding-note">R23 makes both list screens searchable; R23b's wording only covers "list → debit detail → Back," not the rules-list → Edit Rule round trip. Independently found by the bmad-review edge-case-hunter lens too.</div>
+          <div class="finding-fix"><strong>Fix:</strong> extend R23b to name both round trips.</div></article>
+          <article class="finding"><header><span class="badge badge-sev-high">contradiction</span><h3 class="finding-title">R4b commits to an onboarding detail the doc calls unsettled</h3><span class="finding-location">§R4b vs closing paragraph</span></header>
+          <div class="finding-note">Part of the Cluster A onboarding gap above — R4b already commits to a progress-tracking classify screen while the closing line calls onboarding's details "still unspecified."</div>
+          <div class="finding-fix"><strong>Fix:</strong> see Done-ness clarity's onboarding finding above.</div></article>
+          <article class="finding"><header><span class="badge badge-sev-high">gap</span><h3 class="finding-title">R12a's "New payee" wording is false for an unclassified-but-seen payee</h3><span class="finding-location">§R12a vs §R4b, §R10c</span></header>
+          <div class="finding-note">A payee with 20 historical debits, left unclassified at onboarding, gets "you haven't seen this one before" on its next charge — false, since "no rule" (R4b) means unreviewed, not unseen.</div>
+          <div class="finding-fix"><strong>Fix:</strong> see Done-ness clarity's onboarding finding above; this is its sharpest concrete symptom.</div></article>
+          <article class="finding"><header><span class="badge badge-sev-medium">gap</span><span class="badge badge-conv">convergent</span><h3 class="finding-title">No requirement covers an interrupted first sync</h3><span class="finding-location">§R18 vs §R10c</span></header>
+          <div class="finding-note">If the historical pull seeding onboarding is cut short, it's undefined whether resuming it is still "first sync" (silent) or a live gap (R20). Same root cause as the delete-then-reconnect finding below; independently found by the bmad-review edge-case-hunter lens as well (framed as the connection-start gap).</div>
+          <div class="finding-fix"><strong>Fix:</strong> add a start-of-connection counterpart to R18's table.</div></article>
+          <article class="finding"><header><span class="badge badge-sev-medium">gap</span><span class="badge badge-conv">convergent</span><h3 class="finding-title">Undefined boundary for delete-then-reconnect</h3><span class="finding-location">§R20 vs §R10c, §R18</span></header>
+          <div class="finding-note">After R18's account deletion (rules+history wiped) and a reconnect, is that R10c's silent first-sync or R20's gap-summary path? Independently found by the bmad-review edge-case-hunter lens with near-identical reasoning.</div>
+          <div class="finding-fix"><strong>Fix:</strong> state explicitly that post-deletion reconnect always re-enters R10c's silent bootstrap.</div></article>
+        </div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details open>
+        <summary><h2>bmad-review — edge-case-hunter &amp; verification-gap</h2><span class="reviewer-source">review-bmad-review.md</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>11 findings (8 edge-case, 3
+        verification-gap). Verification-gap was adapted from its normal code/diff scope to check
+        REQUIREMENTS.md's claims against the actual <code>app/</code> and
+        <code>backend/GreedyNose.Api</code> code — these 3 are implementation drift, not
+        contradictions within the doc itself, kept separate below.</p></div></div>
+        <div class="findings-list">
+          <article class="finding"><header><span class="badge badge-sev-medium">edge-case</span><h3 class="finding-title">R3a frames R10b's fallback as an exception; real data says it's the majority</h3><span class="finding-location">§R3a, §R10b</span></header>
+          <div class="finding-note">63 of 91 real N26 debits fell back to R10b's composite key (stated later in the same file) — R3a's cross-reference to it as "the exception" undersells how central this path is.</div>
+          <div class="finding-fix"><strong>Fix:</strong> state plainly in R10b that the fallback is a permanent, majority path.</div></article>
+          <article class="finding"><header><span class="badge badge-sev-medium">verification-gap</span><h3 class="finding-title">R4a's "≤2 decimal places" not enforced by the backend validator</h3><span class="finding-location">backend/GreedyNose.Api/Rules/RulesValidation.cs:62-65</span></header>
+          <div class="finding-note">Only checks <code>AmountEUR &lt;= 0</code>; <code>12.999</code> is accepted, then silently rounded by Postgres's <code>numeric(12,2)</code> column rather than rejected as R4a implies. Code-level drift, not a doc contradiction.</div>
+          <div class="finding-fix"><strong>Fix:</strong> add a decimal-scale check to <code>RulesValidation.TryValidate</code>.</div></article>
+          <article class="finding"><header><span class="badge badge-sev-medium">verification-gap</span><h3 class="finding-title">R3a's "raw strings stored alongside the key" is asserted but not implemented</h3><span class="finding-location">backend/GreedyNose.Api/Data/Payee.cs:15</span></header>
+          <div class="finding-note"><code>Payee.Name</code> is a single field, unconditionally overwritten on every ingestion tick and rule save — not the history R3a and <code>ARCHITECTURE.md</code> both claim is stored for future re-tuning.</div>
+          <div class="finding-fix"><strong>Fix:</strong> implement raw-name history, or strike the claim from R3a/<code>ARCHITECTURE.md</code>.</div></article>
+          <article class="finding"><header><span class="badge badge-sev-medium">verification-gap</span><h3 class="finding-title">R24/R24a's whole behavior rides on one untested navigator option</h3><span class="finding-location">app/src/navigation/AppNavigator.tsx:160</span></header>
+          <div class="finding-note"><code>popToTopOnBlur: true</code> delivers both requirements; no render/integration test exercises it — a react-navigation upgrade or accidental removal breaks both while <code>npx jest</code> stays green.</div>
+          <div class="finding-fix"><strong>Fix:</strong> add a render test mounting the tab navigator and asserting the blur-reset + draft-discard behavior.</div></article>
+        </div>
+      </details>
+    </section>
+
+    <div class="mechanical">
+      <h3>Mechanical notes</h3>
+      <ul>
+        <li>ID continuity (R0–R24, O1–O9) is clean — no gaps, duplicates, or orphans.</li>
+        <li>All cited mock IDs and <code>ARCHITECTURE.md</code> section references resolve.</li>
+        <li>No <code>[ASSUMPTION]</code>/<code>[NOTE FOR PM]</code> bracket-tag convention — the doc predates the BMAD tooling in this repo; the substance is present in prose instead, so this is a convention difference, not a gap.</li>
+        <li>R7 vs R10a was checked explicitly and found consistent — noted here so it isn't re-checked later.</li>
+      </ul>
+    </div>
+
+    <footer class="report-footer">
+      <div class="meta">
+        <span>Rubric: .claude\skills\bmad-prd\assets\prd-validation-checklist.md</span>
+        <span>Generated: 2026-09-24</span>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>
