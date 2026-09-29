@@ -98,10 +98,12 @@ nothing here is urgent; each is a design decision to make when that piece is act
       (one seeded user, one connected account); once multi-user exists, two users' identically
       named merchants would resolve to the same `Payee` row — a cross-tenant classification leak.
       Scope the key to `(user, resolved key)` before multi-user lands, not after.
-- [ ] **No server-side guard against starting a second consent while one is already active**
-      (`R22a`) — enforced today only by the mobile client having no UI path to it. Any second path
-      to the API (retry, future admin tool, bug) has undefined behavior. Add the guard when real
-      auth/multi-account work starts.
+- [ ] **No server-side guard against starting a second consent for a bank that already has an
+      active one** (`R22a`, reworded 2026-09-29: several banks at once are now allowed, one account
+      per bank). Today `ConsentStore` holds a single consent and `/connect` just overwrites it, so a
+      second `/connect` — for the same bank *or* a different one — silently replaces the first.
+      Becomes real with the multi-consent store (one row per bank): decide then whether a repeat
+      `/connect` for the same bank replaces the old consent (the reconnect path) or is refused.
 - [ ] **Two ingestion paths can race on the same consent** once the on-demand "app is open" fetch
       is actually built alongside the 6h timer poll — a per-consent lock/lease is needed so a
       concurrent fetch is a no-op, or the same new bad debit could be evaluated twice (breaking

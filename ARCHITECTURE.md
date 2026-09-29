@@ -427,7 +427,8 @@ modes," which both point back to this paragraph.
 
 **The key is `(connected account, entry_reference)`.** `entry_reference` is documented as unique
 and immutable for the same account and matches across authentication sessions, but it is *not*
-globally unique — hence the account scope, which the app has anyway (R22a: one account at a time).
+globally unique — hence the account scope, which the app has anyway (R22a: one account per bank,
+several banks at once — every account has its own `AccountKey`).
 
 **`transaction_id` must not be used for this.** It exists to fetch transaction details, is not
 guaranteed to identify a transaction uniquely, and **may change between fetches** — a de-dup key
@@ -601,8 +602,11 @@ R18's table applies unchanged (see `REQUIREMENTS.md`) — the three ways a conne
 ## Bank-agnostic design
 
 R22: any ASPSP Enable Banking reaches is a valid target. **N26 is the first bank integrated, not
-a dependency** — nothing in the data model, rule logic or copy may assume it. v1 still connects
-one account at a time (R22a); simultaneous multi-bank support stays deferred. **This currently
+a dependency** — nothing in the data model, rule logic or copy may assume it. v1 connects one
+account per bank and several banks at once (R22a, changed 2026-09-29 for the owner's N26 + DKB +
+ING-DiBa): the consent store must hold one consent per bank and the Ingestion Worker must walk all
+of them, isolating a failure in one bank from the others. The go-live can start with N26 alone,
+but the model is built for several from the start. **This currently
 assumes a eurozone ASPSP** (R15 hard-assumes EUR); a non-EUR bank needs a currency model that
 doesn't exist yet, and is out of scope until one does (see `CLAUDE.md`'s Open/deferred).
 
@@ -625,6 +629,16 @@ is limited by *whose* accounts you link, not by which bank — so adding ING-DiB
 N26 costs nothing extra (R22). Paid, volume-based pricing only becomes relevant once onboarding
 other people's accounts at commercial scale — verified 2026-09-28: since April 2026 that pricing is
 sales-quote only (no public price list at all, was previously "unpublished, contact-sales").
+
+**Restricted Production is for the owner's own accounts only — verified 2026-09-29 against the
+Terms of Service and the linked-accounts page.** The Terms exclude "accessing account information
+that does not belong to the Control Panel user who associated the Linked Accounts with the
+application", and forbid making the API accessible to third parties; technically the API returns
+only accounts the Control Panel user linked through their own bank login and strips all others (an
+empty list). So family members' accounts cannot be used on this tier; that needs a contract and the
+company check (KYB) with Enable Banking. The owner's own several accounts are fine, but **each one
+must be linked in the Control Panel** first. (Read from the pages via a summarizer — re-read the
+Terms themselves before relying on this for anything beyond a personal deployment.)
 
 On Azure: Functions (consumption plan), the storage account behind them, and Key Vault are
 all effectively free at this scale, independent of the in-process-vs-isolated worker choice

@@ -278,9 +278,12 @@ so a non-EUR bank is out of scope until a currency model exists (see `CLAUDE.md`
 — not yet a contradiction in practice since every bank named above is in the eurozone, but R22 as
 written does not itself carve that out.
 
-**R22a** — v1 connects **one account at a time**. Supporting several banks simultaneously, and
-labelling which bank a debit came from, stays deferred (see `CLAUDE.md`). "Bank-agnostic" means
-the app works with whichever bank you connect, not that it aggregates several at once.
+**R22a** — v1 connects **one account per bank, and several banks at once** (settled 2026-09-29;
+the owner's own three banks are N26, DKB and ING-DiBa). The debit list shows all of them together,
+with no per-account filter yet. Labelling which bank a debit came from stays deferred (see
+`CLAUDE.md`), and so do several accounts *within* one bank. Each bank is its own consent (R18–R20
+apply per bank), so a connection that ends or reconnects only ever affects its own bank's debits
+and alerts.
 
 ## Currency
 

@@ -4,6 +4,44 @@
 
 ## Status
 
+**2026-09-29 (end of day) — go-live direction decided, nothing built yet.** The owner wants a first
+**productive version for himself only**, on Azure, as soon as possible. Family members' accounts are
+not an option on the free tier: Enable Banking's Terms for Restricted Production allow only accounts
+that belong to the Control Panel user (each linked there), and forbid making the API available to
+third parties — anything else needs a contract and the company check (KYB); see `ARCHITECTURE.md`
+"Cost". He has three accounts at three banks — **N26, DKB, ING-DiBa** — so **`R22a` was changed
+today**: one account per bank, several banks at once, one merged debit list. Go-live may start with
+N26 alone, but the model is built multi-bank from the start (a consent per bank, the worker walking
+all of them, one bank's failure isolated from the others; the schema is already per account).
+**What still blocks deploying anywhere** (documented, in rough order): the debit list must come
+from the database, not live from the bank — `/debits` calls the bank on every request and N26 allows
+~4 fetches a day; authentication on every endpoint and removal of the debug endpoints (`/raw`,
+`/aspsps`, an open `/connect`); the consent moved from a local file into an encrypted table plus
+secrets into Key Vault/app settings; a hosting decision — the worker is an in-process
+`BackgroundService` and needs an always-on host, or must be rebuilt as a timer Function (isolated
+worker model) — plus cloud Postgres and its migrations; an HTTPS address registered as the redirect
+URL in the Enable Banking *production* application (Sandbox and Production differ); switching back
+to the Production application (the N26 consent backup is valid to 2026-12-15); a release build of
+the app pointing at the cloud address. Can wait: in-app onboarding (connect N26 once through the
+backend page, classify payees through the Rules screen), the Health Monitor mail, iOS, banner. Open
+questions for the next session: the redirect path back into the app (DKB and ING switch into their
+own banking apps — the biggest unknown of the onboarding work), the hosting choice (timer Function
+vs a small always-on host), and reading `GET /aspsps?country=DE` with the Production application
+for each bank's `maximum_consent_validity`. Slicing: `bmad-create-epics-and-stories` for epics and
+stories, each story then built with the usual process (`AGENTS.md`, Policy). **The go-live becomes
+its own tracer bullet** — the live document is `TRACER-03-GO-LIVE.md` (steps, Progress, decisions,
+findings; the BMAD stories stay in `_bmad-output/` and each step points to its story, so there is
+one source of truth per thing). **First task tomorrow, before BMAD (decided 2026-09-29): rename the
+three tracer documents so the history reads in order** — `TRACER-BULLET.md` → `TRACER-01-BANK-DATA.md`,
+`NOTIFICATION-TRACER-BULLET.md` → `TRACER-02-NOTIFICATIONS.md`, new `TRACER-03-GO-LIVE.md`; flat in
+the repo root. Use `git mv` (history follows). About 150 references: docs (`CLAUDE.md`,
+`AGENTS.md`, `ARCHITECTURE.md`, `REQUIREMENTS.md`, `TODO.md`, `AUTOMATED-RUN.md`, `.gitignore`) are
+edited directly; the comment-only references in ~14 code files under `backend/` and `app/`
+(`Program.cs`, `ConsentStore.cs`, `Payee.cs`, `config.ts`, …) go through `coder-backend` and
+`coder-mobile` (over the 10-line floor together), then `coder-reviewer`. Also add a short overview of
+the three tracers (dates, outcome) to `AGENTS.md` under "Where things are", which names the live
+tracer document.
+
 **2026-09-29 (newest) — R19's push is built: a dead consent is detected and pushed once (backend),
 uncommitted at time of writing; the in-app banner is not.** The Ingestion Worker now decides on every
 tick whether the consent is dead — *by time* (`ConsentStore.GetState(now)`: `valid_until` reached,
@@ -415,9 +453,11 @@ It still has to be replaced by real data (see Open/deferred below).
 ## Open / deferred (explicitly not v1)
 
 - App-level lock (Face ID/passcode) before opening the app.
-- Multi-bank / multi-account differentiation in the debit list. Note this is *simultaneous*
-  connections, not bank support in general — the app must work with any bank (`R22`), it just
-  handles one connected account at a time in v1 (`R22a`).
+- Telling the banks apart in the debit list (a per-account filter or a bank label), and several
+  accounts *within* one bank. v1 (`R22a`, changed 2026-09-29) connects **one account per bank and
+  several banks at once** — the owner's own N26, DKB and ING-DiBa — with one merged list. The
+  consent store and the worker still handle a single consent today; making both multi-bank is part
+  of the go-live work, see the status entry of 2026-09-29.
 - Offline state handling for the main list (only the initial-connect error state exists).
 - Notification grouping/bundling (a "Group multiple alerts" toggle exists in the Settings mock
   but defaults Off — one notification per charge is the current decision).
