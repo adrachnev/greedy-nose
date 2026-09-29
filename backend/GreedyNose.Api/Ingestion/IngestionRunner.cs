@@ -106,9 +106,16 @@ public sealed class IngestionRunner(
     /// never worse (decided 2026-09-22). Name/initials/iban are refreshed the same way step 4's
     /// endpoint refreshes them on every save.
     ///
+    /// <c>Payee.RecordSeen</c> is the one field that is <em>not</em> overwritten: ARCHITECTURE.md's
+    /// "Payee identity" section asks for a distinct set of every raw IBAN/normalized-name/creditor-
+    /// agent ever seen, so those three grow, they never get replaced.
+    ///
     /// Races with a concurrent <c>POST /rules</c> insert for a brand-new payee the same way step 4
     /// races with itself: caught on <c>PK_Payees</c>, logged, continue — see
-    /// <see cref="RulesEndpoint.HandleAsync"/> for the identical pattern this mirrors.
+    /// <see cref="RulesEndpoint.HandleAsync"/> for the identical pattern this mirrors. A concurrent
+    /// *update* of an already-existing payee (this tick racing a <c>POST /rules</c> save for the
+    /// same payee) is a second, independent race — see <see cref="Payee.Version"/> and the
+    /// <c>DbUpdateConcurrencyException</c> catch below (2026-09-28 review, Finding 2).
     /// </summary>
     private async Task UpsertPayeesAsync(
         GreedyNoseDbContext db, IReadOnlyList<PayeeDto> payees, IReadOnlyList<DebitDto> debits, DateTimeOffset now, CancellationToken ct)
@@ -120,39 +127,77 @@ public sealed class IngestionRunner(
                 g => g.Min(d => DateTimeOffset.Parse(d.Timestamp, CultureInfo.InvariantCulture)),
                 StringComparer.Ordinal);
 
-        foreach (var payeeDto in payees)
+        // Local, not inline, because a concurrency conflict below re-runs this exact upsert against
+        // freshly re-read rows — RecordSeen and the Name/Initials/Iban/FirstSeenAt refresh are all
+        // idempotent against the same payeeDto batch, so applying them twice for an unaffected
+        // payee is a harmless no-op, and applying them again for the one payee that actually
+        // conflicted is the whole point of the retry.
+        async Task ApplyAsync()
         {
-            var earliest = earliestByPayee.TryGetValue(payeeDto.Id, out var value) ? value : now;
-
-            var existing = await db.Payees.SingleOrDefaultAsync(
-                p => p.UserId == SeedData.UserId && p.Id == payeeDto.Id, ct);
-
-            if (existing is null)
+            foreach (var payeeDto in payees)
             {
-                db.Payees.Add(new Payee
+                var earliest = earliestByPayee.TryGetValue(payeeDto.Id, out var value) ? value : now;
+
+                var existing = await db.Payees.SingleOrDefaultAsync(
+                    p => p.UserId == SeedData.UserId && p.Id == payeeDto.Id, ct);
+
+                // Same value both payee-upsert paths merge into (RulesEndpoint's own upsert
+                // mirrors this) — R3a's normalization of the bank's *raw* creditor name, never
+                // payeeDto.Name, which may already be BuildPayee's own display fallback (the raw
+                // IBAN, or "Unknown payee") when the bank sent no creditor name at all — see
+                // PayeeDto.CreditorName's own doc comment (2026-09-28 review, Finding 1).
+                var normalizedName = TransactionMapper.NormalizeName(payeeDto.CreditorName);
+
+                if (existing is null)
                 {
-                    UserId = SeedData.UserId,
-                    Id = payeeDto.Id,
-                    Name = payeeDto.Name,
-                    Initials = payeeDto.Initials,
-                    Iban = payeeDto.Iban,
-                    FirstSeenAt = earliest,
-                });
-            }
-            else
-            {
-                existing.Name = payeeDto.Name;
-                existing.Initials = payeeDto.Initials;
-                existing.Iban = payeeDto.Iban;
-                if (earliest < existing.FirstSeenAt)
+                    var created = new Payee
+                    {
+                        UserId = SeedData.UserId,
+                        Id = payeeDto.Id,
+                        Name = payeeDto.Name,
+                        Initials = payeeDto.Initials,
+                        Iban = payeeDto.Iban,
+                        FirstSeenAt = earliest,
+                    };
+                    created.RecordSeen(payeeDto.Iban, normalizedName, payeeDto.CreditorAgent);
+                    db.Payees.Add(created);
+                }
+                else
                 {
-                    existing.FirstSeenAt = earliest;
+                    existing.Name = payeeDto.Name;
+                    existing.Initials = payeeDto.Initials;
+                    existing.Iban = payeeDto.Iban;
+                    existing.RecordSeen(payeeDto.Iban, normalizedName, payeeDto.CreditorAgent);
+                    if (earliest < existing.FirstSeenAt)
+                    {
+                        existing.FirstSeenAt = earliest;
+                    }
                 }
             }
         }
 
+        await ApplyAsync();
+
         try
         {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // An already-existing payee's row moved under us — a concurrent POST /rules updated it
+            // (or another tick, though IngestionWorker itself runs ticks strictly sequentially in
+            // one process; the same "not this deployment's shape" caveat as the insert race below)
+            // between our read above and our write here. Unlike the insert race, last-write-wins
+            // would silently drop whichever writer's RecordSeen additions lost, with no exception
+            // and no log line — exactly what Payee.Version exists to prevent. One retry: clear the
+            // poisoned tracked state, re-read the now-current rows, and reapply this tick's own
+            // payee data on top of them. A second conflict inside the same tick is left to
+            // propagate — IngestionWorker's own per-tick try/catch logs it and the next scheduled
+            // tick (or the next POST /rules) picks the payee back up, the same self-heals posture
+            // as every other race in this method.
+            logger.LogInformation("A payee row changed underneath this tick's own upsert (concurrent POST /rules); re-reading and retrying once.");
+            db.ChangeTracker.Clear();
+            await ApplyAsync();
             await db.SaveChangesAsync(ct);
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException

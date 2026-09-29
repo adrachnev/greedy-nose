@@ -70,6 +70,22 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
             payee.HasKey(p => new { p.UserId, p.Id });
             payee.Property(p => p.Id).ValueGeneratedNever();
 
+            // Native Postgres arrays for the three distinct-value sets (Payee.cs) — Npgsql already
+            // infers text[] for a List<string> by convention; spelled out explicitly so the column
+            // type is a decision on record, not an inference nobody chose. HasDefaultValueSql is
+            // not decoration: the dev database already has 46 Payees rows (checked directly, not
+            // assumed), and Postgres refuses to ADD COLUMN ... NOT NULL on a non-empty table unless
+            // a default backfills the existing rows.
+            payee.Property(p => p.IbansSeen).HasColumnType("text[]").HasDefaultValueSql("'{}'");
+            payee.Property(p => p.NormalizedNamesSeen).HasColumnType("text[]").HasDefaultValueSql("'{}'");
+            payee.Property(p => p.CreditorAgentsSeen).HasColumnType("text[]").HasDefaultValueSql("'{}'");
+
+            // The optimistic-concurrency token — see Payee.Version's own doc comment for why this
+            // is app-managed (bumped below, in SaveChanges/SaveChangesAsync) rather than Postgres'
+            // xmin. A plain default, not ValueGeneratedOnAddOrUpdate: the app always sends the
+            // current value explicitly, same as every other property here.
+            payee.Property(p => p.Version).IsConcurrencyToken().HasDefaultValue(0);
+
             payee.HasOne<User>().WithMany().HasForeignKey(p => p.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -145,5 +161,38 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
             // push going out unnoticed.
             entry.HasIndex(n => new { n.UserId, n.DebitId }).IsUnique();
         });
+    }
+
+    /// <inheritdoc cref="SaveChangesAsync(bool, CancellationToken)"/>
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        BumpPayeeVersions();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    /// <summary>
+    /// Bumps every about-to-be-written <see cref="Payee"/>'s <see cref="Payee.Version"/> just
+    /// before the write — see that property's own doc comment for why this lives here, centrally,
+    /// rather than at each call site: every current and future write to <c>Payees</c> through this
+    /// context is protected without relying on the call site remembering to do it itself.
+    /// </summary>
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        BumpPayeeVersions();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void BumpPayeeVersions()
+    {
+        foreach (var entry in ChangeTracker.Entries<Payee>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                // Wraps at int.MaxValue rather than throwing — EF Core's concurrency check only
+                // ever compares this value for exact equality, never orders by it, so a wraparound
+                // is harmless; it would take billions of writes to a single payee to ever reach it.
+                entry.Entity.Version = unchecked(entry.Entity.Version + 1);
+            }
+        }
     }
 }

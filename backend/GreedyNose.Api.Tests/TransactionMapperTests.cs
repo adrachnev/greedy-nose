@@ -503,6 +503,24 @@ public class TransactionMapperTests
     }
 
     /// <summary>
+    /// <c>PayeeDto.CreditorAgent</c> exists purely so <c>IngestionRunner</c> can hand it to
+    /// <c>Payee.RecordSeen</c>'s distinct set (Data/Payee.cs's <c>CreditorAgentsSeen</c> —
+    /// ARCHITECTURE.md's "Payee identity"). <see cref="PayeeSerializesTheFieldNamesTheClientDeclares"/>
+    /// above is what actually proves it never reaches the wire ([JsonIgnore]); this pins the value
+    /// itself: the same <c>transaction.CreditorAgent?.BicFi</c> <c>ResolvePayeeKey</c> reads,
+    /// empty rather than null when the bank sent none — the same convention <see cref="PayeeDto.Iban"/> uses.
+    /// </summary>
+    [Fact]
+    public void BuildPayeeCarriesTheCreditorAgentForInternalUseOnly()
+    {
+        var withAgent = Assert.Single(MapOf(Booked("2026-08-18", "AGENT SHOP", agent: "COBADEFFXXX")).Payload.Payees);
+        Assert.Equal("COBADEFFXXX", withAgent.CreditorAgent);
+
+        var withoutAgent = Assert.Single(MapOf(Booked("2026-08-18", "NO AGENT SHOP")).Payload.Payees);
+        Assert.Equal("", withoutAgent.CreditorAgent);
+    }
+
+    /// <summary>
     /// The envelope: <c>payees</c>, <c>debits</c>, and <c>skipped</c> — the count of charges the
     /// mapper refused. The count travels because an empty list otherwise has two indistinguishable
     /// causes ("you have no charges" / "we could not read your charges"), and R19 exists precisely

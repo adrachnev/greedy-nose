@@ -1,5 +1,6 @@
 using GreedyNose.Api.Data;
 using GreedyNose.Api.Domain;
+using GreedyNose.Api.EnableBanking;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -71,49 +72,75 @@ public static class RulesEndpoint
         var logger = loggers.CreateLogger(Category);
         var now = clock.GetUtcNow();
 
-        var payee = await db.Payees.SingleOrDefaultAsync(
-            p => p.UserId == SeedData.UserId && p.Id == validated.PayeeId, ct);
+        // Same normalization TransactionMapper.ResolvePayeeKey itself uses — R3a's normalized-name
+        // tier. Not validated.Name directly: this endpoint has no raw creditor name to offer the
+        // way IngestionRunner now does (PayeeDto.CreditorName) — validated.Name is whatever the app
+        // already had, which may itself be TransactionMapper.BuildPayee's own display fallback (the
+        // raw IBAN, or "Unknown payee") echoed straight back from a prior /debits response. Skipped
+        // rather than normalized when it looks like exactly that — see IsFallbackDisplayName's own
+        // doc comment (2026-09-28 review, Finding 1). This endpoint also has no creditor agent to
+        // offer (the app never sends one), so RecordSeen's third argument is always null below.
+        var normalizedName = TransactionMapper.IsFallbackDisplayName(validated.Name, validated.Iban)
+            ? ""
+            : TransactionMapper.NormalizeName(validated.Name);
 
-        if (payee is null)
+        // Local, not inline: a concurrent-update conflict on Payee (see the DbUpdateConcurrencyException
+        // catch below) re-reads and reapplies both writes from scratch. The Rule side has nothing to
+        // race on — Payee is the only entity here with a concurrency token — but its values come
+        // straight from the request, not from a stale read, so reapplying it on retry is trivially
+        // safe and keeps both writes in the one SaveChangesAsync call the ordering comment below
+        // still relies on.
+        async Task ApplyAsync()
         {
-            db.Payees.Add(new Payee
+            var payee = await db.Payees.SingleOrDefaultAsync(
+                p => p.UserId == SeedData.UserId && p.Id == validated.PayeeId, ct);
+
+            if (payee is null)
             {
-                UserId = SeedData.UserId,
-                Id = validated.PayeeId,
-                Name = validated.Name,
-                Initials = validated.Initials,
-                Iban = validated.Iban,
-                FirstSeenAt = now,
-            });
-        }
-        else
-        {
-            // Refreshed on every save; FirstSeenAt is never touched here — see the class summary.
-            payee.Name = validated.Name;
-            payee.Initials = validated.Initials;
-            payee.Iban = validated.Iban;
-        }
-
-        var rule = await db.Rules.SingleOrDefaultAsync(
-            r => r.UserId == SeedData.UserId && r.PayeeId == validated.PayeeId, ct);
-
-        if (rule is null)
-        {
-            db.Rules.Add(new Rule
+                payee = new Payee
+                {
+                    UserId = SeedData.UserId,
+                    Id = validated.PayeeId,
+                    Name = validated.Name,
+                    Initials = validated.Initials,
+                    Iban = validated.Iban,
+                    FirstSeenAt = now,
+                };
+                payee.RecordSeen(validated.Iban, normalizedName, creditorAgent: null);
+                db.Payees.Add(payee);
+            }
+            else
             {
-                UserId = SeedData.UserId,
-                PayeeId = validated.PayeeId,
-                Classification = validated.Classification,
-                AmountEUR = validated.AmountEUR,
-                UpdatedAt = now,
-            });
+                // Refreshed on every save; FirstSeenAt is never touched here — see the class summary.
+                payee.Name = validated.Name;
+                payee.Initials = validated.Initials;
+                payee.Iban = validated.Iban;
+                payee.RecordSeen(validated.Iban, normalizedName, creditorAgent: null);
+            }
+
+            var rule = await db.Rules.SingleOrDefaultAsync(
+                r => r.UserId == SeedData.UserId && r.PayeeId == validated.PayeeId, ct);
+
+            if (rule is null)
+            {
+                db.Rules.Add(new Rule
+                {
+                    UserId = SeedData.UserId,
+                    PayeeId = validated.PayeeId,
+                    Classification = validated.Classification,
+                    AmountEUR = validated.AmountEUR,
+                    UpdatedAt = now,
+                });
+            }
+            else
+            {
+                rule.Classification = validated.Classification;
+                rule.AmountEUR = validated.AmountEUR;
+                rule.UpdatedAt = now;
+            }
         }
-        else
-        {
-            rule.Classification = validated.Classification;
-            rule.AmountEUR = validated.AmountEUR;
-            rule.UpdatedAt = now;
-        }
+
+        await ApplyAsync();
 
         try
         {
@@ -123,6 +150,22 @@ public static class RulesEndpoint
             // Rule insert from it alone when both are new. Checked against a real Postgres repro
             // (composite PK/FK, no navigation property, client-generated keys): a single batched
             // SaveChangesAsync does order correctly, so two round trips bought nothing here.
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // This payee's row moved under us — a concurrent ingestion tick updated it (see
+            // Payee.Version) between our read above and our write here. Last-write-wins would
+            // silently drop whichever writer's RecordSeen additions lost, with no exception and no
+            // log line; one retry (re-read, reapply, save again) is what Payee.Version exists to
+            // make possible. A second conflict inside the same request is left to propagate as a
+            // 500 rather than looping — rare enough (two concurrent writers touching the same payee
+            // twice within one request) that surfacing it beats an unbounded retry.
+            logger.LogInformation(
+                "Payee {PayeeId} changed underneath this request (concurrent ingestion tick); re-reading and retrying once.",
+                PayeeIdPreview(validated.PayeeId));
+            db.ChangeTracker.Clear();
+            await ApplyAsync();
             await db.SaveChangesAsync(ct);
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException

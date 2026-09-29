@@ -15,6 +15,13 @@ public static class TransactionMapper
     /// <summary>Where a debit lands when the bank names no creditor at all — see <see cref="ResolvePayeeKey"/>.</summary>
     private const string UnknownPayeeKey = "unknown";
 
+    /// <summary>
+    /// <see cref="BuildPayee"/>'s own display-name fallback for that same case — never a creditor
+    /// name the bank actually sent. Named so <see cref="IsFallbackDisplayName"/> and
+    /// <c>BuildPayee</c> share one literal instead of two copies of the same string.
+    /// </summary>
+    internal const string UnknownPayeeDisplayName = "Unknown payee";
+
     public static MappedDebits Map(EbTransactionsResponse response, string accountKey)
     {
         var payees = new Dictionary<string, PayeeDto>(StringComparer.Ordinal);
@@ -137,8 +144,13 @@ public static class TransactionMapper
             : "name:" + name + "@" + agent.ToUpperInvariant();
     }
 
-    /// <summary>R3a's normalization, exactly as specified: uppercase, strip digits, collapse whitespace.</summary>
-    private static string NormalizeName(string? name)
+    /// <summary>
+    /// R3a's normalization, exactly as specified: uppercase, strip digits, collapse whitespace.
+    /// Internal, not private: <c>IngestionRunner</c> and <c>RulesEndpoint</c> both call this
+    /// directly so <c>Payee.NormalizedNamesSeen</c> is folded from the exact same normalization
+    /// <see cref="ResolvePayeeKey"/> itself uses — one rule, not a second copy of it.
+    /// </summary>
+    internal static string NormalizeName(string? name)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -191,15 +203,39 @@ public static class TransactionMapper
         var name = transaction.Creditor?.Name?.Trim();
         if (string.IsNullOrWhiteSpace(name))
         {
-            name = key == UnknownPayeeKey ? "Unknown payee" : transaction.CreditorAccount?.Iban ?? "Unknown payee";
+            name = key == UnknownPayeeKey ? UnknownPayeeDisplayName : transaction.CreditorAccount?.Iban ?? UnknownPayeeDisplayName;
         }
 
         return new PayeeDto(
             Id: key,
             Name: name,
             Initials: ToInitials(name),
-            Iban: transaction.CreditorAccount?.Iban ?? "");
+            Iban: transaction.CreditorAccount?.Iban ?? "",
+            CreditorAgent: transaction.CreditorAgent?.BicFi ?? "",
+            // transaction.Creditor?.Name itself, deliberately not the display-fallback name above —
+            // see PayeeDto.CreditorName's own doc comment (2026-09-28 review, Finding 1).
+            CreditorName: transaction.Creditor?.Name ?? "");
     }
+
+    /// <summary>
+    /// Whether <paramref name="name"/> is one of <see cref="BuildPayee"/>'s own display-name
+    /// fallbacks — the raw creditor IBAN, or <see cref="UnknownPayeeDisplayName"/> — rather than a
+    /// name the bank actually sent.
+    ///
+    /// <c>RulesEndpoint</c> needs this because it has no raw creditor name to fall back on the way
+    /// <c>IngestionRunner</c> now does (<see cref="PayeeDto.CreditorName"/>): <c>POST /rules</c>'
+    /// request body only ever carries <c>Name</c> as the app already knows it, which is whatever a
+    /// prior <c>/debits</c> response put in <see cref="PayeeDto.Name"/> — fallback and all, since
+    /// the wire contract never exposed the distinction. This reconstructs the same detection from
+    /// the outside, using the one extra field <c>RulesRequest</c> already carries for other reasons
+    /// — <see cref="PayeeDto.Iban"/>/<c>ValidatedRule.Iban</c> — rather than guessing from the name
+    /// alone. Not perfect (a creditor genuinely named "Unknown payee" would be misread the same
+    /// way a genuinely-IBAN-named creditor would), but both are exactly the failure mode R3a's own
+    /// tier-1/tier-2 split already accepts as a best-effort key, not a design flaw introduced here.
+    /// </summary>
+    internal static bool IsFallbackDisplayName(string name, string iban) =>
+        string.Equals(name, UnknownPayeeDisplayName, StringComparison.Ordinal)
+        || (!string.IsNullOrWhiteSpace(iban) && string.Equals(name, iban, StringComparison.Ordinal));
 
     private static string ToInitials(string name)
     {

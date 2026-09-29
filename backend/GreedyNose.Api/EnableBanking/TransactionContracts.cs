@@ -54,7 +54,23 @@ public sealed record PayeeDto(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("initials")] string Initials,
-    [property: JsonPropertyName("iban")] string Iban);
+    [property: JsonPropertyName("iban")] string Iban,
+    // Internal only, [JsonIgnore]'d on purpose: app/src/domain/model.ts has no such field and R3a's
+    // matching key never reads it (ResolvePayeeKey resolves the agent from the transaction directly
+    // and is unchanged). Exists so BuildPayee can hand IngestionRunner's Payee.RecordSeen the same
+    // "distinct set" raw material ARCHITECTURE.md's "Payee identity" section asks for — see
+    // Data/Payee.cs's CreditorAgentsSeen. Breaking this out keeps the wire contract to /debits
+    // exactly what it was before this change.
+    [property: JsonIgnore] string CreditorAgent,
+    // Internal only, [JsonIgnore]'d, same reasoning as CreditorAgent above — and the same fix as
+    // that field's own addition, one review round later: the bank's raw creditor name
+    // (transaction.Creditor?.Name, exactly what ResolvePayeeKey's tier-2 key itself normalizes),
+    // never Name above, which BuildPayee may have substituted with a display fallback (the raw
+    // IBAN, or "Unknown payee") when the bank sent no creditor name at all. Feeding that fallback
+    // into NormalizedNamesSeen instead of this field mangled an IBAN into a meaningless
+    // digit-stripped fragment — see IngestionRunner.UpsertPayeesAsync's own call site (2026-09-28
+    // review, Finding 1).
+    [property: JsonIgnore] string CreditorName);
 
 public sealed record DebitDto(
     [property: JsonPropertyName("id")] string Id,
