@@ -16,10 +16,11 @@
     <!--
       R20 — the one deliberate exception to "one notification per bad debit".
 
-      After reconnecting, every charge from the gap carries a transaction ID
-      the app has never seen, so R10b would fire one push per bad charge, all
-      arriving in the same second. A single summary replaces that burst; normal
-      per-charge alerts resume immediately afterwards.
+      After reconnecting, every charge from the gap carries an identifier
+      (entry_reference) the app has never seen, so R10b would fire one push
+      per bad charge, all arriving in the same second. A single summary
+      replaces that burst; normal per-charge alerts resume immediately
+      afterwards.
     -->
     <div class="notif-banner">
       <div class="notif-icon">G</div>
@@ -31,6 +32,6 @@
     </div>
   </div>
 
-  <p style="position:absolute;bottom:16px;left:0;right:0;text-align:center;font-size:11px;color:#8e8e93;">Sent once, right after the first sync following a reconnect. Tapping it opens the debit list.</p>
+  <p style="position:absolute;bottom:16px;left:0;right:0;text-align:center;font-size:11px;color:#8e8e93;">Sent once, right after the app resyncs following a reconnect. Tapping it opens the debit list.</p>
 </body>
 </html>
