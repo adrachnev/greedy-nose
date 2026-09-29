@@ -96,8 +96,8 @@ use the isolated worker model** (verified 2026-09-28): Azure retires support for
 
 ## Data model — tables and relationships
 
-Read from the real schema (`backend/GreedyNose.Api/Data/`, EF Core, 3 migrations as of
-2026-09-22) — this reflects what's built, not just designed. Column-by-column detail stays in the
+Read from the real schema (`backend/GreedyNose.Api/Data/`, EF Core, 6 migrations as of
+2026-09-29) — this reflects what's built, not just designed. Column-by-column detail stays in the
 entity classes, which are the single source of truth; this is only the shape a caller can't safely
 guess from one table's own columns.
 
@@ -108,6 +108,7 @@ erDiagram
     USERS ||--o{ RULES : ""
     USERS ||--o{ DEBITS : ""
     USERS ||--o{ NOTIFICATION_LOG : ""
+    USERS ||--o{ ACCOUNT_SYNC_STATES : ""
     PAYEES ||--o| RULES : "at most one, R4"
     PAYEES ||--o{ DEBITS : ""
     DEBITS ||--o| NOTIFICATION_LOG : "at most one, R11"
@@ -119,7 +120,8 @@ erDiagram
 | DeviceTokens | `Id`, unique on `Token` | One FCM token per install; re-registering the same token upserts, never duplicates |
 | Payees | `(UserId, Id)` | `Id` is R3a's resolved payee key, stored verbatim — not a generated id |
 | Rules | `(UserId, PayeeId)` | The key **is** the composite FK to Payees — a payee has at most one rule by construction (R4), not by application logic |
-| Debits | `(UserId, Id)`, indexed on `(UserId, AccountKey)` | `Id` is R10b's resolved debit identity (`entry_reference` or the composite fallback), stored verbatim. The `AccountKey` index backs the mode-detection check in "Ingestion modes" — currently the row-existence check `TODO.md` tracks as a gap against the `FirstSyncCompletedAt` target |
+| Debits | `(UserId, Id)`, indexed on `(UserId, AccountKey)` | `Id` is R10b's resolved debit identity (`entry_reference` or the composite fallback), stored verbatim. The `AccountKey` index backs the per-account dedup read in the ingestion tick — it is no longer the mode signal (see AccountSyncStates) |
+| AccountSyncStates | `(UserId, AccountKey)` | One row per connected account, and it **exists only once that account's first sync has finished**: `FirstSyncCompletedAt` is its one field. A missing row means "first sync still to do" — the Ingestion Worker's mode signal (see "Ingestion modes"). `AccountKey` is the IBAN, never the per-consent `uid`, so a reconnect finds its own row. Keyed per account, not per user, so several accounts per user need no re-keying later (v1 is one account per bank, R22a) |
 | NotificationLog | `Id`, unique on `(UserId, DebitId)` | R11's guard **at the database level**: the unique index makes a second send fail on insert, not just on an application-level check-then-insert that could race |
 
 **Every table but Users is keyed with a composite `(UserId, …)`**, not a bare id — deliberate, so a
@@ -337,7 +339,7 @@ notify.
 
 | Mode | When | What happens to the debits |
 |---|---|---|
-| **First run** | `FirstSyncCompletedAt` on the consent/account record is still unset | Full available history, stored as **already seen**, routed to the onboarding classify screen (`01c-classify-payees.html`) — never to the Rule Engine. No notifications (R10b). The flag is set only once the pull fully finishes |
+| **First run** | The account has no `AccountSyncStates` row yet, i.e. `FirstSyncCompletedAt` is unset | Full available history, stored as **already seen**, routed to the onboarding classify screen (`01c-classify-payees.html`) — never to the Rule Engine. No notifications (R10b). All debits and the `AccountSyncStates` row are committed in **one** write, so the flag exists only if the whole pull was stored |
 | **Steady state** | `FirstSyncCompletedAt` is set, and the poll follows the normal cadence | Incremental diff → Rule Engine → one push per bad **booked** debit (R10, R11, R10c) |
 | **Reconnect** | `FirstSyncCompletedAt` is set, but this poll follows a gap wider than the normal cadence — expired consent re-authorized, or reconnect after Disconnect | Everything from the gap goes through the Rule Engine, but the dispatcher sends **one summary push**: "12 new charges while you were disconnected, 3 bad" (R20), suppressed entirely when the gap has zero bad debits (R20a) |
 
@@ -353,12 +355,20 @@ a result to its caller. The Ingestion Worker is what calls the Dispatcher, immed
 per-debit in Steady state, batched into one call in Reconnect.
 
 **The mode signal is `FirstSyncCompletedAt`, never "do any debit rows exist."** R25 requires that an
-interrupted-and-resumed first sync is still the same first sync, however many ticks it takes — a
-row-existence check gets this wrong the moment the first sync has saved *some* debits and is then
-interrupted: the next tick would see rows already present and misread itself as a reconnect gap,
-firing a spurious summary push over the user's own history. A dedicated flag, set only once the
-full historical pull finishes, is independent of how many rows happen to be committed at any point
-mid-pull, so a partial first sync can never be misclassified as anything else.
+interrupted first sync is still the same first sync — a row-existence check gets this wrong the
+moment the first sync has saved *some* debits and is then interrupted: the next tick would see rows
+already present and misread itself as a reconnect gap, firing a spurious summary push over the
+user's own history. It also gets a legitimately empty account wrong: no debits means no rows, so
+the account would stay "first sync" forever and swallow its first real charge silently.
+
+**The first sync is all-or-nothing, with no resume logic.** The worker fetches the complete history
+and then writes every new debit plus the `AccountSyncStates` row in a single database write. If
+anything fails before that write (the fetch, a timeout, a shutdown), nothing is stored and the next
+tick simply starts the first sync again — safe to repeat because debits already stored are skipped
+by R10b's dedup key. The cost is one more fetch against the bank's daily quota after an interrupted
+first sync, which is a rare, single-user event. Consequence for the fetcher: it must return the
+**complete** history or throw, never a silent partial page (relevant once pagination is turned on,
+see `TODO.md`).
 
 Reconnect is the mode that did not exist before 2026-08-17 (`A8`). Without it, a user coming back
 after two weeks gets one push per bad charge in a single burst — R20 exists precisely to prevent
@@ -370,19 +380,16 @@ component would duplicate the Enable Banking fetch logic, and suppressing the bu
 dispatcher (rather than making the mode explicit) would hide a rule the spec states outright. The
 cost is a worker with three modes to keep straight, which is worth an explicit test each.
 
-**"First run" above is the target design; step 6 built a narrower stand-in (2026-09-23, step 7
-findings).** The table's "routed to the onboarding classify screen" is not yet true: the bootstrap
-case built and device-verified in the notification tracer bullet inserts everything as already
-seen with no rule evaluation and no notification — matching R10b's consequence — but is silent,
-with no UI, because the classify-screen itself is out of scope for that bullet
-(`NOTIFICATION-TRACER-BULLET.md`, "Deliberately out of scope"). Verified on the device across a
-backend restart mid-session: the bootstrap/steady-state check reads real state (do any `Debits`
-rows exist for this account?), not a flag, so a *full restart before any row was written* did not
-re-fire and did not double-insert. **This is not the same guarantee as `FirstSyncCompletedAt`
-above, and the difference is a real gap, not just a documentation one:** a row-existence check
-still misclassifies a first sync interrupted *after* partially writing rows as steady
-state/reconnect on its next tick, which the device verification above never exercised. Tracked as
-a known implementation gap against the (now fully specified) target design — see `TODO.md`.
+**"First run" above is built, except for its onboarding routing (updated 2026-09-29).** The mode
+signal is now the real `AccountSyncStates` row described above; the earlier stand-in — "do any
+`Debits` rows exist?" — is gone, and with it the gap it had against an interrupted first sync
+(a migration backfills a row for every account that already had debits, so an existing database
+does not re-run its first sync). What is still not true is the table's "routed to the onboarding
+classify screen": the first sync inserts everything as already seen with no rule evaluation and no
+notification — matching R10b's consequence — but is silent, with no UI, because the classify
+screen is not built yet (R26, `NOTIFICATION-TRACER-BULLET.md`, "Deliberately out of scope"). The
+Reconnect mode is not built either: a fresh session for an already-synced account currently runs
+as Steady state.
 
 **Two concurrency risks a design like this table implies are already closed in the real
 implementation**, not just designed around (`IngestionRunner.cs`, step 6 review findings): a tick

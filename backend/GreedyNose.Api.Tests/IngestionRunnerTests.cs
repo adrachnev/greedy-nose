@@ -30,7 +30,7 @@ public class IngestionRunnerTests
         public override DateTimeOffset GetUtcNow() => now;
     }
 
-    private static ConsentStore NewConsentStore(TimeProvider clock, bool connected = true)
+    private static ConsentStore NewConsentStore(TimeProvider clock, bool connected = true, ConnectedAccount? account = null)
     {
         // ConsentStore has no test seam — it is a concrete sealed class with real file I/O in
         // Save(). A temp path keeps tests off the repo's real consent.local.json. Complete() sets
@@ -43,7 +43,7 @@ public class IngestionRunnerTests
 
         if (connected)
         {
-            store.Complete("session-1", [Account], clock.GetUtcNow(), null);
+            store.Complete("session-1", [account ?? Account], clock.GetUtcNow(), null);
         }
 
         return store;
@@ -101,19 +101,36 @@ public class IngestionRunnerTests
             TransactionDate: null,
             RemittanceInformation: []);
 
-    private static MappedDebits Mapped(params EbTransaction[] transactions) =>
-        TransactionMapper.Map(new EbTransactionsResponse(transactions, null), AccountKey);
+    private static MappedDebits Mapped(params EbTransaction[] transactions) => MappedFor(AccountKey, transactions);
+
+    private static MappedDebits MappedFor(string accountKey, params EbTransaction[] transactions) =>
+        TransactionMapper.Map(new EbTransactionsResponse(transactions, null), accountKey);
 
     private static IngestionRunner NewRunner(
         IDbContextFactory<GreedyNoseDbContext> dbFactory, ConsentStore consent, IDebitsFetcher fetcher,
         INotificationSender sender, TimeProvider clock) =>
         new(dbFactory, consent, fetcher, sender, clock, NullLogger<IngestionRunner>.Instance);
 
+    // Without a registered token the runner returns before sending, so a "sends nothing" assertion
+    // would hold even if the tick wrongly ran as steady state. Every silence test needs one.
+    private static async Task SeedTokenAsync(string dbName, TimeProvider clock)
+    {
+        await using var db = NewInMemoryContext(dbName);
+        db.DeviceTokens.Add(new DeviceToken { Id = Guid.NewGuid(), UserId = SeedData.UserId, Token = "tok-1", UpdatedAt = clock.GetUtcNow() });
+        await db.SaveChangesAsync();
+    }
+
     private static async Task SeedBootstrappedAsync(string dbName, TimeProvider clock)
     {
-        // A single pre-existing Debit row for this account is enough to flip the bootstrap check —
-        // its own payee/content is irrelevant, only its AccountKey matters.
+        // The AccountSyncState row is what flips the first-sync check (R25); the single Debit row
+        // is only there so the account looks lived-in — its own payee/content is irrelevant.
         await using var db = NewInMemoryContext(dbName);
+        db.AccountSyncStates.Add(new AccountSyncState
+        {
+            UserId = SeedData.UserId,
+            AccountKey = AccountKey,
+            FirstSyncCompletedAt = clock.GetUtcNow().AddDays(-30),
+        });
         db.Debits.Add(new Debit
         {
             UserId = SeedData.UserId,
@@ -214,6 +231,167 @@ public class IngestionRunnerTests
         await using var verify = NewInMemoryContext(dbName);
         var payee = await verify.Payees.SingleAsync(p => p.Id == "name:PRE EXISTING");
         Assert.Equal(new DateTimeOffset(2026, 1, 10, 0, 0, 0, TimeSpan.Zero), payee.FirstSeenAt);
+    }
+
+    // --- First sync (R25): the marker row, not row existence, is the mode signal ------------------
+
+    [Fact]
+    public async Task A_first_sync_inserts_every_debit_sends_nothing_and_writes_the_marker()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        await SeedTokenAsync(dbName, clock);
+        var fetcher = new FakeDebitsFetcher(Mapped(Booked("2026-09-20", "SHOP A"), Booked("2026-09-21", "SHOP B")));
+        var sender = new FakeSender(_ => throw new InvalidOperationException("must not be called"));
+
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), fetcher, sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Empty(sender.Sent);
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Equal(2, await verify.Debits.CountAsync());
+        var state = await verify.AccountSyncStates.SingleAsync();
+        Assert.Equal(AccountKey, state.AccountKey);
+        Assert.Equal(clock.GetUtcNow(), state.FirstSyncCompletedAt);
+    }
+
+    [Fact]
+    public async Task An_empty_account_still_completes_its_first_sync_so_the_next_charge_notifies()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        var consent = NewConsentStore(clock);
+        var factory = new InMemoryDbContextFactory(dbName);
+
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped()), new FakeSender(_ => SendResult.Accepted("x")), clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        await using (var verify = NewInMemoryContext(dbName))
+        {
+            Assert.Empty(await verify.Debits.ToListAsync());
+            Assert.Single(await verify.AccountSyncStates.ToListAsync());
+        }
+
+        await using (var db = NewInMemoryContext(dbName))
+        {
+            db.DeviceTokens.Add(new DeviceToken { Id = Guid.NewGuid(), UserId = SeedData.UserId, Token = "tok-1", UpdatedAt = clock.GetUtcNow() });
+            await db.SaveChangesAsync();
+        }
+
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped(Booked("2026-09-22", "FIRST REAL CHARGE"))), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Single(sender.Sent);
+    }
+
+    /// <summary>
+    /// The gap this marker closes: debits left behind by a first sync that never finished, with no
+    /// marker. The old "any Debits rows?" check read that as steady state and pushed the rest of
+    /// the history.
+    /// </summary>
+    [Fact]
+    public async Task Leftover_debits_from_an_interrupted_first_sync_are_completed_silently()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        var mapped = Mapped(Booked("2026-09-20", "OLD SHOP", entryReference: "REF-1"), Booked("2026-09-21", "OLD SHOP", entryReference: "REF-2"));
+
+        await using (var db = NewInMemoryContext(dbName))
+        {
+            db.Debits.Add(new Debit
+            {
+                UserId = SeedData.UserId,
+                Id = mapped.Payload.Debits[0].Id,
+                PayeeId = "name:OLD SHOP",
+                AmountEUR = 10m,
+                Timestamp = clock.GetUtcNow().AddDays(-2),
+                HasTime = false,
+                PaymentType = "Card payment",
+                AccountKey = AccountKey,
+                FirstSeenAt = clock.GetUtcNow().AddDays(-2),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await SeedTokenAsync(dbName, clock);
+        var sender = new FakeSender(_ => throw new InvalidOperationException("must not be called"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(mapped), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Empty(sender.Sent);
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Equal(2, await verify.Debits.CountAsync());
+        Assert.True(await verify.Debits.AnyAsync(d => d.Id == mapped.Payload.Debits[1].Id));
+        Assert.Single(await verify.AccountSyncStates.ToListAsync());
+        Assert.Empty(await verify.NotificationLog.ToListAsync());
+    }
+
+    private sealed class ThrowingDebitsFetcher : IDebitsFetcher
+    {
+        public Task<MappedDebits> FetchAsync(ConnectedAccount account, CancellationToken ct) =>
+            throw new HttpRequestException("bank unreachable");
+    }
+
+    [Fact]
+    public async Task A_fetch_failure_writes_nothing_and_the_next_tick_is_still_a_first_sync()
+    {
+        // Proves only the fetch-fails-before-any-write path; the atomicity of the first sync's single
+        // SaveChangesAsync is not exercised here (no clean save-failure seam over the in-memory provider).
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        var consent = NewConsentStore(clock);
+        var factory = new InMemoryDbContextFactory(dbName);
+        await SeedTokenAsync(dbName, clock);
+        var sender = new FakeSender(_ => throw new InvalidOperationException("must not be called"));
+
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+            NewRunner(factory, consent, new ThrowingDebitsFetcher(), sender, clock).RunOnceAsync(CancellationToken.None));
+
+        await using (var verify = NewInMemoryContext(dbName))
+        {
+            Assert.Empty(await verify.Debits.ToListAsync());
+            Assert.Empty(await verify.AccountSyncStates.ToListAsync());
+        }
+
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped(Booked("2026-09-21", "SHOP A"))), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Empty(sender.Sent);
+        await using var verify2 = NewInMemoryContext(dbName);
+        Assert.Single(await verify2.Debits.ToListAsync());
+        Assert.Single(await verify2.AccountSyncStates.ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_second_account_of_the_same_user_gets_its_own_first_sync_while_the_first_stays_steady()
+    {
+        const string secondKey = "DE99888877776666555544";
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        var factory = new InMemoryDbContextFactory(dbName);
+        await SeedBootstrappedAsync(dbName, clock);
+        await SeedTokenAsync(dbName, clock);
+
+        var secondAccount = new ConnectedAccount("uid-2", secondKey, "Second Account", "EUR", null);
+        var sender = new FakeSender(_ => throw new InvalidOperationException("must not be called"));
+        await NewRunner(
+                factory,
+                NewConsentStore(clock, account: secondAccount),
+                new FakeDebitsFetcher(MappedFor(secondKey, Booked("2026-09-21", "OTHER BANK SHOP"))),
+                sender,
+                clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        // The second account ran silently as a first sync (no push) although the user already has a
+        // completed one for the first account.
+        Assert.Empty(sender.Sent);
+        await using var verify = NewInMemoryContext(dbName);
+        var keys = await verify.AccountSyncStates.Select(s => s.AccountKey).ToListAsync();
+        Assert.Equal(2, keys.Count);
+        Assert.Contains(AccountKey, keys);
+        Assert.Contains(secondKey, keys);
+        Assert.Equal(1, await verify.Debits.CountAsync(d => d.AccountKey == secondKey));
     }
 
     // --- Steady state ----------------------------------------------------------------------------

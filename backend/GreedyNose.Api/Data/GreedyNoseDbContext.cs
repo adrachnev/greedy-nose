@@ -37,6 +37,8 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
 
     public DbSet<NotificationLogEntry> NotificationLog => Set<NotificationLogEntry>();
 
+    public DbSet<AccountSyncState> AccountSyncStates => Set<AccountSyncState>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<User>(user =>
@@ -141,6 +143,19 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
             // Step 6's bootstrap check ("any debits for this account yet?") is a WHERE on exactly
             // these two columns, run once per poll tick — flagged as needed back in step 1's review.
             debit.HasIndex(d => new { d.UserId, d.AccountKey });
+        });
+
+        modelBuilder.Entity<AccountSyncState>(state =>
+        {
+            state.ToTable("AccountSyncStates");
+
+            // One row per account per user; (UserId, AccountKey) rather than UserId alone so a
+            // second account per user later needs no re-keying.
+            state.HasKey(s => new { s.UserId, s.AccountKey });
+
+            // Cascade: deleting the account (R18) empties this table, so a fresh connection runs as
+            // a first sync again (R20b) instead of inheriting a stale "done".
+            state.HasOne<User>().WithMany().HasForeignKey(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<NotificationLogEntry>(entry =>

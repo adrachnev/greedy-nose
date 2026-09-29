@@ -10,9 +10,9 @@ using Npgsql;
 namespace GreedyNose.Api.Ingestion;
 
 /// <summary>
-/// One poll tick, steady-state only (NOTIFICATION-TRACER-BULLET.md, step 6). Fetches, upserts
-/// payees, inserts new debits, classifies and — for a bad debit not already logged — sends and
-/// logs. Depends only on interfaces and the DB context factory, so it is what
+/// One poll tick (NOTIFICATION-TRACER-BULLET.md, step 6): the silent first sync (R25) or steady
+/// state. Fetches, upserts payees, inserts new debits, classifies and — for a bad debit not
+/// already logged — sends and logs. Depends only on interfaces and the DB context factory, so it is what
 /// <c>IngestionRunnerTests</c> exercises with an in-memory database, a fake <see cref="IDebitsFetcher"/>
 /// and a fake <see cref="INotificationSender"/> — no network, no real Postgres.
 ///
@@ -47,11 +47,14 @@ public sealed class IngestionRunner(
 
         await UpsertPayeesAsync(db, mapped.Payload.Payees, mapped.Payload.Debits, now, ct);
 
-        // Bootstrap: this connected account has never had a Debits row before. Insert everything
-        // as seen, no classification, no notification — R10b's "first sync" consequence, without
-        // the onboarding classify screen (deliberately out of scope, doc's "Deliberately out of
-        // scope" list). Decided once, from state before this tick's own inserts.
-        var isBootstrap = !await db.Debits.AnyAsync(d => d.UserId == SeedData.UserId && d.AccountKey == account.Key, ct);
+        // First sync (R25): this connected account has no AccountSyncState row, i.e. no earlier tick
+        // ever finished its first sync. Insert everything as seen, no classification, no
+        // notification — R10b's "first sync" consequence, without the onboarding classify screen
+        // (deliberately out of scope, doc's "Deliberately out of scope" list). Decided once, from
+        // state before this tick's own writes. Not "are there any Debits rows": a first sync cut
+        // short after some rows, or an empty account, would then read as steady state.
+        var isBootstrap = !await db.AccountSyncStates.AnyAsync(
+            s => s.UserId == SeedData.UserId && s.AccountKey == account.Key, ct);
 
         var existingIds = await db.Debits
             .Where(d => d.UserId == SeedData.UserId && d.AccountKey == account.Key)
@@ -71,11 +74,8 @@ public sealed class IngestionRunner(
 
             if (isBootstrap)
             {
-                // No classification, no I/O, nothing to interleave with the insert — a single
-                // SaveChangesAsync is already atomic, so a cutoff here simply leaves this (and
-                // every later) debit un-inserted, retried next tick.
+                // Only tracked here, committed below together with the AccountSyncState row.
                 db.Debits.Add(debit);
-                await db.SaveChangesAsync(ct);
             }
             else
             {
@@ -92,6 +92,19 @@ public sealed class IngestionRunner(
 
         if (isBootstrap)
         {
+            // All-or-nothing: every debit of this first sync and the "done" marker land in one
+            // SaveChangesAsync (atomic on its own, no explicit transaction), so a tick cut short
+            // leaves no marker and the next tick simply runs the whole first sync again — idempotent,
+            // because rows already stored are skipped via `seen`. An empty fetch still writes the
+            // marker, so the first real charge on an empty account is not swallowed as "history".
+            db.AccountSyncStates.Add(new AccountSyncState
+            {
+                UserId = SeedData.UserId,
+                AccountKey = account.Key,
+                FirstSyncCompletedAt = now,
+            });
+            await db.SaveChangesAsync(ct);
+
             logger.LogInformation(
                 "Bootstrap tick for account {AccountKey}: inserted {Count} debits as seen, no notifications.",
                 AccountKeyPreview(account.Key), insertedCount);

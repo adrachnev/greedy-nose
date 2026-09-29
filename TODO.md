@@ -312,7 +312,12 @@ The four below are left open on purpose.
       same account, which this tracer bullet does not deploy (`IngestionWorker` runs one tick at a
       time, one process). Self-heals: FCM keeps answering `TokenNoLongerValid` for that token on
       every later bad debit until it is actually pruned. Third review pass, 2026-09-22.
-- [ ] **The bootstrap/steady-state check is "do any `Debits` rows exist?", not a dedicated flag —
+- [x] **Fixed 2026-09-29** — the mode now comes from an `AccountSyncStates` row (migration
+      `AddAccountSyncState`, backfilled for existing accounts), and the first sync writes all its
+      debits plus that row in one `SaveChangesAsync`, all-or-nothing. Assumption to keep in mind
+      once pagination is turned on: the fetcher must return the complete history or throw.
+      Original finding follows.
+      **The bootstrap/steady-state check is "do any `Debits` rows exist?", not a dedicated flag —
       a first sync interrupted *after* it has written some rows would misclassify its remaining
       history as a reconnect gap on the next tick, firing a spurious summary push (breaks R25).**
       Device-verified only for a restart *before* any row was written (`NOTIFICATION-TRACER-BULLET.md`

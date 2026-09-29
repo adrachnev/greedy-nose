@@ -31,7 +31,7 @@ public class DataModelTests
         var crossTable = foreignKeys.Except(toUser).ToList();
 
         // Guards against this passing vacuously: rule → payee, debit → payee, log → debit.
-        Assert.Equal(5, toUser.Count);
+        Assert.Equal(6, toUser.Count);
         Assert.Equal(3, crossTable.Count);
 
         // Deleting the user must still empty everything (account deletion is a real delete)…
@@ -40,6 +40,21 @@ public class DataModelTests
         // …but deleting a parent alone must be refused. A cascade here would let deleting a debit
         // erase its NotificationLog row — R11's guard — and a delete-and-reinsert payee upsert wipe the rule.
         Assert.All(crossTable, fk => Assert.Equal(DeleteBehavior.NoAction, fk.DeleteBehavior));
+    }
+
+    [Fact]
+    public void The_account_sync_state_is_keyed_per_account_and_cascades_from_the_user()
+    {
+        using var context = NewContext();
+        var entity = DesignTimeModel(context).FindEntityType(typeof(AccountSyncState))!;
+
+        // Account deletion (R18) must empty this table so a new connection is a first sync again (R20b).
+        var fk = Assert.Single(entity.GetForeignKeys());
+        Assert.Equal(typeof(User), fk.PrincipalEntityType.ClrType);
+        Assert.Equal(DeleteBehavior.Cascade, fk.DeleteBehavior);
+        Assert.Equal(
+            [nameof(AccountSyncState.UserId), nameof(AccountSyncState.AccountKey)],
+            entity.FindPrimaryKey()!.Properties.Select(p => p.Name));
     }
 
     [Fact]

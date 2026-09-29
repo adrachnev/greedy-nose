@@ -4,6 +4,25 @@
 
 ## Status
 
+**2026-09-29 — first-sync mode signal built (backend), uncommitted at time of writing.** The
+ingestion worker's "first sync or steady state" decision no longer asks "do any `Debits` rows
+exist?" — it reads a new `AccountSyncStates` row, keyed `(UserId, AccountKey)` (IBAN, never `uid`),
+which exists only once that account's first sync has finished. The first sync is **all-or-nothing**:
+every new debit plus the row are committed in one `SaveChangesAsync`, no resume logic — an
+interrupted first sync restarts from scratch and the R10b dedup key makes that safe. This closes
+the `TODO.md` gap against R25 *and* a second one found while designing it: an empty account never
+wrote a row, so it would have stayed "first sync" forever and swallowed its first real charge.
+Migration `AddAccountSyncState` backfills a row for every account that already has debits.
+Built by `coder-backend`, two `coder-reviewer` passes (no MUST FIX; two test-strength findings
+fixed — the silence tests now register a device token so they can really fail). 242 tests pass.
+Verified live: migration applied to the dev DB, backfill gave one row; deleting that row and
+starting the backend re-ran a silent bootstrap — 0 pushes, no duplicate debits, row restored.
+**Decided but not built (each needs its own plan):** Reconnect mode (derive it by comparing the
+current consent session with a `LastSessionId` on that row, no flag; send the summary first, then
+commit); runtime consent-death detection (`ExpiresAt` per tick plus a bank "session invalid"
+error); the client-facing "first sync done" contract and the onboarding classify screen (R26).
+v1 is one account per bank, but the schema deliberately doesn't block several accounts later.
+
 **2026-09-28 — `ARCHITECTURE.md` validated against `REQUIREMENTS.md` via `bmad-architecture`, all
 findings fixed and committed (`b844bb7`).** Two independent reviewers found ARCHITECTURE.md had
 drifted from the 2026-09-24 REQUIREMENTS.md revision (stale R12a wording, R20a/R20b uncited, R25's
