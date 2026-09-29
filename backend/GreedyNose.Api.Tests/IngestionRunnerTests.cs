@@ -30,7 +30,7 @@ public class IngestionRunnerTests
         public override DateTimeOffset GetUtcNow() => now;
     }
 
-    private static ConsentStore NewConsentStore(TimeProvider clock, bool connected = true, ConnectedAccount? account = null)
+    private static ConsentStore NewConsentStore(TimeProvider clock, bool connected = true, ConnectedAccount? account = null, string sessionId = "session-1")
     {
         // ConsentStore has no test seam — it is a concrete sealed class with real file I/O in
         // Save(). A temp path keeps tests off the repo's real consent.local.json. Complete() sets
@@ -43,7 +43,7 @@ public class IngestionRunnerTests
 
         if (connected)
         {
-            store.Complete("session-1", [account ?? Account], clock.GetUtcNow(), null);
+            store.Complete(sessionId, [account ?? Account], clock.GetUtcNow(), null);
         }
 
         return store;
@@ -120,7 +120,7 @@ public class IngestionRunnerTests
         await db.SaveChangesAsync();
     }
 
-    private static async Task SeedBootstrappedAsync(string dbName, TimeProvider clock)
+    private static async Task SeedBootstrappedAsync(string dbName, TimeProvider clock, string? sessionHash = null)
     {
         // The AccountSyncState row is what flips the first-sync check (R25); the single Debit row
         // is only there so the account looks lived-in — its own payee/content is irrelevant.
@@ -130,6 +130,7 @@ public class IngestionRunnerTests
             UserId = SeedData.UserId,
             AccountKey = AccountKey,
             FirstSyncCompletedAt = clock.GetUtcNow().AddDays(-30),
+            LastSessionIdHash = sessionHash,
         });
         db.Debits.Add(new Debit
         {
@@ -636,6 +637,175 @@ public class IngestionRunnerTests
         await using var verify2 = NewInMemoryContext(dbName);
         Assert.True(await verify2.Debits.AnyAsync(d => d.PayeeId == "name:CUTOFF SHOP"));
         Assert.Equal(1, await verify2.NotificationLog.CountAsync(n => n.UserId == SeedData.UserId));
+    }
+
+    // --- Reconnect detection: the session fingerprint ---------------------------------------------
+
+    [Fact]
+    public async Task A_first_sync_stores_the_session_hash_not_the_session_id()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedTokenAsync(dbName, clock);
+        var sender = new FakeSender(_ => throw new InvalidOperationException("must not be called"));
+
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(Mapped(Booked("2026-09-21", "SHOP A"))), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        await using var verify = NewInMemoryContext(dbName);
+        var stored = (await verify.AccountSyncStates.SingleAsync()).LastSessionIdHash;
+        Assert.NotNull(stored);
+        Assert.Equal(64, stored.Length);
+        Assert.Matches("^[0-9a-f]{64}$", stored);
+        Assert.NotEqual("session-1", stored);
+        Assert.Equal(SessionFingerprint.Of("session-1"), stored);
+    }
+
+    [Fact]
+    public async Task A_row_with_a_null_hash_adopts_the_session_silently_and_still_pushes_a_new_bad_debit()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedBootstrappedAsync(dbName, clock); // null hash: stored before the column existed
+        await SeedTokenAsync(dbName, clock);
+
+        var mapped = Mapped(
+            Booked("2026-09-20", "OLD SHOP", entryReference: "REF-OLD"),
+            Booked("2026-09-22", "NEW SHOP", entryReference: "REF-NEW"));
+        await using (var db = NewInMemoryContext(dbName))
+        {
+            // The already-stored history: must not push again just because the hash is being adopted.
+            db.Debits.Add(new Debit
+            {
+                UserId = SeedData.UserId, Id = mapped.Payload.Debits[0].Id, PayeeId = "name:OLD SHOP", AmountEUR = 10m,
+                Timestamp = clock.GetUtcNow().AddDays(-2), HasTime = false, PaymentType = "Card payment",
+                AccountKey = AccountKey, FirstSeenAt = clock.GetUtcNow().AddDays(-2),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(mapped), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        var push = Assert.Single(sender.Sent);
+        Assert.StartsWith("NEW SHOP", push.Title);
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Equal(SessionFingerprint.Of("session-1"), (await verify.AccountSyncStates.SingleAsync()).LastSessionIdHash);
+    }
+
+    [Fact]
+    public async Task The_same_session_leaves_the_hash_unchanged()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        var hash = SessionFingerprint.Of("session-1");
+        await SeedBootstrappedAsync(dbName, clock, hash);
+        await SeedTokenAsync(dbName, clock);
+
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(Mapped(Booked("2026-09-22", "NEW SHOP"))), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Single(sender.Sent);
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Equal(hash, (await verify.AccountSyncStates.SingleAsync()).LastSessionIdHash);
+    }
+
+    /// <summary>
+    /// A reconnect is currently processed exactly like steady state: the new bad debit pushes normally.
+    /// When the R20 summary notification is built this changes (one summary instead of per-debit
+    /// pushes) and this test's push assertion has to change with it — that is intended.
+    /// </summary>
+    [Fact]
+    public async Task A_different_session_updates_the_hash_after_the_tick_and_processes_like_steady_state()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedBootstrappedAsync(dbName, clock, SessionFingerprint.Of("old-session"));
+        await SeedTokenAsync(dbName, clock);
+
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), new FakeDebitsFetcher(Mapped(Booked("2026-09-22", "NEW SHOP"))), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Single(sender.Sent);
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Equal(SessionFingerprint.Of("session-1"), (await verify.AccountSyncStates.SingleAsync()).LastSessionIdHash);
+        Assert.True(await verify.Debits.AnyAsync(d => d.PayeeId == "name:NEW SHOP"));
+    }
+
+    [Fact]
+    public async Task A_different_session_and_an_aborted_tick_keep_the_old_hash_so_the_next_tick_detects_it_again()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        var oldHash = SessionFingerprint.Of("old-session");
+        await SeedBootstrappedAsync(dbName, clock, oldHash);
+        await SeedTokenAsync(dbName, clock);
+
+        var fetcher = new FakeDebitsFetcher(Mapped(Booked("2026-09-22", "CUTOFF SHOP")));
+        using var cts = new CancellationTokenSource();
+        var sender = new FakeSender(_ =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+        var consent = NewConsentStore(clock);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            NewRunner(new InMemoryDbContextFactory(dbName), consent, fetcher, sender, clock).RunOnceAsync(cts.Token));
+
+        await using (var verify = NewInMemoryContext(dbName))
+        {
+            Assert.Equal(oldHash, (await verify.AccountSyncStates.SingleAsync()).LastSessionIdHash);
+        }
+
+        // The next tick still sees the reconnect, completes, and only then moves the hash.
+        await NewRunner(new InMemoryDbContextFactory(dbName), consent, fetcher, new FakeSender(_ => SendResult.Accepted("msg-1")), clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        await using var verify2 = NewInMemoryContext(dbName);
+        Assert.Equal(SessionFingerprint.Of("session-1"), (await verify2.AccountSyncStates.SingleAsync()).LastSessionIdHash);
+    }
+
+    [Fact]
+    public async Task Two_accounts_each_keep_their_own_session_hash()
+    {
+        const string secondKey = "DE99888877776666555544";
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        var factory = new InMemoryDbContextFactory(dbName);
+        await SeedTokenAsync(dbName, clock);
+        var sender = new FakeSender(_ => throw new InvalidOperationException("must not be called"));
+        var secondAccount = new ConnectedAccount("uid-2", secondKey, "Second Account", "EUR", null);
+
+        await NewRunner(factory, NewConsentStore(clock), new FakeDebitsFetcher(Mapped(Booked("2026-09-21", "SHOP A"))), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+        await NewRunner(
+                factory,
+                NewConsentStore(clock, account: secondAccount, sessionId: "session-2"),
+                new FakeDebitsFetcher(MappedFor(secondKey, Booked("2026-09-21", "SHOP B"))),
+                sender,
+                clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        await using var verify = NewInMemoryContext(dbName);
+        var hashes = await verify.AccountSyncStates.ToDictionaryAsync(s => s.AccountKey, s => s.LastSessionIdHash);
+        Assert.Equal(SessionFingerprint.Of("session-1"), hashes[AccountKey]);
+        Assert.Equal(SessionFingerprint.Of("session-2"), hashes[secondKey]);
+    }
+
+    [Fact]
+    public void DetermineMode_maps_stored_state_to_a_mode()
+    {
+        var hash = SessionFingerprint.Of("session-1");
+        AccountSyncState Row(string? stored) => new() { UserId = SeedData.UserId, AccountKey = AccountKey, LastSessionIdHash = stored };
+
+        Assert.Equal(IngestionRunner.IngestionMode.FirstSync, IngestionRunner.DetermineMode(null, hash));
+        Assert.Equal(IngestionRunner.IngestionMode.Steady, IngestionRunner.DetermineMode(Row(null), hash));
+        Assert.Equal(IngestionRunner.IngestionMode.Steady, IngestionRunner.DetermineMode(Row(hash), hash));
+        Assert.Equal(IngestionRunner.IngestionMode.Reconnect, IngestionRunner.DetermineMode(Row(SessionFingerprint.Of("other")), hash));
     }
 
     // --- Multi-token outcomes ----------------------------------------------------------------------

@@ -326,6 +326,23 @@ The four below are left open on purpose.
       consent/account record instead — set only once the full historical pull finishes, independent
       of row count. Fix before a first sync can realistically span more than one tick (e.g. once
       pagination is turned on, see above).
+- [ ] **Reconnect is detected but not acted on (R20/R20a not built)** (`IngestionRunner.cs`,
+      `DetermineMode`, 2026-09-29). A changed session hash is logged and the tick still runs as
+      Steady state, so a re-authorization after a gap fires one push per bad debit, all at once —
+      the burst R20 exists to prevent. Design constraints found while building the detection, for
+      whoever builds the summary:
+      - Per-debit commit (`ClassifyInsertAndNotifyAsync`) makes an interrupted Reconnect tick
+        under-count N/M on retry, because debits already committed are no longer "new". The
+        Reconnect tick has to collect all results, send the summary **first**, then commit debits
+        and the new hash in **one** `SaveChangesAsync` (the first-sync shape).
+      - Even so, the end-of-tick hash write is a separate save today; if it fails after the debits
+        committed, the next tick sees the reconnect again but finds no new debits. The summary must
+        not depend on "debits inserted this tick".
+      - The dispatcher needs a second request shape (N/M counts, R20 wording, mock `05b`).
+- [ ] **No test pins "one debit committed, a later one fails → old session hash stays"**
+      (`IngestionRunnerTests`). The abort test fails on the first and only debit, so the
+      partial-commit case is safe in the code but unpinned. Reviewer suggestion 2026-09-29: one
+      good debit commits, a second bad debit throws in the sender, assert the old hash.
 
 ## From notification tracer-bullet step 4 — rules sync, 2026-09-22
 

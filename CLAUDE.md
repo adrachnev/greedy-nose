@@ -4,6 +4,26 @@
 
 ## Status
 
+**2026-09-29 (later) — reconnect *detection* built (backend), uncommitted at time of writing;
+the R20 summary push is not.** `AccountSyncStates` gained a nullable `LastSessionIdHash` (SHA-256 of
+the consent session id — a hash on purpose: the session id reads the real account, so it never goes
+into the database, and neither it nor the hash is logged). `IngestionRunner` now derives an explicit
+mode per tick — FirstSync / Steady / Reconnect — from the row and the hash (`DetermineMode`);
+`null` hash = written before the field existed, adopted silently; a different hash = the user
+authorized again. A detected Reconnect is logged and processed **exactly like Steady state** for now
+(one push per bad debit, no summary). The hash is written only after a tick fully completes, so an
+interrupted tick is detected again. `ConsentStore.Current` gives the runner a lock-protected
+(session, account) snapshot so a `/callback` mid-tick cannot mix an old account with a new session.
+Checked first: every `POST /sessions` returns a new `session_id` (Enable Banking docs, UUID4), and
+two sandbox re-authorizations of one IBAN gave a new session id *and* a new `uid` — while polling
+reuses one session, so the comparison sees exactly a re-authorization. Built by `coder-backend`, one
+`coder-reviewer` pass, no MUST/SHOULD FIX; 256 tests pass. Verified live on the dev DB: migration
+applied, silent adoption matched an independently computed hash, forcing a wrong hash logged
+"Reconnect detected", hash healed, 0 pushes, no duplicate debits. The design constraints for the
+summary push (collect → send first → commit debits and hash in one save; the summary must not
+depend on "debits inserted this tick") are in `TODO.md`. Still to do, each its own plan: R20/R20a
+summary push, runtime consent-death detection, client contract + onboarding classify (R26).
+
 **2026-09-29 — first-sync mode signal built (backend), uncommitted at time of writing.** The
 ingestion worker's "first sync or steady state" decision no longer asks "do any `Debits` rows
 exist?" — it reads a new `AccountSyncStates` row, keyed `(UserId, AccountKey)` (IBAN, never `uid`),

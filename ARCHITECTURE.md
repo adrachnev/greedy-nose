@@ -121,7 +121,7 @@ erDiagram
 | Payees | `(UserId, Id)` | `Id` is R3a's resolved payee key, stored verbatim — not a generated id |
 | Rules | `(UserId, PayeeId)` | The key **is** the composite FK to Payees — a payee has at most one rule by construction (R4), not by application logic |
 | Debits | `(UserId, Id)`, indexed on `(UserId, AccountKey)` | `Id` is R10b's resolved debit identity (`entry_reference` or the composite fallback), stored verbatim. The `AccountKey` index backs the per-account dedup read in the ingestion tick — it is no longer the mode signal (see AccountSyncStates) |
-| AccountSyncStates | `(UserId, AccountKey)` | One row per connected account, and it **exists only once that account's first sync has finished**: `FirstSyncCompletedAt` is its one field. A missing row means "first sync still to do" — the Ingestion Worker's mode signal (see "Ingestion modes"). `AccountKey` is the IBAN, never the per-consent `uid`, so a reconnect finds its own row. Keyed per account, not per user, so several accounts per user need no re-keying later (v1 is one account per bank, R22a) |
+| AccountSyncStates | `(UserId, AccountKey)` | One row per connected account, and it **exists only once that account's first sync has finished**: `FirstSyncCompletedAt` says when. A missing row means "first sync still to do" — the Ingestion Worker's mode signal (see "Ingestion modes"). The second field, nullable `LastSessionIdHash`, is the SHA-256 of the consent session the last completed tick used — a **hash, never the session id**, which reads the real account and so is not something to add to the database; equality is all the reconnect check needs. `null` means "written before this field existed" and is adopted silently. `AccountKey` is the IBAN, never the per-consent `uid`, so a reconnect finds its own row. Keyed per account, not per user, so several accounts per user need no re-keying later (v1 is one account per bank, R22a) |
 | NotificationLog | `Id`, unique on `(UserId, DebitId)` | R11's guard **at the database level**: the unique index makes a second send fail on insert, not just on an application-level check-then-insert that could race |
 
 **Every table but Users is keyed with a composite `(UserId, …)`**, not a bare id — deliberate, so a
@@ -341,7 +341,7 @@ notify.
 |---|---|---|
 | **First run** | The account has no `AccountSyncStates` row yet, i.e. `FirstSyncCompletedAt` is unset | Full available history, stored as **already seen**, routed to the onboarding classify screen (`01c-classify-payees.html`) — never to the Rule Engine. No notifications (R10b). All debits and the `AccountSyncStates` row are committed in **one** write, so the flag exists only if the whole pull was stored |
 | **Steady state** | `FirstSyncCompletedAt` is set, and the poll follows the normal cadence | Incremental diff → Rule Engine → one push per bad **booked** debit (R10, R11, R10c) |
-| **Reconnect** | `FirstSyncCompletedAt` is set, but this poll follows a gap wider than the normal cadence — expired consent re-authorized, or reconnect after Disconnect | Everything from the gap goes through the Rule Engine, but the dispatcher sends **one summary push**: "12 new charges while you were disconnected, 3 bad" (R20), suppressed entirely when the gap has zero bad debits (R20a) |
+| **Reconnect** | The account's row exists, but the current consent session's hash differs from `LastSessionIdHash` — the user authorized again (expired consent re-authorized, or reconnect after Disconnect). A gap while the *same* session stays valid (e.g. a backend outage) is deliberately not this mode: it is Steady state, one late push per bad debit. Verified 2026-09-29: every authorization returns a new `session_id` (UUID4, Enable Banking docs), and two sandbox re-authorizations of one IBAN gave a new session id **and** a new account `uid`. The hash is updated only after a tick fully completes, so a tick that dies midway is detected as a Reconnect again | Everything from the gap goes through the Rule Engine, but the dispatcher sends **one summary push**: "12 new charges while you were disconnected, 3 bad" (R20), suppressed entirely when the gap has zero bad debits (R20a) |
 
 **The Reconnect summary is owned by the Ingestion Worker, not the Rule Engine or the Dispatcher.**
 The Rule Engine stays mode-agnostic — it classifies every debit in the gap exactly as it would in
@@ -388,8 +388,9 @@ does not re-run its first sync). What is still not true is the table's "routed t
 classify screen": the first sync inserts everything as already seen with no rule evaluation and no
 notification — matching R10b's consequence — but is silent, with no UI, because the classify
 screen is not built yet (R26, `NOTIFICATION-TRACER-BULLET.md`, "Deliberately out of scope"). The
-Reconnect mode is not built either: a fresh session for an already-synced account currently runs
-as Steady state.
+Reconnect mode is **detected but not acted on** (2026-09-29): the runner derives it from the session
+hash and logs it, but still processes the tick exactly like Steady state — one push per bad debit,
+no summary — because R20's summary needs a different tick shape (see `TODO.md`).
 
 **Two concurrency risks a design like this table implies are already closed in the real
 implementation**, not just designed around (`IngestionRunner.cs`, step 6 review findings): a tick

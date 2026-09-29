@@ -19,4 +19,13 @@ public sealed class AccountSyncState
 
     /// <summary>When the tick that finished the first sync committed — written in the same save as that tick's debits.</summary>
     public DateTimeOffset FirstSyncCompletedAt { get; set; }
+
+    /// <summary>
+    /// SHA-256 hex of the consent session id this account was last synced under — the hash, never the
+    /// id (a credential; see <c>SessionFingerprint</c>). A different value on a later tick means the
+    /// user logged in at the bank again: a reconnect. Null = the row predates this column, session
+    /// unknown, adopted silently on the next tick (no backfill is possible: the id lives only in the
+    /// consent file).
+    /// </summary>
+    public string? LastSessionIdHash { get; set; }
 }

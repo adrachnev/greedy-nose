@@ -29,12 +29,15 @@ public sealed class IngestionRunner(
 {
     public async Task RunOnceAsync(CancellationToken ct)
     {
-        var account = consent.PrimaryAccount;
-        if (account is null)
+        // One consistent read for the whole tick: account and session from the same instant, so a
+        // /callback landing mid-tick cannot pair one login's account with another's session.
+        if (consent.Current is not var (sessionId, account))
         {
             logger.LogInformation("No active consent; skipping this tick.");
             return;
         }
+
+        var sessionHash = SessionFingerprint.Of(sessionId);
 
         var mapped = await fetcher.FetchAsync(account, ct);
         foreach (var skipped in mapped.Skipped)
@@ -53,8 +56,23 @@ public sealed class IngestionRunner(
         // (deliberately out of scope, doc's "Deliberately out of scope" list). Decided once, from
         // state before this tick's own writes. Not "are there any Debits rows": a first sync cut
         // short after some rows, or an empty account, would then read as steady state.
-        var isBootstrap = !await db.AccountSyncStates.AnyAsync(
+        //
+        // Loaded here, after UpsertPayeesAsync, on purpose: that method (and the NotificationLog race
+        // catch below) calls ChangeTracker.Clear(), which detaches anything loaded earlier. Untracked
+        // for the same reason — this instance is only read; the end-of-tick hash update re-loads.
+        var syncState = await db.AccountSyncStates.AsNoTracking().SingleOrDefaultAsync(
             s => s.UserId == SeedData.UserId && s.AccountKey == account.Key, ct);
+        var mode = DetermineMode(syncState, sessionHash);
+        var isBootstrap = mode == IngestionMode.FirstSync;
+
+        if (mode == IngestionMode.Reconnect)
+        {
+            // Detected and remembered only; the one summary push (R20) is a later step, so this tick
+            // is processed exactly like steady state. Never log the session id or its hash.
+            logger.LogInformation(
+                "Reconnect detected for account {AccountKey} (the summary notification is not built yet); processing as steady state.",
+                AccountKeyPreview(account.Key));
+        }
 
         var existingIds = await db.Debits
             .Where(d => d.UserId == SeedData.UserId && d.AccountKey == account.Key)
@@ -102,6 +120,7 @@ public sealed class IngestionRunner(
                 UserId = SeedData.UserId,
                 AccountKey = account.Key,
                 FirstSyncCompletedAt = now,
+                LastSessionIdHash = sessionHash,
             });
             await db.SaveChangesAsync(ct);
 
@@ -109,7 +128,39 @@ public sealed class IngestionRunner(
                 "Bootstrap tick for account {AccountKey}: inserted {Count} debits as seen, no notifications.",
                 AccountKeyPreview(account.Key), insertedCount);
         }
+        else if (syncState?.LastSessionIdHash != sessionHash)
+        {
+            // Null hash (silent adoption) or a reconnect. Only now, after the whole loop: a tick that
+            // dies midway leaves the old hash, so the next tick detects the reconnect again. A freshly
+            // loaded row, not `syncState` — that one is untracked, and the tracker may have been
+            // cleared since. No ExecuteUpdateAsync: the tests' in-memory provider does not support it.
+            var row = await db.AccountSyncStates.SingleAsync(
+                s => s.UserId == SeedData.UserId && s.AccountKey == account.Key, ct);
+            row.LastSessionIdHash = sessionHash;
+            await db.SaveChangesAsync(ct);
+        }
     }
+
+    /// <summary>What this tick is, derived from stored state — never a flag someone has to set and clear.</summary>
+    public enum IngestionMode
+    {
+        FirstSync,
+        Steady,
+        Reconnect,
+    }
+
+    /// <summary>
+    /// No row: first sync (R25). Row with a null hash: written before the column existed, session
+    /// unknown — steady state, adopted silently. Same hash: steady. Different hash: the user logged
+    /// in at the bank again, a reconnect.
+    /// </summary>
+    public static IngestionMode DetermineMode(AccountSyncState? state, string sessionHash) => state switch
+    {
+        null => IngestionMode.FirstSync,
+        { LastSessionIdHash: null } => IngestionMode.Steady,
+        { LastSessionIdHash: var stored } when stored == sessionHash => IngestionMode.Steady,
+        _ => IngestionMode.Reconnect,
+    };
 
     /// <summary>
     /// Upsert-then-overwrite: a payee row may already exist from <c>POST /rules</c> (step 4, a

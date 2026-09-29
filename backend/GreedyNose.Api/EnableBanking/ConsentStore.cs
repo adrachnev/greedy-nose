@@ -89,6 +89,25 @@ public sealed class ConsentStore(string filePath, TimeSpan consentValidity, ILog
     /// <summary>The account the rest of the bullet reads. v1 connects one account at a time (R22a).</summary>
     public ConnectedAccount? PrimaryAccount => Accounts.Count > 0 ? Accounts[0] : null;
 
+    /// <summary>
+    /// The session and the account it belongs to, read together under <c>_gate</c> — the same lock
+    /// <see cref="Complete"/> writes both under. The plain getters above read without it, so a
+    /// <c>/callback</c> landing mid-read could pair the old account with the new session. Null when
+    /// not connected.
+    /// </summary>
+    public (string SessionId, ConnectedAccount PrimaryAccount)? Current
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return SessionId is { } sessionId && PrimaryAccount is { } account
+                    ? (sessionId, account)
+                    : null;
+            }
+        }
+    }
+
     public string StartAuthorization(string aspspName)
     {
         lock (_gate)
