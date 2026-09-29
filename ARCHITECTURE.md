@@ -94,6 +94,52 @@ use the isolated worker model** (verified 2026-09-28): Azure retires support for
 .NET model on 10 November 2026, and the isolated model is the only one that supports .NET 9/10/11
 — since the backend already targets net10.0, in-process was never actually an option here anyway.
 
+## Data model — tables and relationships
+
+Read from the real schema (`backend/GreedyNose.Api/Data/`, EF Core, 3 migrations as of
+2026-09-22) — this reflects what's built, not just designed. Column-by-column detail stays in the
+entity classes, which are the single source of truth; this is only the shape a caller can't safely
+guess from one table's own columns.
+
+```mermaid
+erDiagram
+    USERS ||--o{ DEVICE_TOKENS : ""
+    USERS ||--o{ PAYEES : ""
+    USERS ||--o{ RULES : ""
+    USERS ||--o{ DEBITS : ""
+    USERS ||--o{ NOTIFICATION_LOG : ""
+    PAYEES ||--o| RULES : "at most one, R4"
+    PAYEES ||--o{ DEBITS : ""
+    DEBITS ||--o| NOTIFICATION_LOG : "at most one, R11"
+```
+
+| Table | Key | What it holds |
+|---|---|---|
+| Users | `Id` | Anchor for every other table's `UserId`. No auth fields yet — one seeded row, single-user (R22a) |
+| DeviceTokens | `Id`, unique on `Token` | One FCM token per install; re-registering the same token upserts, never duplicates |
+| Payees | `(UserId, Id)` | `Id` is R3a's resolved payee key, stored verbatim — not a generated id |
+| Rules | `(UserId, PayeeId)` | The key **is** the composite FK to Payees — a payee has at most one rule by construction (R4), not by application logic |
+| Debits | `(UserId, Id)`, indexed on `(UserId, AccountKey)` | `Id` is R10b's resolved debit identity (`entry_reference` or the composite fallback), stored verbatim. The `AccountKey` index backs the mode-detection check in "Ingestion modes" — currently the row-existence check `TODO.md` tracks as a gap against the `FirstSyncCompletedAt` target |
+| NotificationLog | `Id`, unique on `(UserId, DebitId)` | R11's guard **at the database level**: the unique index makes a second send fail on insert, not just on an application-level check-then-insert that could race |
+
+**Every table but Users is keyed with a composite `(UserId, …)`**, not a bare id — deliberate, so a
+real multi-user login later needs no re-keying (R22a's single-user scope is a v1 limit, not a
+schema one).
+
+**Delete behavior is asymmetric on purpose, and it's the one thing worth knowing before touching
+any of this:** `UserId → Users` cascades (account deletion, R18, must empty every table). Every
+other cross-table FK — Rule→Payee, Debit→Payee, NotificationLog→Debit — is `NoAction`, refusing a
+lone parent delete instead of silently taking its children along. Two consequences that aren't
+obvious from either table alone: a payee "upsert" written as delete-and-reinsert would silently
+wipe the user's rule if this weren't enforced, and deleting a debit could otherwise erase its
+`NotificationLog` row — which would make the next fetch see that debit as new and re-notify,
+breaking R11.
+
+**`BankConsents` doesn't exist as a table**, despite the component table above listing it under
+Data Store. The real consent store is a gitignored file (`ConsentStore`, `consent.local.json`),
+not Postgres — a deliberate, narrower stand-in scoped to this tracer bullet (single user, no need
+for a real table yet), the same kind of built-vs-designed gap as the Ingestion Worker row above.
+
 ## Client
 
 **React Native.** Considered .NET MAUI and Flutter.
