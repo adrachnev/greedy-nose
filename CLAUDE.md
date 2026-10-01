@@ -4,6 +4,20 @@
 
 ## Status
 
+**2026-10-01 — tracer docs renamed (committed); go-live requirements walked through and decided,
+epics list is next.** `TRACER-01-BANK-DATA.md` / `TRACER-02-NOTIFICATIONS.md` /
+`TRACER-03-GO-LIVE.md` are in place. `bmad-create-epics-and-stories` ran step 1:
+`_bmad-output/planning-artifacts/epics.md` holds the requirements inventory (FR1–10, NFR1–10,
+AR1–18, UX-DR1–3), scoped to Tracer 3 only, every item confirmed one by one. Decisions are in
+`TRACER-03-GO-LIVE.md` and the three docs: **all three banks in this tracer**; Azure Functions
+(isolated, timer trigger) + Neon; one static API key with a single "current user" seam;
+Key Vault; `azurewebsites.net` redirect, consents finished in the browser; first sync = last 12
+months (R25 changed); **a failed push is now retried** (R11a — reverses the 2026-09-29 "accept the
+loss": push-owed mark, 24 h, email after 3 failed attempts); sideloaded APK; first story = make
+`dotnet test` runnable. Next: confirm step 1 with **C**, then step 2 (epics list), step 3
+(stories), step 4 (validation). Documents stay English; the console language follows the user. Not yet done: the Reconnect summary push (R20) is not covered by R11a — decide in the
+story.
+
 **2026-09-29 (end of day) — go-live direction decided, nothing built yet.** The owner wants a first
 **productive version for himself only**, on Azure, as soon as possible. Family members' accounts are
 not an option on the free tier: Enable Banking's Terms for Restricted Production allow only accounts

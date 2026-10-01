@@ -94,6 +94,15 @@ use the isolated worker model** (verified 2026-09-28): Azure retires support for
 .NET model on 10 November 2026, and the isolated model is the only one that supports .NET 9/10/11
 — since the backend already targets net10.0, in-process was never actually an option here anyway.
 
+**Decided 2026-10-01 (go-live, `TRACER-03-GO-LIVE.md`): hosting is Azure Functions, isolated
+worker model.** The `BackgroundService` loop becomes a **timer trigger** (every 6 h) that runs one
+existing `IngestionRunner` tick — the tick logic is unchanged; the API runs in the same Functions
+host (ASP.NET Core integration) or separately, settled in the story. Free at this scale
+(Consumption: 1M executions / 400k GB-s per month; Flex: 250k / 100k). Accepted cost: a cold start
+of roughly 2–7 s on the first request after a quiet period; pushes are not affected, they come
+from the worker. Rejected: App Service F1 (60 CPU min/day, no Always On); Container Apps with one
+always-on replica (~$1–3/month) stays as the fallback.
+
 ## Data model — tables and relationships
 
 Read from the real schema (`backend/GreedyNose.Api/Data/`, EF Core, 6 migrations as of
@@ -141,6 +150,14 @@ breaking R11.
 Data Store. The real consent store is a gitignored file (`ConsentStore`, `consent.local.json`),
 not Postgres — a deliberate, narrower stand-in scoped to this tracer bullet (single user, no need
 for a real table yet), the same kind of built-vs-designed gap as the Ingestion Worker row above.
+
+**Decided 2026-10-01: for the go-live it becomes a real table.** `BankConsents` holds one row per
+`(UserId, bank)` — today's file has no user at all. The session id (it reads the real account) is
+stored only **encrypted** with a Key Vault key; elsewhere in the database only its hash, and it
+is never logged. A repeat `/connect` for a bank that already has a consent **replaces** it (the
+reconnect path), and the old session is closed with `DELETE /sessions/{id}`. The Ingestion Worker
+takes the user from each consent row, not from the hardcoded `SeedData.UserId` (about 25 uses
+today); new code adds no new `SeedData.UserId`.
 
 ## Client
 
@@ -319,6 +336,16 @@ Given the product owner's call that same-day notification is an acceptable user 
   action, not a repeating background signal — so it's a different case from the disproven exemption
   above, not a re-opening of it. Without this exception, onboarding's "mark your payees" screen
   (R26) would have to wait up to 6h after consent for any data to review.
+
+**The first sync pulls a fixed window of the last 12 months** (R25, settled 2026-10-01): the
+fetcher sends `date_from`, follows `continuation_key` to the last page, and returns the complete
+window or throws — never a silent partial page. The fallback debit id's ordinal must not collide
+across pages. To verify while building: whether each page counts against the bank's ~4 fetches
+per day.
+
+**The debit list is served from the database** (settled 2026-10-01): `GET /debits` reads stored
+debits and payees and never calls the bank; the worker is the only thing that fetches. The list
+is therefore up to one poll interval (6 h) old, and pull-to-refresh only re-reads it.
 
 **Swipe-to-refresh needs no new backend contract.** With app-open fetch gone, a manual refresh in
 the debit list is just the app **re-calling the existing debit-history read from the API** — the
@@ -519,6 +546,34 @@ chance:
 
 This keeps operator alerts limited to the failures that actually need a human to intervene.
 
+**A failed push is retried, not lost (R11a, decided 2026-10-01).** The per-debit path used to
+commit a bad debit as seen even when its push failed (`Rejected`/`Transient`/no token), so the
+alert was never retried. Now the debit is saved and listed, and carries an explicit **push owed**
+mark set when the first send fails — never inferred from "bad and no `NotificationLog` row", since
+a debit that turns bad through a rule edit has no row either and must not notify (R10a). Every
+tick the worker, besides fetching, retries every marked debit from stored data (never calling the
+bank), for at most 24 h, then gives up and logs it; failed attempts are logged per debit. After
+three failed attempts in a row, one email goes to the owner (once per incident) through Brevo —
+a small slice of the Health Monitor pulled into the go-live; the daily staleness job itself stays
+unbuilt. Only `TokenNoLongerValid` prunes a token; `Rejected` means a human must look.
+
+## Authentication and secrets (go-live, decided 2026-10-01)
+
+**A single static API key**, sent by the app with every request, over HTTPS only — no endpoint is
+reachable without it, and `/raw`, `/aspsps` and the open `/connect` are removed. Owner-only for
+now. All endpoints get the user from **one "current user" seam** (today it returns the owner), so
+a later move to per-user sign-in (OAuth/OIDC) touches that seam plus the app's sign-in, not every
+endpoint; the schema is already keyed `(UserId, …)`. Before real multi-user, the payee key still
+has to be scoped per user (`TODO.md`). Rotating the key: change it on the server and ship a new
+APK. The browser pages (`/connect`, `/callback`) cannot send a header and need their own
+protection (e.g. a one-time `state`), settled in the story. The static key sits inside the
+sideloaded release APK — accepted for one owner.
+
+**Secrets:** Key Vault holds the Enable Banking private key (one per application, shared by all
+banks and users) and the encryption key for the consent sessions (one session per user and bank);
+plain settings, and Key Vault references, live in app settings; locally everything stays in
+`dotnet user-secrets`.
+
 ## Consent lifecycle
 
 PSD2 access consents expire periodically (commonly ~90 days) and need re-authorization. This
@@ -654,6 +709,13 @@ pause action needed — it resumes automatically). Neither loses data, ever. In 
 matters here: the Ingestion Worker polls every 6h and the Health Monitor runs daily, both touching
 the DB far more often than Supabase's 7-day threshold, so a deployed project stays awake on its own
 without any keep-alive hack. Worst case either way is one slow request, never a missed alert.
+
+**Decided 2026-10-01 for the go-live: Neon free tier**, with the EF migrations applied manually
+from the owner's machine at deploy time (not at startup — a Function app can start several
+instances). The redirect URL is the default `https://<name>.azurewebsites.net/callback`, no custom
+domain, and it must be registered exactly in the Enable Banking *Production* application. The
+consent's `valid_until` is the smaller of 90 days and the bank's `maximum_consent_validity`, read
+fresh from `GET /aspsps` at every `/connect`.
 
 **Email Alerts — the "zero cost" claim above didn't actually price this channel; now it does.**
 Verified 2026-09-28: SendGrid's free tier ended in May 2025 (new signups get a 60-day trial, then

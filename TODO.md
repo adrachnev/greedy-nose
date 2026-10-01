@@ -336,7 +336,11 @@ The four below are left open on purpose.
       `DetermineMode`, 2026-09-29). A changed session hash is logged and the tick still runs as
       Steady state, so a re-authorization after a gap fires one push per bad debit, all at once —
       the burst R20 exists to prevent.
-- [ ] **A failed send loses the notification, in the per-debit and the summary path alike**
+- [ ] **Reversed 2026-10-01 for the per-debit path (R11a, go-live AR18): a failed push is now
+      retried via a "push owed" mark, with a 24 h limit and an email after 3 failed attempts in a
+      row. Still open: the Reconnect *summary* push (R20) — not covered by R11a, decide in the
+      story.** Original finding follows.
+      **A failed send loses the notification, in the per-debit and the summary path alike**
       (`IngestionRunner.SendToAllTokensAsync`, 2026-09-29). `Rejected`/`Transient` (and "no device
       token") still commit the debits, so the alert is never retried: once a debit is stored it is
       "seen". Owner decision 2026-09-29: accept for now, same as before. Options if it bites: hold

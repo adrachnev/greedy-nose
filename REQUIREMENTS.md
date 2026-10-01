@@ -228,6 +228,15 @@ Consequences:
 
 **R11** — One notification per bad debit. Grouping stays deferred (see `CLAUDE.md`).
 
+**R11a — A failed push is retried, never silently lost** (settled 2026-10-01; reverses the
+2026-09-29 decision to accept the loss). The bad debit is stored and listed whether or not its
+push went out. If the push could not be sent, the debit is marked **push owed** and every later
+poll sends it again, for up to **24 hours**; after that it gives up and logs it. Failed attempts
+are logged per debit. After **three failed attempts in a row** the owner gets one email (once per
+incident), so a broken push channel never looks like "nothing bad happened" (R1). The mark is
+explicit: a debit that turns bad later because of a rule edit never notifies (R10a), so "bad and
+never sent" cannot be the signal.
+
 **R12** — Notifications carry no quick actions. Tapping one opens the debit detail, which links
 to the payee's rule screen.
 
@@ -307,8 +316,9 @@ whole app — decided while reworking the mocks on 2026-08-14.)
 ## Bank connection
 
 **R25 — A connection starts with a first sync.** Granting consent triggers one bulk pull of the
-account's available history — as much as the ASPSP returns; there is no separate "how far back"
-setting. Every debit that pull produces is **already-seen** the moment it's fetched (R10c) and
+account's history for a **fixed window of the last 12 months** (settled 2026-10-01, was "as much
+as the ASPSP returns"; the window is an upper limit — a bank may return less). Every bank gets
+the same window, so banks do not differ by their own defaults (R22). Every debit that pull produces is **already-seen** the moment it's fetched (R10c) and
 feeds directly into onboarding (R26); none of it can notify, no matter how many app launches or
 network retries it takes to finish pulling. If the pull is interrupted partway through, resuming
 it is still the **same first sync**, never a gap (R20) — there is no prior "seen" state yet for
