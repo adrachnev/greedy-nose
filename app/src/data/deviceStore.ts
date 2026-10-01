@@ -32,6 +32,7 @@
 
 import { getMessaging, getToken, onTokenRefresh } from '@react-native-firebase/messaging';
 import { PermissionsAndroid, Platform } from 'react-native';
+import { backendHeaders, hasApiKey } from './backendAuth';
 import { BACKEND_BASE_URL, BACKEND_TIMEOUT_MS, USE_BACKEND } from './config';
 
 /** POST_NOTIFICATIONS is a runtime permission from Android 13 (API 33) on. */
@@ -141,13 +142,17 @@ async function askForNotificationPermission(): Promise<void> {
  * otherwise waits out the platform's own minutes-long socket timeout.
  */
 async function postToken(token: string): Promise<void> {
+  if (!hasApiKey()) {
+    console.warn('[deviceStore] API key not configured; not registering the device token');
+    return;
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
   try {
     const response = await fetch(`${BACKEND_BASE_URL}/device-token`, {
       method: 'POST',
       signal: controller.signal,
-      headers: { 'Content-Type': 'application/json' },
+      headers: backendHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ token }),
     });
     if (!response.ok) {

@@ -354,6 +354,18 @@ So that it keeps working once the backend starts requiring the key (Story 1.3).
 
 *(The backend ignores the header until Story 1.3, so nothing breaks in between.)*
 
+**As built (2026-10-01):** header `Authorization: Bearer <key>` (Story 1.3 must accept exactly
+this; it also lets a later per-user token reuse the header). The key lives in the gitignored
+`app/src/data/apiKey.local.ts`, with the committed template `apiKey.local.example.ts`; no new
+dependency. `backendAuth.ts` reads it through a guarded `require`, and `metro.config.js` sets
+`allowOptionalDependencies: true` — verified with a real `react-native bundle`: it builds without
+the file, and with a throwaway key file the key is in the bundle (file deleted afterwards).
+Missing key: no request is sent, the feed shows "API key not configured", the rules and
+device-token syncs warn and skip, and a rule is still saved locally. 211 jest tests (was 200),
+`tsc` clean, `eslint` only the 3 old warnings. One review pass, no MUST/SHOULD FIX. Known and
+accepted: the key sits in the JS bundle, so a release APK carries it (rotate by shipping a new
+APK). Not verified end to end against the backend — Story 1.3 is not built yet.
+
 ### Story 1.3: The backend requires the API key and drops the debug endpoints
 
 As the owner,

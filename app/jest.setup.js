@@ -25,6 +25,10 @@ jest.mock('@react-native-firebase/messaging', () => ({
   onTokenRefresh: jest.fn(() => () => {}),
 }));
 
+// The API key (src/data/backendAuth.ts) comes from a gitignored file. Virtual, so the mock works
+// whether or not that file exists, and no test ever sees a real key.
+jest.mock('./src/data/apiKey.local', () => ({ API_KEY: 'test-api-key' }), { virtual: true });
+
 // No test may reach the network. React Native's `fetch` is XHR-backed and, in Jest, really does
 // connect to localhost — a rendered <App/> once POSTed the mock token above ('test-fcm-token')
 // into a developer's running dev database. So the default `fetch` fails loudly instead, and a

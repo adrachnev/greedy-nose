@@ -10,6 +10,7 @@
 
 import { Debit, Payee, PaymentType } from '../domain/model';
 import { toInitials, unknownPayee } from '../domain/payees';
+import { backendHeaders, hasApiKey } from './backendAuth';
 import { BACKEND_BASE_URL, BACKEND_TIMEOUT_MS } from './config';
 
 export type FeedStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -124,6 +125,16 @@ export function refresh(): Promise<void> {
 }
 
 async function load(): Promise<void> {
+  if (!hasApiKey()) {
+    // Loud, not an empty list (UX-DR2): no request is sent, and the badge shows this.
+    setState({
+      status: 'error',
+      error: 'API key not configured',
+      dropped: state.dropped,
+      skipped: state.skipped,
+    });
+    return;
+  }
   setState({ status: 'loading', dropped: state.dropped, skipped: state.skipped });
 
   const controller = new AbortController();
@@ -131,7 +142,7 @@ async function load(): Promise<void> {
   try {
     const response = await fetch(`${BACKEND_BASE_URL}/debits`, {
       signal: controller.signal,
-      headers: { Accept: 'application/json' },
+      headers: backendHeaders({ Accept: 'application/json' }),
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());

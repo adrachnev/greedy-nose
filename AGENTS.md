@@ -74,6 +74,11 @@ the single source of truth for product behavior; where anything else disagrees, 
   `MSYS_NO_PATHCONV=1 docker run --rm -v "C:/Workspace/greedy-nose/backend:/src:ro" -v greedy-nose-nuget:/root/.nuget/packages -w /src mcr.microsoft.com/dotnet/sdk:10.0 dotnet test GreedyNose.Api.Tests --artifacts-path /tmp/artifacts`
   (the `MSYS_NO_PATHCONV` prefix is for Git Bash; drop it in PowerShell). `dotnet build` still
   works on the host. Do not switch Smart App Control off — that was ruled out on 2026-10-01.
+- App backend key (Story 1.2): in backend mode the app sends `Authorization: Bearer <key>`. Copy
+  `app/src/data/apiKey.local.example.ts` to `apiKey.local.ts` (gitignored) and put the key in it;
+  without it the app sends no backend request and the dev badge says "API key not configured".
+  After changing the file, restart Metro with `--reset-cache`. The key ends up inside the bundle,
+  so a release APK carries it (accepted for one owner; rotate by shipping a new APK).
 - Local Postgres: `docker compose -f backend/docker-compose.yml up -d` (loopback-only, dev creds,
   throwaway data) before running the backend.
 - Stop any locally-running backend before a coder agent builds it — a running process locks the

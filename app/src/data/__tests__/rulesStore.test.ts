@@ -52,9 +52,13 @@ type Modules = {
   AsyncStorage: AsyncStorageMock;
 };
 
-function loadWith(useBackend: boolean): Modules {
+function loadWith(useBackend: boolean, apiKey?: string): Modules {
   let modules!: Modules;
   jest.isolateModules(() => {
+    if (apiKey !== undefined) {
+      // Same isolated registry as the store below, so this is the key it sees.
+      require('../backendAuth').__setApiKeyForTests(apiKey);
+    }
     jest.doMock('../config', () => ({
       USE_BACKEND: useBackend,
       BACKEND_BASE_URL: 'http://backend.test',
@@ -398,7 +402,7 @@ describe('backend sync (TRACER-02-NOTIFICATIONS.md step 4)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith('http://backend.test/rules', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { Authorization: 'Bearer test-api-key', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         payeeId: PAYEE.id,
         classification: 'good',
@@ -409,6 +413,31 @@ describe('backend sync (TRACER-02-NOTIFICATIONS.md step 4)', () => {
       }),
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it('skips the POST without an API key, still saves locally, and warns without any key', async () => {
+    const { store } = loadWith(true, '');
+    await hydrated(store);
+
+    store.saveRule(PAYEE, { classification: 'good', amountEUR: 25 });
+    await flush();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(store.getRules().find(r => r.payeeId === PAYEE.id)?.classification).toBe('good');
+    expect(console.warn).toHaveBeenCalledWith(
+      '[rulesStore] API key not configured; the rule was saved locally only',
+    );
+  });
+
+  it('never writes the API key into a log, even when the request fails', async () => {
+    fetchMock.mockRejectedValue(new TypeError('Network request failed'));
+    const { store } = loadWith(true);
+    await hydrated(store);
+
+    store.saveRule(PAYEE, { classification: 'good', amountEUR: 25 });
+    await flush();
+
+    expect(JSON.stringify((console.warn as jest.Mock).mock.calls)).not.toContain('test-api-key');
   });
 
   it('omits amountEUR and iban rather than sending null/empty when the payee/draft carry none', async () => {

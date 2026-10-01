@@ -29,9 +29,9 @@ const permissions = {
 
 const fetchMock = jest.fn();
 
-type Env = { useBackend?: boolean; os?: string; version?: number };
+type Env = { useBackend?: boolean; os?: string; version?: number; apiKey?: string };
 
-function load({ useBackend = true, os = 'android', version = 34 }: Env = {}) {
+function load({ useBackend = true, os = 'android', version = 34, apiKey }: Env = {}) {
   let loaded!: {
     store: typeof import('../deviceStore');
     messaging: {
@@ -50,6 +50,10 @@ function load({ useBackend = true, os = 'android', version = 34 }: Env = {}) {
       Platform: { OS: os, Version: version },
       PermissionsAndroid: permissions,
     }));
+    if (apiKey !== undefined) {
+      // Same isolated registry as the store below, so this is the key it sees.
+      require('../backendAuth').__setApiKeyForTests(apiKey);
+    }
     loaded = {
       store: require('../deviceStore'),
       // The stand-in from jest.setup.js, re-created inside this isolated
@@ -146,11 +150,36 @@ describe('registering', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith('http://backend.test/device-token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { Authorization: 'Bearer test-api-key', 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: 'tok-1' }),
       signal: expect.any(AbortSignal),
     });
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('sends no request without an API key, and warns without naming any key', async () => {
+    const { store, messaging } = load({ apiKey: '' });
+    messaging.getToken.mockResolvedValue('tok-1');
+
+    store.startDeviceRegistration();
+    await flush();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      '[deviceStore] API key not configured; not registering the device token',
+    );
+    expect(everythingLogged()).not.toContain('test-api-key');
+  });
+
+  it('never writes the API key into a log, even when the request fails', async () => {
+    const { store } = load();
+    fetchMock.mockRejectedValue(new TypeError('Network request failed'));
+
+    store.startDeviceRegistration();
+    await flush();
+
+    expect(warn).toHaveBeenCalled();
+    expect(everythingLogged()).not.toContain('test-api-key');
   });
 
   it('still registers the token when the user denies the permission', async () => {

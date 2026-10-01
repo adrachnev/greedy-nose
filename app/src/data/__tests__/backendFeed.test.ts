@@ -7,6 +7,7 @@
  * which is how useSyncExternalStore renders forever.
  */
 
+import { __setApiKeyForTests } from '../backendAuth';
 import {
   __resetFeedForTests,
   getDebits,
@@ -53,6 +54,48 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.restoreAllMocks();
+});
+
+describe('API key', () => {
+  afterEach(() => {
+    __setApiKeyForTests('test-api-key');
+  });
+
+  it('sends the key as a Bearer header on /debits', async () => {
+    respondWith({ payees: [PAYEE], debits: [DEBIT] });
+    await refresh();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:5199/debits',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer test-api-key', Accept: 'application/json' },
+      }),
+    );
+  });
+
+  it('sends no request without a key, and says so in the error state', async () => {
+    __setApiKeyForTests('');
+    await refresh();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(getState().status).toBe('error');
+    expect(getState().error).toBe('API key not configured');
+  });
+
+  it('never writes the key into a log or the error message', async () => {
+    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    fetchMock.mockRejectedValueOnce(new TypeError('Network request failed'));
+    await refresh();
+    respondWith({ payees: [PAYEE], debits: [{ ...DEBIT, amountEUR: 0 }] });
+    await refresh();
+
+    const printed = JSON.stringify([
+      (console.warn as jest.Mock).mock.calls,
+      error.mock.calls,
+      getState(),
+    ]);
+    expect(printed).not.toContain('test-api-key');
+  });
 });
 
 describe('refresh', () => {

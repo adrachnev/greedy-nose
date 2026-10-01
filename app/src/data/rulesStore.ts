@@ -18,6 +18,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Payee, Rule, RuleDraft } from '../domain/model';
 import { FIXTURE_SEED_RULES } from '../mocks/data';
+import { backendHeaders, hasApiKey } from './backendAuth';
 import { BACKEND_BASE_URL, BACKEND_TIMEOUT_MS, USE_BACKEND } from './config';
 
 /**
@@ -271,6 +272,10 @@ async function syncRuleToBackend(payee: Payee, rule: Rule): Promise<void> {
   if (!USE_BACKEND) {
     return;
   }
+  if (!hasApiKey()) {
+    console.warn('[rulesStore] API key not configured; the rule was saved locally only');
+    return;
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
   try {
@@ -293,7 +298,7 @@ async function syncRuleToBackend(payee: Payee, rule: Rule): Promise<void> {
     const response = await fetch(`${BACKEND_BASE_URL}/rules`, {
       method: 'POST',
       signal: controller.signal,
-      headers: { 'Content-Type': 'application/json' },
+      headers: backendHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     if (!response.ok) {

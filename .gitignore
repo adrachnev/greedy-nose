@@ -28,6 +28,10 @@ N26.json
 # developer/environment gets their own from the Firebase console.
 app/android/app/google-services.json
 
+# The backend API key the app sends (Story 1.2) — a credential, same class as the .pem. The
+# committed apiKey.local.example.ts is the template.
+app/src/data/apiKey.local.ts
+
 # Firebase Admin SDK service account key (TRACER-02-NOTIFICATIONS.md, step 0) — grants
 # server-side send access to the whole Firebase project. Same class as the Enable Banking .pem:
 # the entire credential, no token endpoint, stays server-side forever.
