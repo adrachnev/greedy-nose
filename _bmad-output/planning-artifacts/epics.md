@@ -394,6 +394,21 @@ unprotected pair, closed right after)
 from configuration (user secrets locally)
 **And** tests cover 401 for every other endpoint and success with the key (NFR7, NFR8)
 
+**As built (2026-10-01):** `Auth/ApiKeyMiddleware` (registered first in `Program.cs`) +
+`Auth/ApiKeyOptions` (`Api:Key`, fail closed: missing, shorter than 32 characters or edge
+whitespace stops the startup). `Authorization: Bearer <key>` (scheme case-insensitive), SHA-256 +
+`FixedTimeEquals`, 401 with `WWW-Authenticate: Bearer` and an empty body; unknown paths also 401.
+Exempt only `/connect` and `/callback` (exact segment match, so `/connectx` is not; removed in
+Story 1.4). `/raw` and `/aspsps` are gone (and `EnableBankingOptions.RawDumpDirectory`, whose only
+reader was `/raw`); `/health` needs the key. A rejection logs only a sanitized, truncated path.
+346 tests (310 + 36 new, in the container), host `dotnet build` clean, one review pass (no MUST
+FIX; the three cheap items fixed). **Verified live** in a container against the dev Postgres: 18
+curl checks (no/wrong/right key, lower-case `bearer`, key without scheme, `/raw` and `/aspsps` →
+404, `/callback` exempt, `/CONNECTX` 401, POST `/rules` and `/device-token` with an empty body →
+400 so nothing was written), the key in no log and no tracked file, and the backend refusing to
+start with a short key. **Finding:** Smart App Control also blocks *running* the backend on the
+host, so it now runs in a container (`tools/run-backend-container.sh`, see `AGENTS.md`).
+
 ### Story 1.4: Starting a consent is protected
 
 As the owner,

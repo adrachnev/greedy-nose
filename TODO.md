@@ -239,7 +239,7 @@ The four below are left open on purpose.
 ### Needed before pagination is turned on
 
 - [ ] **`/debits` reads one page and ignores `continuation_key`**
-      (`backend/GreedyNose.Api/Program.cs`). `/raw` accepts it, `/debits` does not, so history
+      (`backend/GreedyNose.Api/Program.cs`). `/raw` (removed 2026-10-01, Story 1.3) accepted it, `/debits` does not, so history
       silently stops at whatever one page holds — 100 transactions in the 2026-08-18 dump, about
       three months. Fine for step 5's list; wrong for onboarding, which is supposed to see the
       whole history before deciding what counts as new.
@@ -378,7 +378,7 @@ once per session. Measured in the sandbox: a fetch on a closed session answers 4
       poll (6 h) after `valid_until`.
 - [ ] **The app has no way to read the connection state yet** (banner `01d`, R19's first half).
       Needs an endpoint (`ConsentStore.GetState` is the source) — belongs to the client-contract
-      plan. `/debits` and `/raw` now pass the bank's 401 through for an expired consent (they used
+      plan. `/debits` (and the since-removed `/raw`) now pass the bank's 401 through for an expired consent (they used
       to answer 409) and `/health` still says `connected: true` next to its new `state` field.
 - [ ] **`EXPIRED`/`REVOKED` were never observed, only `CLOSED`.** Any status other than
       `AUTHORIZED` after a 401-with-`error` counts as dead, and the actual value is logged — read the
@@ -413,7 +413,7 @@ once per session. Measured in the sandbox: a fetch on a closed session answers 4
       insert and never touches it on update, so the row self-heals once step 6's ingestion worker
       upserts the real payee data from a later fetch — the placeholder is a brief, cosmetic
       mismatch, not a permanent one.
-- [ ] **`POST /rules` has no authentication** (`backend/GreedyNose.Api/Rules/RulesEndpoint.cs`).
+- [x] **Fixed 2026-10-01 (Story 1.3, API key on every data endpoint)** — was: **`POST /rules` has no authentication** (`backend/GreedyNose.Api/Rules/RulesEndpoint.cs`).
       Same posture and same reason as `POST /device-token`'s finding below: deliberate while the
       backend only runs on the owner's machine and there is one seeded user; whoever can reach it
       can rewrite that user's payees and rules. **Close before the backend is deployed anywhere,**
@@ -490,7 +490,7 @@ once per session. Measured in the sandbox: a fetch on a closed session answers 4
 
 ## From notification tracer-bullet step 2 — device token registration, 2026-09-21
 
-- [ ] **`POST /device-token` has no authentication** (`backend/GreedyNose.Api/Notifications/DeviceTokenEndpoint.cs`).
+- [x] **Fixed 2026-10-01 (Story 1.3, API key on every data endpoint)** — was: **`POST /device-token` has no authentication** (`backend/GreedyNose.Api/Notifications/DeviceTokenEndpoint.cs`).
       Deliberate while the backend only runs on the owner's machine and there is one seeded user;
       whoever can reach it can register a token. **Close before the backend is deployed anywhere.**
       Also the moment real login exists: an existing token's row keeps its old `UserId` on

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using GreedyNose.Api.Auth;
 using GreedyNose.Api.Data;
 using GreedyNose.Api.EnableBanking;
 using FirebaseAdmin.Messaging;
@@ -45,6 +46,13 @@ if (string.IsNullOrWhiteSpace(postgres))
 // into logs and the dev error page — see DeviceTokenEndpoint.
 builder.Services.AddDbContextFactory<GreedyNoseDbContext>(db => db.UseNpgsql(postgres));
 
+// Fail closed, same idea as the Postgres check: no key (or a short one) means no backend, not an
+// open one. The message never contains the key.
+var apiKey = builder.Configuration.GetSection(ApiKeyOptions.SectionName).Get<ApiKeyOptions>()
+             ?? new ApiKeyOptions();
+apiKey.Validate();
+builder.Services.AddSingleton(apiKey);
+
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<EnableBankingSigner>();
@@ -84,6 +92,10 @@ builder.Services.AddHostedService<IngestionWorker>();
 
 var app = builder.Build();
 
+// Everything requires the API key except the /connect and /callback browser pages (Story 1.3).
+// First in the pipeline, so no endpoint — including one added later — can be reached without it.
+app.UseMiddleware<ApiKeyMiddleware>();
+
 // Fail loudly at startup rather than on the first request: a missing key or application ID is a
 // setup mistake, and finding it in a 500 later costs more than finding it here.
 app.Services.GetRequiredService<EnableBankingSigner>();
@@ -107,15 +119,6 @@ app.MapGet("/health", (ConsentStore consent, TimeProvider clock) => Results.Ok(n
     connectedAt = consent.ConnectedAt,
     expiresAt = consent.ExpiresAt,
 }));
-
-// --- Step 1: the first authenticated call -----------------------------------------------------
-
-app.MapGet("/aspsps", async (EnableBankingClient eb, string? country, CancellationToken ct) =>
-{
-    var result = await eb.GetAsync($"/aspsps?country={country ?? options.DefaultCountry}", ct);
-
-    return Results.Content(result.Body, "application/json", statusCode: result.StatusCode);
-});
 
 // --- Step 2: consent round trip ---------------------------------------------------------------
 
@@ -211,44 +214,8 @@ app.MapGet("/callback", async (
           <tr><th>account uid</th><th>iban</th><th>name</th><th>currency</th></tr>
           {rows}
         </table>
-        <p>Next: <a href="/raw">/raw</a> — the transactions, exactly as the bank sends them.</p>
+        <p>Next: <a href="/debits">/debits</a> — the debits mapped from the bank's transactions.</p>
         """);
-});
-
-// --- Step 3: raw transactions -----------------------------------------------------------------
-
-// Returned verbatim and written to disk. The file is the evidence R3a and R10b/R10c are supposed
-// to be re-tuned against (REQUIREMENTS.md, "Refining these from real data") — parsing comes next
-// in step 4, and guessing at field shapes before seeing them is what this step exists to avoid.
-app.MapGet("/raw", async (
-    EnableBankingClient eb,
-    ConsentStore consent,
-    TimeProvider clock,
-    IWebHostEnvironment env,
-    string? dateFrom,
-    string? continuationKey,
-    CancellationToken ct) =>
-{
-    var account = consent.PrimaryAccount;
-    if (account is null)
-    {
-        return Results.Problem("No connected account. Visit /connect first.", statusCode: 409);
-    }
-
-    var query = new List<string>();
-    if (dateFrom is not null) query.Add($"date_from={Uri.EscapeDataString(dateFrom)}");
-    if (continuationKey is not null) query.Add($"continuation_key={Uri.EscapeDataString(continuationKey)}");
-    var suffix = query.Count > 0 ? "?" + string.Join("&", query) : "";
-
-    var result = await eb.GetAsync($"/accounts/{account.Uid}/transactions{suffix}", ct);
-
-    var directory = Path.Combine(env.ContentRootPath, options.RawDumpDirectory);
-    Directory.CreateDirectory(directory);
-    var file = Path.Combine(directory, $"transactions-{clock.GetUtcNow():yyyyMMdd-HHmmss}.json");
-    await File.WriteAllTextAsync(file, result.Body, ct);
-    app.Logger.LogInformation("Raw transactions written to {File}", file);
-
-    return Results.Content(result.Body, "application/json", statusCode: result.StatusCode);
 });
 
 // --- Step 4: the domain mapping ---------------------------------------------------------------

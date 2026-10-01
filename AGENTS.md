@@ -74,6 +74,16 @@ the single source of truth for product behavior; where anything else disagrees, 
   `MSYS_NO_PATHCONV=1 docker run --rm -v "C:/Workspace/greedy-nose/backend:/src:ro" -v greedy-nose-nuget:/root/.nuget/packages -w /src mcr.microsoft.com/dotnet/sdk:10.0 dotnet test GreedyNose.Api.Tests --artifacts-path /tmp/artifacts`
   (the `MSYS_NO_PATHCONV` prefix is for Git Bash; drop it in PowerShell). `dotnet build` still
   works on the host. Do not switch Smart App Control off — that was ruled out on 2026-10-01.
+- Running the backend: `dotnet run` does not work on the host either — Smart App Control blocks
+  the freshly built `GreedyNose.Api.exe` (same cause as the tests). Start it in a container with
+  `bash tools/run-backend-container.sh <name>` (Docker and the dev Postgres up; port 5199 on
+  127.0.0.1, so `adb reverse tcp:5199 tcp:5199` still works; run it in the background and stop it
+  with `docker rm -f <name>`). It mounts the user-secrets file and the Firebase / Enable Banking
+  key files read-only and prints no secret. Verified live 2026-10-01 (Story 1.3).
+- Backend API key (Story 1.3): the backend refuses to start without `Api:Key` (at least 32
+  characters, no leading/trailing whitespace) — `dotnet user-secrets set "Api:Key" "<random>"`.
+  Put the same value into `app/src/data/apiKey.local.ts`. Every endpoint except `/connect` and
+  `/callback` (closed in Story 1.4) answers 401 without `Authorization: Bearer <key>`.
 - App backend key (Story 1.2): in backend mode the app sends `Authorization: Bearer <key>`. Copy
   `app/src/data/apiKey.local.example.ts` to `apiKey.local.ts` (gitignored) and put the key in it;
   without it the app sends no backend request and the dev badge says "API key not configured".

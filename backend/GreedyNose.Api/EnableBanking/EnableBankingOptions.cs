@@ -47,12 +47,6 @@ public sealed class EnableBankingOptions
     public TimeSpan ConsentValidity { get; set; } = TimeSpan.FromDays(90);
 
     /// <summary>
-    /// Where GET /raw drops what the bank sent. Kept out of git: it is real account data, and
-    /// after step 6 it is the owner's own. See TRACER-01-BANK-DATA.md step 3.
-    /// </summary>
-    public string RawDumpDirectory { get; set; } = "raw";
-
-    /// <summary>
     /// Where the live consent is remembered across restarts, relative to the content root. Holds
     /// a session id that reads a real bank account, so it is gitignored like the key and the raw
     /// dumps — it is a credential, not a cache.
