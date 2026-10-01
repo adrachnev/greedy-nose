@@ -322,6 +322,12 @@ pass/fail per test
 **Given** no local fix works
 **Then** the fallback (CI or a container) is set up and documented instead
 
+**As built (2026-10-01):** the block is Smart App Control (state 1), not a managed policy, and
+the owner chose not to switch it off. The tests run in a Linux container (`dotnet/sdk:10.0`, the
+repo mounted read-only, NuGet cached in a named volume): **310 passed, 0 failed, about 11 s**,
+repeatable after every change. The command is in `AGENTS.md`; `dotnet build` still works on the
+host. Coders and reviewers use the same command for backend tests.
+
 ### Story 1.2: The app sends the API key with every backend call
 
 As the owner,

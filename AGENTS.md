@@ -67,6 +67,13 @@ the single source of truth for product behavior; where anything else disagrees, 
   every mobile fix round.
 - Backend: `dotnet build`, `dotnet test`, `dotnet ef` — run `dotnet tool restore` first; a
   globally installed `dotnet-ef` may not match the version `dotnet-tools.json` pins.
+- Backend tests: `dotnet test` does not run on this machine — Smart App Control blocks every
+  freshly built, unsigned DLL (`0x800711C7`, code-integrity event 3077). Run the tests in a Linux
+  container instead (Docker running; the mount is read-only, so the Windows build output is
+  untouched; the named volume caches NuGet; about 11 s):
+  `MSYS_NO_PATHCONV=1 docker run --rm -v "C:/Workspace/greedy-nose/backend:/src:ro" -v greedy-nose-nuget:/root/.nuget/packages -w /src mcr.microsoft.com/dotnet/sdk:10.0 dotnet test GreedyNose.Api.Tests --artifacts-path /tmp/artifacts`
+  (the `MSYS_NO_PATHCONV` prefix is for Git Bash; drop it in PowerShell). `dotnet build` still
+  works on the host. Do not switch Smart App Control off — that was ruled out on 2026-10-01.
 - Local Postgres: `docker compose -f backend/docker-compose.yml up -d` (loopback-only, dev creds,
   throwaway data) before running the backend.
 - Stop any locally-running backend before a coder agent builds it — a running process locks the
