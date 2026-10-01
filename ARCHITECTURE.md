@@ -555,7 +555,8 @@ tick the worker, besides fetching, retries every marked debit from stored data (
 bank), for at most 24 h, then gives up and logs it; failed attempts are logged per debit. After
 three failed attempts in a row, one email goes to the owner (once per incident) through Brevo —
 a small slice of the Health Monitor pulled into the go-live; the daily staleness job itself stays
-unbuilt. Only `TokenNoLongerValid` prunes a token; `Rejected` means a human must look.
+unbuilt. The reconnect summary push (R20) is retried the same way, its counts N and M frozen at
+creation. Only `TokenNoLongerValid` prunes a token; `Rejected` means a human must look.
 
 ## Authentication and secrets (go-live, decided 2026-10-01)
 

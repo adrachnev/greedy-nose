@@ -36,7 +36,8 @@ N26 + DKB + ING-DiBa  →  Enable Banking (Production)  →  Azure Functions + N
   finished in the browser (no deep link back into the app); all three consents are granted fresh.
 - **First sync:** last 12 months (R25 changed), pagination with `continuation_key`.
 - **Failed pushes** are retried (R11a, reverses the 2026-09-29 decision): "push owed" mark, 24 h
-  limit, one email to the owner after 3 failed attempts in a row.
+  limit, one email to the owner after 3 failed attempts in a row. The reconnect summary push (R20)
+  is retried the same way (decided 2026-10-01).
 - **Release build:** sideloaded, self-signed APK.
 - **First story:** make `dotnet test` runnable (Windows Application Control blocks fresh DLLs).
 
@@ -53,11 +54,14 @@ per-bank labels in the debit list, other users' accounts.
 - Each bank's `maximum_consent_validity` — read with the Production application.
 - Whether each fetched page counts against a bank's ~4 fetches per day.
 - Whether `DELETE /sessions/{id}` also revokes the consent at a real bank.
-- The Reconnect summary push (R20) is not covered by the push-retry rule R11a.
 - Behaviour of the target phone when the app is force-stopped.
 
 ## Progress
 
 | Step | State |
 |---|---|
-| Slice into epics and stories (`bmad-create-epics-and-stories`) | **in progress** — requirements inventory walked through and confirmed 2026-10-01; next: epics list |
+| Slice into epics and stories (`bmad-create-epics-and-stories`) | **done 2026-10-01** — 4 epics, 30 stories in `_bmad-output/planning-artifacts/epics.md`; push retry and failure email (2.9, 2.10) come before the live proof (2.11) |
+| Epic 1 — a backend I can trust to deploy (1.1–1.8) | not started; first: 1.1 make `dotnet test` runnable |
+| Epic 2 — N26 live on Azure, end to end (2.1–2.11) | not started |
+| Epic 3 — DKB and ING-DiBa watched too (3.1–3.8) | not started |
+| Epic 4 — never silently without alerts (4.1–4.3) | not started |

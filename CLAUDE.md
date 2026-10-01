@@ -14,9 +14,15 @@ AR1–18, UX-DR1–3), scoped to Tracer 3 only, every item confirmed one by one.
 Key Vault; `azurewebsites.net` redirect, consents finished in the browser; first sync = last 12
 months (R25 changed); **a failed push is now retried** (R11a — reverses the 2026-09-29 "accept the
 loss": push-owed mark, 24 h, email after 3 failed attempts); sideloaded APK; first story = make
-`dotnet test` runnable. Next: confirm step 1 with **C**, then step 2 (epics list), step 3
-(stories), step 4 (validation). Documents stay English; the console language follows the user. Not yet done: the Reconnect summary push (R20) is not covered by R11a — decide in the
-story.
+`dotnet test` runnable. **All four steps of `bmad-create-epics-and-stories` are done; step 4 (final
+validation) passed and the workflow is complete.** `epics.md` now holds **4 epics and 30
+stories**: Epic 1 (backend I can trust to deploy, 8), Epic 2 (N26 live on Azure, 11), Epic 3 (DKB
+and ING-DiBa, 8), Epic 4 (never silently without alerts, 3). **Order decision:** the push retry and
+failure email (2.9, 2.10) come before the live proof (2.11), so N26 only counts as live once a
+failed push is no longer lost; the reconnect summary push is retried like every other push (R11a).
+Documents stay English; the console language follows the user. Next: plan each story in plan mode,
+then an "automated run" for code-only stories (1.2–1.8, 2.1–2.4, 2.9, 2.10, 3.1–3.4, Epic 4);
+1.1 is a machine fix done in the main session; cloud, bank and phone stories run with the owner.
 
 **2026-09-29 (end of day) — go-live direction decided, nothing built yet.** The owner wants a first
 **productive version for himself only**, on Azure, as soon as possible. Family members' accounts are

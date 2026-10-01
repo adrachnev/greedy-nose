@@ -231,7 +231,9 @@ Consequences:
 **R11a — A failed push is retried, never silently lost** (settled 2026-10-01; reverses the
 2026-09-29 decision to accept the loss). The bad debit is stored and listed whether or not its
 push went out. If the push could not be sent, the debit is marked **push owed** and every later
-poll sends it again, for up to **24 hours**; after that it gives up and logs it. Failed attempts
+poll sends it again, for up to **24 hours**; after that it gives up and logs it. The same holds
+for R20's reconnect summary: if it cannot be sent it is remembered, with its counts frozen, and
+retried the same way. Failed attempts
 are logged per debit. After **three failed attempts in a row** the owner gets one email (once per
 incident), so a broken push channel never looks like "nothing bad happened" (R1). The mark is
 explicit: a debit that turns bad later because of a rule edit never notifies (R10a), so "bad and

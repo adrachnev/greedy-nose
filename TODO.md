@@ -338,8 +338,8 @@ The four below are left open on purpose.
       the burst R20 exists to prevent.
 - [ ] **Reversed 2026-10-01 for the per-debit path (R11a, go-live AR18): a failed push is now
       retried via a "push owed" mark, with a 24 h limit and an email after 3 failed attempts in a
-      row. Still open: the Reconnect *summary* push (R20) — not covered by R11a, decide in the
-      story.** Original finding follows.
+      row. The Reconnect *summary* push (R20) is retried the same way (decided 2026-10-01).**
+      Original finding follows.
       **A failed send loses the notification, in the per-debit and the summary path alike**
       (`IngestionRunner.SendToAllTokensAsync`, 2026-09-29). `Rejected`/`Transient` (and "no device
       token") still commit the debits, so the alert is never retried: once a debit is stored it is
