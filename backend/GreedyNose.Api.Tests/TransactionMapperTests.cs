@@ -12,7 +12,7 @@ namespace GreedyNose.Api.Tests;
 /// bank, no credentials and no <c>raw/</c> directory**; that is the whole point.
 ///
 /// The fixture is hand-built, with invented merchants and IBANs, but it reproduces the *shapes*
-/// the first real dump actually had (TRACER-BULLET.md, "What the first real dump said"). Each test
+/// the first real dump actually had (TRACER-01-BANK-DATA.md, "What the first real dump said"). Each test
 /// below names the finding it pins, so a future change to any of them is a decision rather than an
 /// accident. Where a test pins behaviour we already know is imperfect — the aggregator prefixes,
 /// the stranded punctuation — it says so, and cites the requirement that will eventually change it.
@@ -469,7 +469,7 @@ public class TransactionMapperTests
     // Actually pinning both halves would mean this project reading a TypeScript file two
     // directories up, which makes a backend-only checkout or a backend-only CI job fail for
     // reasons that have nothing to do with the backend. That coupling costs more than it catches;
-    // the seam is small, it is written down in TRACER-BULLET.md, and the client validates what it
+    // the seam is small, it is written down in TRACER-01-BANK-DATA.md, and the client validates what it
     // reads at runtime (src/data/backendFeed.ts) precisely because nobody can compile-check this.
 
     /// <summary>

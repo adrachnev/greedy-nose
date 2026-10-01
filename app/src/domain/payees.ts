@@ -71,7 +71,7 @@ function isLetter(character: string): boolean {
  *
  * **The backend does the opposite with the same words, and both are right.**
  * TransactionMapper pools *every* creditor-less charge under one shared
- * UnknownPayeeKey (decided 2026-08-18, see TRACER-BULLET.md) because there the
+ * UnknownPayeeKey (decided 2026-08-18, see TRACER-01-BANK-DATA.md) because there the
  * charges have no creditor at all — no name, no IBAN, no remittance — so one
  * payee each would flood the Rules list with un-reviewable one-offs, and one
  * shared payee is one review. Here the situation is not the same: the debit

@@ -5,7 +5,7 @@ namespace GreedyNose.Api.Ingestion;
 
 /// <summary>
 /// The one production implementation of <see cref="IDebitsFetcher"/>, and the fix for the
-/// captive-dependency bug flagged in NOTIFICATION-TRACER-BULLET.md's step 6 plan: a singleton
+/// captive-dependency bug flagged in TRACER-02-NOTIFICATIONS.md's step 6 plan: a singleton
 /// <see cref="IngestionWorker"/> cannot hold a transient typed <c>HttpClient</c>
 /// (<see cref="EnableBankingClient"/>) for the process lifetime — the handler would never rotate.
 /// Instead this builds a fresh <see cref="EnableBankingClient"/> every call from

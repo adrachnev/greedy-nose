@@ -68,7 +68,7 @@ public sealed record ConsentSnapshot(
     DateTimeOffset? ExpiresAt);
 
 /// <summary>
-/// Holds the one live consent (TRACER-BULLET.md, step 2), and writes it to a local file so a
+/// Holds the one live consent (TRACER-01-BANK-DATA.md, step 2), and writes it to a local file so a
 /// backend restart does not cost a browser click.
 ///
 /// Step 2 chose memory-only on the argument that "a restart costs one sandbox consent, which is

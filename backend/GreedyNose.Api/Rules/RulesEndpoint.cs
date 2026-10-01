@@ -16,7 +16,7 @@ public sealed record RulesRequest(
     string? Iban);
 
 /// <summary>
-/// <c>POST /rules</c> (NOTIFICATION-TRACER-BULLET.md, step 4): the app's local rule
+/// <c>POST /rules</c> (TRACER-02-NOTIFICATIONS.md, step 4): the app's local rule
 /// (<c>app/src/data/rulesStore.ts</c>'s AsyncStorage stays the source of truth per R6) is synced here,
 /// so the server-side rule engine (step 5) and, later, the ingestion worker (step 6) have something to
 /// read.
@@ -24,7 +24,7 @@ public sealed record RulesRequest(
 /// <c>Rules</c> carries a composite foreign key to <c>Payees</c> (<see cref="GreedyNoseDbContext"/>),
 /// and nothing else writes <c>Payees</c> before step 6 — so this endpoint upserts the payee first,
 /// from the name/initials/iban the app already has (decided 2026-09-22,
-/// NOTIFICATION-TRACER-BULLET.md step 4). <c>FirstSeenAt</c> is set only when the payee row is first
+/// TRACER-02-NOTIFICATIONS.md step 4). <c>FirstSeenAt</c> is set only when the payee row is first
 /// inserted, and is never touched again here; step 6 must later overwrite it with the real (earlier)
 /// bank date once it starts reading real transactions for a payee this endpoint created first.
 ///

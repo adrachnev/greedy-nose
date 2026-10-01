@@ -214,7 +214,7 @@ function persist(next: Rule[]): void {
  *
  * Takes the whole `payee`, not just its id: the local write below only ever
  * needed `payee.id` (and still keys on it, exactly as before), but the
- * backend sync this function also kicks off (NOTIFICATION-TRACER-BULLET.md
+ * backend sync this function also kicks off (TRACER-02-NOTIFICATIONS.md
  * step 4) needs `name`/`initials`/`iban` too, since `POST /rules` upserts a
  * `Payees` row the backend may never have seen (nothing writes `Payees`
  * before step 6).
@@ -274,7 +274,7 @@ async function syncRuleToBackend(payee: Payee, rule: Rule): Promise<void> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
   try {
-    // Key order matches the contract in NOTIFICATION-TRACER-BULLET.md's step 4
+    // Key order matches the contract in TRACER-02-NOTIFICATIONS.md's step 4
     // exactly — not load-bearing for the backend, but keeps this body legible
     // against the doc it implements. amountEUR/iban are omitted rather than
     // sent as undefined/empty, matching the contract's `?`.

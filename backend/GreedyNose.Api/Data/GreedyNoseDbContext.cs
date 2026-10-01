@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 namespace GreedyNose.Api.Data;
 
 /// <summary>
-/// The schema for the notification tracer bullet (NOTIFICATION-TRACER-BULLET.md, step 1). Each table
+/// The schema for the notification tracer bullet (TRACER-02-NOTIFICATIONS.md, step 1). Each table
 /// gets its first reader or writer in a later step: <c>DeviceTokens</c> in step 2, the rest in 4 and 6.
 ///
 /// Every table is keyed by <c>UserId</c> so a real login later needs no re-keying. There are

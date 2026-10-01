@@ -1,6 +1,6 @@
 // Device registration: tells our backend which FCM token this phone can be
 // reached on, so the server can push a bad-payee alert to it (the whole product,
-// see NOTIFICATION-TRACER-BULLET.md step 2). Until the backend holds a token it
+// see TRACER-02-NOTIFICATIONS.md step 2). Until the backend holds a token it
 // has nowhere to send anything, however correct the rule engine gets.
 //
 // Module-level like backendFeed.ts and rulesStore.ts, and with the same
@@ -133,7 +133,7 @@ async function askForNotificationPermission(): Promise<void> {
 }
 
 /**
- * The contract (NOTIFICATION-TRACER-BULLET.md step 2): `POST /device-token`,
+ * The contract (TRACER-02-NOTIFICATIONS.md step 2): `POST /device-token`,
  * `{ "token": "<fcm token>" }`, any 2xx is stored. Everything else is a warning.
  * Never throws — it runs from a Firebase listener as well as from register().
  *

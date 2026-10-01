@@ -1,15 +1,15 @@
 # Secrets — never commit. The Enable Banking application's private RSA key lives as
-# <application-id>.pem; the filename itself is the application ID (TRACER-BULLET.md, step 0).
+# <application-id>.pem; the filename itself is the application ID (TRACER-01-BANK-DATA.md, step 0).
 *.pem
 *.key
 .env
 .env.*
 
-# .NET build output (backend/, from TRACER-BULLET.md step 1)
+# .NET build output (backend/, from TRACER-01-BANK-DATA.md step 1)
 bin/
 obj/
 
-# Raw bank responses saved by GET /raw (TRACER-BULLET.md step 3). Evidence for the R3a/R10b
+# Raw bank responses saved by GET /raw (TRACER-01-BANK-DATA.md step 3). Evidence for the R3a/R10b
 # tuning pass — and real account data from step 6 on, so it stays local.
 raw/
 
@@ -19,16 +19,16 @@ raw/
 # (2026-09-16) — same class of data, just not the live file.
 consent.local.json*
 
-# Account exports used to seed the Mock ASPSP (TRACER-BULLET.md, step 3). N26.json is a real
+# Account exports used to seed the Mock ASPSP (TRACER-01-BANK-DATA.md, step 3). N26.json is a real
 # account's full transaction history — the same class of data as raw/, just arriving by hand.
 N26.json
 
-# Firebase config for the Android app (NOTIFICATION-TRACER-BULLET.md, step 0). Carries a
+# Firebase config for the Android app (TRACER-02-NOTIFICATIONS.md, step 0). Carries a
 # project-specific API key; same treatment as the Enable Banking .pem — never committed, each
 # developer/environment gets their own from the Firebase console.
 app/android/app/google-services.json
 
-# Firebase Admin SDK service account key (NOTIFICATION-TRACER-BULLET.md, step 0) — grants
+# Firebase Admin SDK service account key (TRACER-02-NOTIFICATIONS.md, step 0) — grants
 # server-side send access to the whole Firebase project. Same class as the Enable Banking .pem:
 # the entire credential, no token endpoint, stays server-side forever.
 *firebase-adminsdk*.json

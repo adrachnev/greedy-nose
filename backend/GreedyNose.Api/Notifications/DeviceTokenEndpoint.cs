@@ -9,7 +9,7 @@ namespace GreedyNose.Api.Notifications;
 public sealed record DeviceTokenRequest(string? Token);
 
 /// <summary>
-/// <c>POST /device-token</c> (NOTIFICATION-TRACER-BULLET.md, step 2): the app tells us its FCM token
+/// <c>POST /device-token</c> (TRACER-02-NOTIFICATIONS.md, step 2): the app tells us its FCM token
 /// so step 3 has somewhere to send to.
 ///
 /// Idempotent by design — the app posts on every launch and again whenever Firebase rotates the

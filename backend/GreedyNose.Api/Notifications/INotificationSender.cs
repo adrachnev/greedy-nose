@@ -2,7 +2,7 @@ namespace GreedyNose.Api.Notifications;
 
 /// <summary>
 /// One push to one device. Text only for now: no data payload, no tap action (R12's navigation half
-/// is deferred — NOTIFICATION-TRACER-BULLET.md, "Deliberately out of scope").
+/// is deferred — TRACER-02-NOTIFICATIONS.md, "Deliberately out of scope").
 /// </summary>
 /// <param name="Token">The FCM registration token of the target install. Non-blank; never logged whole.</param>
 public sealed record PushMessage(string Token, string Title, string Body);

@@ -365,7 +365,7 @@ describe('persistence write failures', () => {
   });
 });
 
-describe('backend sync (NOTIFICATION-TRACER-BULLET.md step 4)', () => {
+describe('backend sync (TRACER-02-NOTIFICATIONS.md step 4)', () => {
   const PAYEE: Payee = {
     id: 'name:LIDL CONNECT',
     name: 'LIDL CONNECT',

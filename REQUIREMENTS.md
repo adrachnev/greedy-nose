@@ -468,7 +468,7 @@ error/empty/disconnected states.
 
 ### Refining these from real data
 
-**Settled 2026-09-16 against a real N26 account** — full evidence in `TRACER-BULLET.md`, "What
+**Settled 2026-09-16 against a real N26 account** — full evidence in `TRACER-01-BANK-DATA.md`, "What
 real N26 data said." Headline results:
 
 - `entry_reference` exists on real data, but per-row within one account, not as a bank-wide flag:

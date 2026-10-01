@@ -11,7 +11,7 @@ in `AGENTS.md` hold: plan mode, questions, commit when asked.
 to wait on questions or on agents.
 
 **Prerequisites — all three, or the main session refuses to start and says which one is missing:**
-1. The steps are written in a repo document (`NOTIFICATION-TRACER-BULLET.md`, `TRACER-BULLET.md`,
+1. The steps are written in a repo document (`TRACER-02-NOTIFICATIONS.md`, `TRACER-01-BANK-DATA.md`,
    or the doc the plan names).
 2. The plan for them was **approved by the owner in plan mode**, with **no open questions left** —
    they were decided there, and the decisions are recorded in the step's section.

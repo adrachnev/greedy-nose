@@ -14,7 +14,7 @@ namespace GreedyNose.Api.Tests;
 /// <summary>
 /// The real <see cref="FirebaseNotificationSender"/> — the part of it that is not a pure function —
 /// run against the real FirebaseAdmin SDK with its HTTP layer replaced by a stub, so what the SDK does
-/// with an answer (or with no answer) is observed rather than assumed. NOTIFICATION-TRACER-BULLET.md,
+/// with an answer (or with no answer) is observed rather than assumed. TRACER-02-NOTIFICATIONS.md,
 /// step 3.
 ///
 /// <b>Nothing here can reach the network or use a real key.</b> The stub handler is the terminal

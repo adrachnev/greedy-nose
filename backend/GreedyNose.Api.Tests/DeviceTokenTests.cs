@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace GreedyNose.Api.Tests;
 
 /// <summary>
-/// The device-token contract (NOTIFICATION-TRACER-BULLET.md, step 2) as far as it can be pinned
+/// The device-token contract (TRACER-02-NOTIFICATIONS.md, step 2) as far as it can be pinned
 /// without a database. The upsert itself — including two concurrent posts of one token — is what the
 /// project's no-database rule leaves to a run against real Postgres.
 /// </summary>

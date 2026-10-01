@@ -68,7 +68,7 @@ public sealed class Payee
     public List<string> NormalizedNamesSeen { get; set; } = [];
 
     /// <summary>Distinct creditor agent/BIC values seen. Empty on almost every real debit so far
-    /// (TRACER-BULLET.md's first dump had one on none of them) — kept for the day a bank sends one.</summary>
+    /// (TRACER-01-BANK-DATA.md's first dump had one on none of them) — kept for the day a bank sends one.</summary>
     public List<string> CreditorAgentsSeen { get; set; } = [];
 
     /// <summary>

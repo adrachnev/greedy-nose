@@ -41,9 +41,17 @@ the single source of truth for product behavior; where anything else disagrees, 
 ## Where things are
 
 - `REQUIREMENTS.md` — read first. `ARCHITECTURE.md` — the design doc, reconciled with it.
-  `NOTIFICATION-TRACER-BULLET.md` — the live step-by-step doc for current work; read its Progress
-  section first. `TODO.md` — known implementation gaps and review findings; check before starting
-  so a finding isn't rediscovered.
+  `TODO.md` — known implementation gaps and review findings; check before starting so a finding
+  isn't rediscovered.
+- The tracer bullets, in order — each doc has a Progress section; the live one is
+  `TRACER-03-GO-LIVE.md`, read its Progress first:
+  - `TRACER-01-BANK-DATA.md` (2026-08-17 → 09-17) — real Enable Banking data end to end into the
+    app; done. Real data broke three assumptions (missing `entry_reference`, almost no creditor
+    IBAN, `uid` changing per consent).
+  - `TRACER-02-NOTIFICATIONS.md` (2026-09-17 → 09-23) — Postgres, FCM push, rules sync, rule
+    engine, ingestion worker; done, verified on the device.
+  - `TRACER-03-GO-LIVE.md` (from 2026-09-29) — the owner-only productive version on Azure with
+    N26, DKB and ING-DiBa; in progress.
 - `.claude/agents/coder-mobile.md` / `coder-backend.md` / `coder-reviewer.md` — the three subagent
   definitions Policy refers to above.
 - `mocks/index.html` — the UI ground truth for `coder-mobile`; static HTML/CSS phone mockups, one

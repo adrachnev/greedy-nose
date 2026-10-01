@@ -2,7 +2,7 @@ namespace GreedyNose.Api.EnableBanking;
 
 /// <summary>
 /// Configuration for talking to Enable Banking. The application ID and the key path come from
-/// user secrets (see TRACER-BULLET.md, "Secrets") — the private key must never reach git.
+/// user secrets (see TRACER-01-BANK-DATA.md, "Secrets") — the private key must never reach git.
 /// </summary>
 public sealed class EnableBankingOptions
 {
@@ -48,7 +48,7 @@ public sealed class EnableBankingOptions
 
     /// <summary>
     /// Where GET /raw drops what the bank sent. Kept out of git: it is real account data, and
-    /// after step 6 it is the owner's own. See TRACER-BULLET.md step 3.
+    /// after step 6 it is the owner's own. See TRACER-01-BANK-DATA.md step 3.
     /// </summary>
     public string RawDumpDirectory { get; set; } = "raw";
 

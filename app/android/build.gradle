@@ -15,7 +15,7 @@ buildscript {
         classpath("com.android.tools.build:gradle")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
-        // NOTIFICATION-TRACER-BULLET.md step 0: reads app/google-services.json at build time.
+        // TRACER-02-NOTIFICATIONS.md step 0: reads app/google-services.json at build time.
         classpath("com.google.gms:google-services:4.5.0")
     }
 }

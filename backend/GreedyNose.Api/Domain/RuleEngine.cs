@@ -116,7 +116,7 @@ public static class RuleEngine
 
     /// <summary>
     /// A fixed de-DE-style amount ("49,00 €") for push text — the server has no device locale to
-    /// format with (NOTIFICATION-TRACER-BULLET.md's "Formatting default" note). Built explicitly
+    /// format with (TRACER-02-NOTIFICATIONS.md's "Formatting default" note). Built explicitly
     /// rather than through <c>ToString("C")</c> or <c>new CultureInfo("de-DE")</c>: both key off
     /// culture data (the current culture, or the OS's installed culture database) which can differ
     /// between machines and containers, where this always produces the same string. In-app screens

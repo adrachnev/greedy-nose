@@ -1,4 +1,4 @@
-# Local dev Postgres for the notification tracer bullet (NOTIFICATION-TRACER-BULLET.md, step 1).
+# Local dev Postgres for the notification tracer bullet (TRACER-02-NOTIFICATIONS.md, step 1).
 # Throwaway database: the password below is dev-only and never used anywhere real. The connection
 # string the backend actually reads lives in `dotnet user-secrets` (ConnectionStrings:Postgres).
 services:

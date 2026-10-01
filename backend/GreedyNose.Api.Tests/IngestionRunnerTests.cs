@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace GreedyNose.Api.Tests;
 
 /// <summary>
-/// One poll tick (NOTIFICATION-TRACER-BULLET.md, step 6), against EF Core's in-memory provider and
+/// One poll tick (TRACER-02-NOTIFICATIONS.md, step 6), against EF Core's in-memory provider and
 /// a fake fetcher/sender — never real Postgres, never real HTTP. Mirrors RulesTests.cs's shape.
 ///
 /// Not covered here, for the same reason <c>DeviceTokenTests.cs</c> names explicitly: the two race
@@ -221,7 +221,7 @@ public class IngestionRunnerTests
         var clock = new FixedTimeProvider(new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
 
         // Simulates POST /rules having created the payee first, with a synthetic "now" FirstSeenAt
-        // (NOTIFICATION-TRACER-BULLET.md step 4's "as built" note).
+        // (TRACER-02-NOTIFICATIONS.md step 4's "as built" note).
         await using (var db = NewInMemoryContext(dbName))
         {
             db.Payees.Add(new Payee

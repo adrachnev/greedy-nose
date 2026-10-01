@@ -1,15 +1,15 @@
 # Notification tracer bullet
 
-The second tracer bullet, same discipline as `TRACER-BULLET.md`: the thinnest end-to-end slice
+The second tracer bullet, same discipline as `TRACER-01-BANK-DATA.md`: the thinnest end-to-end slice
 through every new layer, seen working before moving on, not a prototype to throw away.
-`TRACER-BULLET.md` proved the app can read real bank data end to end; it deliberately stopped
+`TRACER-01-BANK-DATA.md` proved the app can read real bank data end to end; it deliberately stopped
 short of everything in `ARCHITECTURE.md`'s "Deliberately out of scope" list — Postgres, FCM push,
 the polling worker, the rule engine, the three ingestion modes. Notifications are the actual
 product (`CLAUDE.md`: "the whole product"), so this is the next slice. Written 2026-09-17, scoped
 in conversation before any code — see "Decisions" below.
 
 **This will span several sessions.** Update the Progress table before ending each one, same habit
-as `TRACER-BULLET.md`.
+as `TRACER-01-BANK-DATA.md`.
 
 ## The path
 
@@ -19,7 +19,7 @@ Mock ASPSP (sandbox)  →  local C# API (poll worker + rule engine)  →  Postgr
 
 Testing happens against **Mock ASPSP, not real N26** — same reasoning as the first tracer bullet:
 the consent/data loop can be re-run endlessly while wiring this up, without touching the
-rate-limited production quota (`TRACER-BULLET.md`'s Findings).
+rate-limited production quota (`TRACER-01-BANK-DATA.md`'s Findings).
 
 ## Decisions taken before writing this (2026-09-17)
 

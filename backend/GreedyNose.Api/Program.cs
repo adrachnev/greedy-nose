@@ -8,10 +8,10 @@ using GreedyNose.Api.Notifications;
 using GreedyNose.Api.Rules;
 using Microsoft.EntityFrameworkCore;
 
-// Tracer bullet (TRACER-BULLET.md): the thinnest path from Enable Banking to the device.
+// Tracer bullet (TRACER-01-BANK-DATA.md): the thinnest path from Enable Banking to the device.
 // Steps live here in order — 1 authenticate, 2 consent round trip, 3 raw transactions, 4 the
 // domain mapping. The step 1-4 endpoints below still have no storage and no user. The database
-// arrived with NOTIFICATION-TRACER-BULLET.md step 1: each table gets its first reader or writer in
+// arrived with TRACER-02-NOTIFICATIONS.md step 1: each table gets its first reader or writer in
 // the step that needs it — DeviceTokens in step 2, the Firebase sender in step 3, both at the end of
 // this file.
 

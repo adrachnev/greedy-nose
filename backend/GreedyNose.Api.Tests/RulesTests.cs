@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace GreedyNose.Api.Tests;
 
 /// <summary>
-/// The rules-sync contract (NOTIFICATION-TRACER-BULLET.md, step 4), following
+/// The rules-sync contract (TRACER-02-NOTIFICATIONS.md, step 4), following
 /// <c>DeviceTokenTests.cs</c>'s split: validation is pinned without a database (mirrors
 /// <c>RulesValidation</c> directly), and the upsert flow — including upsert-then-upsert, which is the
 /// part validation alone cannot prove — runs against EF Core's in-memory provider, never the dev
@@ -199,7 +199,7 @@ public class RulesTests
     /// The core of step 4's "done when": marking a payee twice — the normal case, since the app can
     /// resave a rule any number of times — must leave exactly one row each, refresh what changed, and
     /// never touch <c>FirstSeenAt</c> on the second call. That last part is the decision
-    /// NOTIFICATION-TRACER-BULLET.md's step 4 section calls out explicitly: step 6 is the only thing
+    /// TRACER-02-NOTIFICATIONS.md's step 4 section calls out explicitly: step 6 is the only thing
     /// allowed to overwrite it, with the real bank date.
     /// </summary>
     [Fact]

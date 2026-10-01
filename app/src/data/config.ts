@@ -1,6 +1,6 @@
 // Where the app reads payees and debits from. One flag, one file, so switching
 // back to fixtures while the real feed is still being trusted is a one-line
-// change with nothing else to remember (TRACER-BULLET.md step 5).
+// change with nothing else to remember (TRACER-01-BANK-DATA.md step 5).
 //
 // Rules are not covered by this flag: the backend deliberately does not send a
 // classification (R6 — the client derives it), so there is nothing on the wire

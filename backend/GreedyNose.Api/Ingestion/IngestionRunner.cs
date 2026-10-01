@@ -10,7 +10,7 @@ using Npgsql;
 namespace GreedyNose.Api.Ingestion;
 
 /// <summary>
-/// One poll tick (NOTIFICATION-TRACER-BULLET.md, step 6): the silent first sync (R25), steady
+/// One poll tick (TRACER-02-NOTIFICATIONS.md, step 6): the silent first sync (R25), steady
 /// state, or a reconnect after a gap (R20). Fetches, upserts payees, inserts new debits, classifies
 /// and — for a bad debit not already logged — sends and logs. A reconnect tick instead sends one
 /// summary push (only if any new debit is bad) and commits all new debits with the session hash in

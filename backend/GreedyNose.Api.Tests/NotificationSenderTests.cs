@@ -5,7 +5,7 @@ using GreedyNose.Api.Notifications;
 namespace GreedyNose.Api.Tests;
 
 /// <summary>
-/// The send path (NOTIFICATION-TRACER-BULLET.md, step 3) as far as it can be pinned without Firebase:
+/// The send path (TRACER-02-NOTIFICATIONS.md, step 3) as far as it can be pinned without Firebase:
 /// what goes on the wire, what each failure means, and how the debug endpoint reports it. Nothing here
 /// touches the network — Firebase itself is what the real send on the phone proves.
 /// </summary>

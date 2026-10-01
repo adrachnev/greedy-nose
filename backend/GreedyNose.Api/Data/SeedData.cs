@@ -1,7 +1,7 @@
 namespace GreedyNose.Api.Data;
 
 /// <summary>
-/// The rows the migration itself inserts. There is no login yet (NOTIFICATION-TRACER-BULLET.md,
+/// The rows the migration itself inserts. There is no login yet (TRACER-02-NOTIFICATIONS.md,
 /// "Auth: tables only, one seeded user row"), so every later step — device token, rules sync, the
 /// ingestion worker — attaches to this one user instead of inventing its own.
 /// </summary>

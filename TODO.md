@@ -289,7 +289,7 @@ The four below are left open on purpose.
       flipping `USE_BACKEND` therefore reads as "every payee is new again". Recorded because it
       will look like data loss the first time someone hits it.
 - [ ] **Booking timestamps are midnight UTC**, because `transaction_date` was null on every row
-      (see `TRACER-BULLET.md`). Germany is UTC+1/+2 so the date sections land on the right day,
+      (see `TRACER-01-BANK-DATA.md`). Germany is UTC+1/+2 so the date sections land on the right day,
       but in any timezone behind UTC the same charge would group under the previous day, and
       `DebitDetailScreen` prints a meaningless `01:00`/`02:00` for every debit. `R22` says nothing
       may assume a bank; nothing should assume a timezone either.
@@ -322,7 +322,7 @@ The four below are left open on purpose.
       **The bootstrap/steady-state check is "do any `Debits` rows exist?", not a dedicated flag —
       a first sync interrupted *after* it has written some rows would misclassify its remaining
       history as a reconnect gap on the next tick, firing a spurious summary push (breaks R25).**
-      Device-verified only for a restart *before* any row was written (`NOTIFICATION-TRACER-BULLET.md`
+      Device-verified only for a restart *before* any row was written (`TRACER-02-NOTIFICATIONS.md`
       step 6), which this gap doesn't exercise. `ARCHITECTURE.md`'s target design (found by
       `bmad-architecture` validation, 2026-09-28) now specifies `FirstSyncCompletedAt` on the
       consent/account record instead — set only once the full historical pull finishes, independent

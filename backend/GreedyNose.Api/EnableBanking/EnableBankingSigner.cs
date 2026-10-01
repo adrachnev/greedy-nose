@@ -29,7 +29,7 @@ public sealed class EnableBankingSigner : IDisposable
         if (string.IsNullOrWhiteSpace(options.ApplicationId))
         {
             throw new InvalidOperationException(
-                "EnableBanking:ApplicationId is not configured. See TRACER-BULLET.md, step 1.");
+                "EnableBanking:ApplicationId is not configured. See TRACER-01-BANK-DATA.md, step 1.");
         }
 
         if (!File.Exists(options.PrivateKeyPath))

@@ -122,7 +122,7 @@ public class RuleEngineTests
     /// <summary>
     /// The server has no device locale (unlike the app's `describeBadReason`, which the TS test
     /// leaves locale-agnostic on purpose): the wording is pinned to the exact fixed de-DE-style
-    /// format NOTIFICATION-TRACER-BULLET.md's "Formatting default" decided.
+    /// format TRACER-02-NOTIFICATIONS.md's "Formatting default" decided.
     /// </summary>
     [Fact]
     public void Over_limit_words_the_amount_in_the_fixed_de_DE_style_format_R12a()

@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- TRACER-BULLET (NOTIFICATION-TRACER-BULLET.md step 0): required from Android 13 (API 33)
+    <!-- TRACER-BULLET (TRACER-02-NOTIFICATIONS.md step 0): required from Android 13 (API 33)
          for a notification to display at all; requested at runtime in App.tsx. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 

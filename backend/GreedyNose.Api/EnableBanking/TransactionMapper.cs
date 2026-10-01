@@ -4,7 +4,7 @@ using System.Text;
 namespace GreedyNose.Api.EnableBanking;
 
 /// <summary>
-/// Enable Banking's transactions → the app's <c>Payee</c>/<c>Debit</c> (TRACER-BULLET.md step 4).
+/// Enable Banking's transactions → the app's <c>Payee</c>/<c>Debit</c> (TRACER-01-BANK-DATA.md step 4).
 ///
 /// Pure and static on purpose: this is the one piece of the bullet with real rules in it, and the
 /// rules come from REQUIREMENTS.md, not from HTTP. Keeping I/O out means it can be tested against

@@ -3,7 +3,7 @@ namespace GreedyNose.Api.Notifications;
 /// <summary>
 /// Configuration for sending pushes through Firebase Cloud Messaging. The key path comes from user
 /// secrets, never appsettings.json: the service-account JSON is the whole credential for sending to
-/// every install of the app, exactly like the Enable Banking private key (NOTIFICATION-TRACER-BULLET.md,
+/// every install of the app, exactly like the Enable Banking private key (TRACER-02-NOTIFICATIONS.md,
 /// step 0). It stays server-side and never goes near <c>app/</c>.
 /// </summary>
 public sealed class FirebaseOptions

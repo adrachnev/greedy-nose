@@ -80,7 +80,7 @@ export function useRuleByPayeeId(): Map<string, Rule> {
  *
  * Takes the whole `payee`, not just its id: saveRule() needs `name`/
  * `initials`/`iban` too, to upsert the backend's `Payees` row alongside the
- * rule (NOTIFICATION-TRACER-BULLET.md step 4).
+ * rule (TRACER-02-NOTIFICATIONS.md step 4).
  */
 export function useSavePayeeRule(): (payee: Payee, draft: RuleDraft) => void {
   return useCallback((payee: Payee, draft: RuleDraft) => {

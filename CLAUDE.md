@@ -31,16 +31,13 @@ for each bank's `maximum_consent_validity`. Slicing: `bmad-create-epics-and-stor
 stories, each story then built with the usual process (`AGENTS.md`, Policy). **The go-live becomes
 its own tracer bullet** — the live document is `TRACER-03-GO-LIVE.md` (steps, Progress, decisions,
 findings; the BMAD stories stay in `_bmad-output/` and each step points to its story, so there is
-one source of truth per thing). **First task tomorrow, before BMAD (decided 2026-09-29): rename the
-three tracer documents so the history reads in order** — `TRACER-BULLET.md` → `TRACER-01-BANK-DATA.md`,
-`NOTIFICATION-TRACER-BULLET.md` → `TRACER-02-NOTIFICATIONS.md`, new `TRACER-03-GO-LIVE.md`; flat in
-the repo root. Use `git mv` (history follows). About 150 references: docs (`CLAUDE.md`,
-`AGENTS.md`, `ARCHITECTURE.md`, `REQUIREMENTS.md`, `TODO.md`, `AUTOMATED-RUN.md`, `.gitignore`) are
-edited directly; the comment-only references in ~14 code files under `backend/` and `app/`
-(`Program.cs`, `ConsentStore.cs`, `Payee.cs`, `config.ts`, …) go through `coder-backend` and
-`coder-mobile` (over the 10-line floor together), then `coder-reviewer`. Also add a short overview of
-the three tracers (dates, outcome) to `AGENTS.md` under "Where things are", which names the live
-tracer document.
+one source of truth per thing). **Done 2026-10-01: the three tracer documents are renamed so the history reads
+in order** — `TRACER-BULLET.md` → `TRACER-01-BANK-DATA.md`, `NOTIFICATION-TRACER-BULLET.md` →
+`TRACER-02-NOTIFICATIONS.md`, new `TRACER-03-GO-LIVE.md` (a skeleton: scope, blockers, open
+questions; flat in the repo root). `git mv`, every reference updated (the comment-only ones in
+`backend/` and `app/` by the coders), and `AGENTS.md` carries the overview of the three tracers.
+**Next: BMAD slicing** (`bmad-create-epics-and-stories`) into `_bmad-output/`, then each story
+built with the usual process.
 
 **2026-09-29 (newest) — R19's push is built: a dead consent is detected and pushed once (backend),
 uncommitted at time of writing; the in-app banner is not.** The Ingestion Worker now decides on every
@@ -154,7 +151,7 @@ Five tech-currency claims web-verified: Azure Functions' in-process model retire
 lose data, and aren't a practical risk given the worker's own cadence; SendGrid's free tier ended
 May 2025 — swapped for Brevo (300/day, free forever).
 
-**`NOTIFICATION-TRACER-BULLET.md` is the live document for the notification work; read its
+**`TRACER-02-NOTIFICATIONS.md` is the live document for the notification work; read its
 Progress section first.** Scoped and started 2026-09-17, right after the first tracer bullet
 closed — Postgres, FCM push, the polling worker, the rule engine and rules-sync are all new
 ground it covers step by step. **All steps 0–7 are done (0 Firebase 2026-09-18, 1 Postgres schema
@@ -193,7 +190,7 @@ didn't build (silent bootstrap only), confirmed by a mid-session backend restart
 real state, not a flag; and Mock ASPSP's control-panel-added test transactions do carry
 `entry_reference` (verified by querying the dev `Debits` table directly), sandbox-only evidence
 that doesn't reopen the already-answered real-N26 question. Full detail in
-`NOTIFICATION-TRACER-BULLET.md`'s step 7.
+`TRACER-02-NOTIFICATIONS.md`'s step 7.
 
 **2026-09-22 — step 6 (the ingestion worker) done, verified on the device.** A bootstrap tick
 silently seeded 92 historical debits with no notifications; two later mock transactions for
@@ -207,7 +204,7 @@ blocked. Two real MUST FIX findings came back, both about the one failure this p
 have — a charge that silently never notifies — and both fixed and verified by reproduction: a
 bulk-insert-then-classify shape that could strand an already-committed debit if a tick was cut
 short, and a payee-upsert race that poisoned the rest of a tick's writes. See
-`NOTIFICATION-TRACER-BULLET.md`'s step 6 "as built" for the full detail, including the
+`TRACER-02-NOTIFICATIONS.md`'s step 6 "as built" for the full detail, including the
 `IDebitsFetcher` seam added beyond the plan (mirrors `INotificationSender`, needed so the new
 tests exercise real mapping logic without a socket).
 
@@ -227,7 +224,7 @@ waiting on it. Also found on the device, not a regression: rules saved before th
 no retry mechanism and never reached the backend — expected given the step's scope, fix deferred.
 The decisions left open for step 6 (notably: its own `Payees` upsert must overwrite
 `FirstSeenAt`, which step 4 may have already set to a synthetic "now") are in
-`NOTIFICATION-TRACER-BULLET.md`.
+`TRACER-02-NOTIFICATIONS.md`.
 
 Step 3, verified on the phone: our own backend put a real banner on it, a high-priority push woke
 the screen while Dozing, and FCM's answers to bad tokens matched the sender's four outcomes
@@ -248,19 +245,19 @@ still there and matched correctly — confirming rules persistence and the payee
 Sandbox↔Production secret switch and a reinstall, not only a restart. One gap found along the way,
 now recorded in `REQUIREMENTS.md`: the `Subscription` payment type is confirmed unreachable from
 any real bank data seen — the owner's own Netflix and Anthropic charges both arrive as plain card
-payments. Full detail in `TRACER-BULLET.md`'s "Step 6 as built".
+payments. Full detail in `TRACER-01-BANK-DATA.md`'s "Step 6 as built".
 
 **2026-09-16 — tracer-bullet steps 6 and 7 are done at the backend, verified against the real N26
 account (91 debits, 52 payees) through the Production application; device confirmation of step 6
 is the one thing still open.** It's blocked by N26 itself, not by code: Enable Banking rate-limits
 background fetches (`ASPSP_RATE_LIMIT_EXCEEDED`, ~4/day per their own FAQ), and a burst of calls
 while wiring up USB access used up the day's quota — their guidance is to wait ~6h before
-retrying, no workaround exists. Full findings in `TRACER-BULLET.md`. For unrelated testing in the
+retrying, no workaround exists. Full findings in `TRACER-01-BANK-DATA.md`. For unrelated testing in the
 meantime, the backend was switched back to the **Sandbox** application (Mock ASPSP):
 `dotnet user-secrets` currently hold the sandbox `ApplicationId`/`PrivateKeyPath`, and the real N26
 consent was moved aside as `consent.local.json.n26-bak` (not deleted) under
 `backend/GreedyNose.Api/`. Switching back to Production needs both application ids restored (see
-`TRACER-BULLET.md`'s Findings) **and** the `RedirectUrl` secret set back to
+`TRACER-01-BANK-DATA.md`'s Findings) **and** the `RedirectUrl` secret set back to
 `https://localhost:5199/callback` — the two applications are registered with different redirect
 URIs in Enable Banking's console (Sandbox: plain `http://`; Production: `https://`), discovered the
 hard way this session when the wrong one produced a `WRONG_ASPSP_PROVIDED` / `REDIRECT_URI_NOT_ALLOWED`
@@ -278,7 +275,7 @@ regression test for it) — both fixed by `coder-mobile` and re-verified mergeab
 on-device: mark a payee, force-close the app, reopen — the rule survives.
 
 **The tracer bullet reached the device on 2026-08-19: every layer is wired end to end, and the
-app shows bank data fetched through our own backend. `TRACER-BULLET.md` is the live document;
+app shows bank data fetched through our own backend. `TRACER-01-BANK-DATA.md` is the live document;
 read its "Progress" section first.** Started 2026-08-17. The account behind it is still the
 **sandbox** Mock ASPSP (holding an import of real German account data, which is why its findings
 are worth something) — firing the same code at the real N26 account is step 6, and it waits on
@@ -303,7 +300,7 @@ the `useSyncExternalStore` store); `hooks.ts` binds the source **once at module 
 rules stay local under both flags because `R6` means the backend sends no classification.
 `MockDataBadge` became `DataSourceBadge` — once the feed is real, an empty list could mean the
 backend is down, `adb reverse` is missing, the consent expired, or the account is genuinely
-empty, and the device is the worst place to guess. Full detail in `TRACER-BULLET.md`'s
+empty, and the device is the worst place to guess. Full detail in `TRACER-01-BANK-DATA.md`'s
 "Step 5 as built". **Steps 0–5 are done; step 6 waits on Restricted Production approval.**
 
 Three things step 5 exposed, all in `TODO.md`: **rules are in-memory only** and die with the JS
@@ -312,7 +309,7 @@ while rules and payees shared a fixture file); booking timestamps are **midnight
 groups correctly only in a timezone ahead of UTC; and **45 payees with no rule** make the
 unclassified state real for the first time, which is the onboarding bulk review's whole purpose.
 
-**Real data broke three assumptions**, all recorded with evidence in `TRACER-BULLET.md`'s Findings:
+**Real data broke three assumptions**, all recorded with evidence in `TRACER-01-BANK-DATA.md`'s Findings:
 
 - **`entry_reference` was null on all 100 rows**, so `R10b`'s de-duplication key did not exist at
   all. The mapper falls back to a composite of `(account, booking date, amount, payee key,

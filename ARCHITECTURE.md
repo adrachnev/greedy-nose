@@ -88,7 +88,7 @@ one push" --> Notify
 row above is the target design. What actually runs today, built and device-verified in the
 notification tracer bullet's step 6, is a `BackgroundService`/`PeriodicTimer` **in-process inside
 the same ASP.NET Core host as the API** — not a separate Azure Function. Deliberate and scoped
-("the worker stays in-process for this bullet," `NOTIFICATION-TRACER-BULLET.md` step 6): moving it
+("the worker stays in-process for this bullet," `TRACER-02-NOTIFICATIONS.md` step 6): moving it
 to its own Azure Function is deferred, not decided against. **When that migration happens, it must
 use the isolated worker model** (verified 2026-09-28): Azure retires support for the in-process
 .NET model on 10 November 2026, and the isolated model is the only one that supports .NET 9/10/11
@@ -387,7 +387,7 @@ signal is now the real `AccountSyncStates` row described above; the earlier stan
 does not re-run its first sync). What is still not true is the table's "routed to the onboarding
 classify screen": the first sync inserts everything as already seen with no rule evaluation and no
 notification — matching R10b's consequence — but is silent, with no UI, because the classify
-screen is not built yet (R26, `NOTIFICATION-TRACER-BULLET.md`, "Deliberately out of scope"). The
+screen is not built yet (R26, `TRACER-02-NOTIFICATIONS.md`, "Deliberately out of scope"). The
 Reconnect mode is built (2026-09-29): the runner derives it from the session hash, classifies each
 new debit **without** sending, counts N (all new) and M (bad), sends **one** R20 summary push if
 M > 0 — **before** saving — and then commits every new debit, any token prune and the new session
@@ -493,7 +493,7 @@ real debits). The key is `(account, day, amount, payee, ordinal)`, with every fi
   charge can shift between polls even though nothing about the charge changed. A DB-count-based
   ordinal only grows monotonically per unique key, so it can't shift under a re-fetch. This also
   closes the previously-open question of whether the ASPSP's feed order is stable across polls
-  (`TRACER-BULLET.md`) — the key no longer depends on that at all.
+  (`TRACER-01-BANK-DATA.md`) — the key no longer depends on that at all.
 
 ## Reliability: poll health monitoring
 
@@ -708,7 +708,7 @@ that field turned out to be unusable as an identifier.
   `429 ASPSP_RATE_LIMIT_EXCEEDED`, matching Enable Banking's FAQ exactly. Still unconfirmed for
   ING-DiBa or DKB, and still only proves a real cap exists — not that it is precisely 4/day rather
   than, say, a burst limit that a well-spaced 6h timer would clear either way. See
-  `TRACER-BULLET.md`'s Findings.
+  `TRACER-01-BANK-DATA.md`'s Findings.
 - ~~Does the on-demand "app is open" fetch actually get exempted from this cap on real N26?~~ —
   **answered 2026-09-28: no.** A real device test called the actual on-demand code path with PSU
   headers against real N26 and still hit `ASPSP_RATE_LIMIT_EXCEEDED` — every call counts the same,
@@ -731,7 +731,7 @@ that field turned out to be unusable as an identifier.
 
 ## Refining these from real data
 
-**Settled 2026-09-16 against a real N26 account** — full evidence in `TRACER-BULLET.md`, "What
+**Settled 2026-09-16 against a real N26 account** — full evidence in `TRACER-01-BANK-DATA.md`, "What
 real N26 data said." R3a's payee key and R10b's de-dup key held up under evidence rather than
 guesswork:
 
