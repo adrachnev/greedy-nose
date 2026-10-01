@@ -561,7 +561,7 @@ creation. Only `TokenNoLongerValid` prunes a token; `Rejected` means a human mus
 ## Authentication and secrets (go-live, decided 2026-10-01)
 
 **A single static API key**, sent by the app with every request, over HTTPS only — no endpoint is
-reachable without it, and `/raw` and `/aspsps` are removed (done in Story 1.3); the open `/connect` and `/callback` are closed in Story 1.4. Owner-only for
+reachable without it, and `/raw` and `/aspsps` are removed (done in Story 1.3); `/connect` and `/callback` are protected by one-time secrets stored in `PendingConsents` (done in Story 1.4). Owner-only for
 now. All endpoints get the user from **one "current user" seam** (today it returns the owner), so
 a later move to per-user sign-in (OAuth/OIDC) touches that seam plus the app's sign-in, not every
 endpoint; the schema is already keyed `(UserId, …)`. Before real multi-user, the payee key still

@@ -9,6 +9,21 @@ Rules for this file: an item is either done and deleted, or it says why it is st
 let it become a graveyard — anything nobody has touched in months is not a TODO, it is a decision
 to not do it, and should be recorded as such or dropped.
 
+## From Story 1.4 — protected consent start, 2026-10-01
+
+- [ ] **`/connect` and `/callback` have no rate limit.** One owner, so no risk today; add one (or an
+      App Service / front-door rule) in the cloud story (2.6) before the address is public.
+- [ ] **The one-time link token travels in a query string**, so a proxy or App Service access log
+      can record it. Single use and a 30 minute lifetime limit the exposure; check the cloud log
+      settings in Story 2.6 (the pages already send `Cache-Control: no-store` and
+      `Referrer-Policy: no-referrer`).
+- [ ] **A failed or interrupted session trade leaves the pending row spent and no consent
+      stored** (by design — a replay must never reach Enable Banking). The owner just requests a
+      new link; revisit only if it happens in practice.
+- [ ] **The simultaneous-spend race on the link token and on the state is not unit-tested** (the
+      InMemory provider has no concurrency); it relies on the `Version` concurrency token and the
+      unique hash indexes, and was exercised live against Postgres (Story 1.4 live check).
+
 ## From the `REQUIREMENTS.md` validation pass — 2026-09-24
 
 `bmad-review`'s verification-gap lens, run against `REQUIREMENTS.md` adapted to check the actual

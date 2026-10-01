@@ -10,6 +10,8 @@
 # --artifacts-path in the container, so no bin/obj lands in the repo. Nothing secret is printed.
 # Usage:  bash tools/run-backend-container.sh <container-name> [extra docker args, e.g. -e Api__Key=x]
 # Stop:   docker rm -f <container-name>
+# Other command in the same environment (e.g. migrations): GN_CMD="<command>" bash tools/run-backend-container.sh <name>
+#   migrations (changes the dev DB!): GN_CMD='export ArtifactsPath=/tmp/artifacts PATH=$PATH:/root/.dotnet/tools; dotnet tool install -g dotnet-ef --version 10.0.12 >/dev/null 2>&1; dotnet restore GreedyNose.Api >/dev/null && dotnet ef database update --project GreedyNose.Api'
 set -e
 NAME="$1"; shift
 cd /c/Workspace/greedy-nose/backend
@@ -33,4 +35,4 @@ docker run --rm --name "$NAME" --network backend_default -p 127.0.0.1:5199:5199 
   -e Ingestion__PollIntervalSeconds=21600 \
   "$@" \
   -w /src mcr.microsoft.com/dotnet/sdk:10.0 \
-  dotnet run --project GreedyNose.Api --artifacts-path /tmp/artifacts --no-launch-profile
+  bash -c "${GN_CMD:-dotnet run --project GreedyNose.Api --artifacts-path /tmp/artifacts --no-launch-profile}"

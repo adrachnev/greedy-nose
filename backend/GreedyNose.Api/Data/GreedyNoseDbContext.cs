@@ -1,3 +1,4 @@
+using GreedyNose.Api.Consent;
 using GreedyNose.Api.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -39,8 +40,33 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
 
     public DbSet<AccountSyncState> AccountSyncStates => Set<AccountSyncState>();
 
+    public DbSet<PendingConsent> PendingConsents => Set<PendingConsent>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<PendingConsent>(pending =>
+        {
+            pending.ToTable("PendingConsents");
+            pending.HasKey(p => p.Id);
+            pending.Property(p => p.Id).ValueGeneratedNever();
+
+            pending.Property(p => p.AspspName).HasMaxLength(100);
+            pending.Property(p => p.Country).HasMaxLength(2);
+            pending.Property(p => p.PsuType).HasMaxLength(20);
+
+            // SHA-256 hex. Unique, so a lookup by secret hits at most one row; the state hash is
+            // null until the link is used (Postgres allows many nulls in a unique index).
+            pending.Property(p => p.LinkTokenHash).HasMaxLength(64);
+            pending.Property(p => p.StateHash).HasMaxLength(64);
+            pending.HasIndex(p => p.LinkTokenHash).IsUnique();
+            pending.HasIndex(p => p.StateHash).IsUnique();
+
+            // Makes "single use" atomic — see PendingConsent. App-managed, like Payee.Version.
+            pending.Property(p => p.Version).IsConcurrencyToken().HasDefaultValue(0);
+
+            pending.HasOne<User>().WithMany().HasForeignKey(p => p.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<User>(user =>
         {
             user.ToTable("Users");

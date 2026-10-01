@@ -34,7 +34,7 @@ public class IngestionRunnerTests
     {
         // ConsentStore has no test seam — it is a concrete sealed class with real file I/O in
         // Save(). A temp path keeps tests off the repo's real consent.local.json. Complete() sets
-        // Accounts directly (see ConsentStore.cs), so no StartAuthorization/IsExpectedState dance
+        // Accounts directly (see ConsentStore.cs), so no authorization flow
         // is needed to get a "connected" store for a test.
         var store = new ConsentStore(
             Path.Combine(Path.GetTempPath(), $"ingestion-test-consent-{Guid.NewGuid():N}.json"),
@@ -43,7 +43,7 @@ public class IngestionRunnerTests
 
         if (connected)
         {
-            store.Complete(sessionId, [account ?? Account], clock.GetUtcNow(), expiresAt);
+            store.Complete(sessionId, "Test Bank", [account ?? Account], clock.GetUtcNow(), expiresAt);
         }
 
         return store;

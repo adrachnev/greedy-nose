@@ -124,7 +124,7 @@ public class PayeeIdentitySeenSetsTests
             TimeSpan.FromDays(90),
             NullLogger<ConsentStore>.Instance);
 
-        store.Complete("session-1", [new ConnectedAccount("uid-1", AccountKey, "Test Account", "EUR", null)], clock.GetUtcNow(), null);
+        store.Complete("session-1", "Test Bank", [new ConnectedAccount("uid-1", AccountKey, "Test Account", "EUR", null)], clock.GetUtcNow(), null);
 
         return store;
     }

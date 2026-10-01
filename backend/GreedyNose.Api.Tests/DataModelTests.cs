@@ -30,8 +30,9 @@ public class DataModelTests
         var toUser = foreignKeys.Where(fk => fk.PrincipalEntityType.ClrType == typeof(User)).ToList();
         var crossTable = foreignKeys.Except(toUser).ToList();
 
-        // Guards against this passing vacuously: rule → payee, debit → payee, log → debit.
-        Assert.Equal(6, toUser.Count);
+        // Guards against this passing vacuously (users: tokens, payees, rules, debits, sync states, log,
+        // pending consents): rule → payee, debit → payee, log → debit.
+        Assert.Equal(7, toUser.Count);
         Assert.Equal(3, crossTable.Count);
 
         // Deleting the user must still empty everything (account deletion is a real delete)…

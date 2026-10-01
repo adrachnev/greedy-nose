@@ -81,17 +81,14 @@ public sealed record ConsentSnapshot(
 /// development convenience with a credential in it, which is why it is gitignored. R18's data
 /// lifecycle and the real persistence remain out of the bullet's scope.
 ///
-/// The pending state is the `state` parameter we sent to Enable Banking: the callback must
-/// present the same value back, or it is not the redirect we started. It is deliberately *not*
-/// persisted — an authorization interrupted by a restart should fail, not resume.
+/// The authorization in progress (the `state` we sent to Enable Banking) is not kept here: since
+/// Story 1.4 it is a hashed, expiring, single-use row in the database (<c>PendingConsent</c>).
 /// </summary>
 public sealed class ConsentStore(string filePath, TimeSpan consentValidity, ILogger<ConsentStore> logger)
 {
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
     private readonly Lock _gate = new();
-
-    private string? _pendingState;
 
     public string? SessionId { get; private set; }
     public string? AspspName { get; private set; }
@@ -139,27 +136,14 @@ public sealed class ConsentStore(string filePath, TimeSpan consentValidity, ILog
         }
     }
 
-    public string StartAuthorization(string aspspName)
-    {
-        lock (_gate)
-        {
-            _pendingState = Guid.NewGuid().ToString();
-            AspspName = aspspName;
-
-            return _pendingState;
-        }
-    }
-
-    public bool IsExpectedState(string? state)
-    {
-        lock (_gate)
-        {
-            return _pendingState is not null && string.Equals(_pendingState, state, StringComparison.Ordinal);
-        }
-    }
-
+    /// <summary>
+    /// Replaces the live consent. <paramref name="aspspName"/> comes from the consent record that was
+    /// started and verified (<c>PendingConsent</c>), so the bank name only changes once a consent
+    /// has actually completed — never when one is merely started.
+    /// </summary>
     public void Complete(
         string sessionId,
+        string aspspName,
         IReadOnlyList<ConnectedAccount> accounts,
         DateTimeOffset now,
         DateTimeOffset? expiresAt)
@@ -167,10 +151,10 @@ public sealed class ConsentStore(string filePath, TimeSpan consentValidity, ILog
         lock (_gate)
         {
             SessionId = sessionId;
+            AspspName = aspspName;
             Accounts = accounts;
             ConnectedAt = now;
             ExpiresAt = expiresAt;
-            _pendingState = null;
 
             Save(new ConsentSnapshot(sessionId, AspspName, accounts, now, expiresAt));
         }

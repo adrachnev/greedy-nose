@@ -90,6 +90,7 @@ public class ApiKeyMiddlewareTests
     }
 
     [Theory]
+    [InlineData("/connect-links")]
     [InlineData("/connectx")]
     [InlineData("/callbackx")]
     [InlineData("/connect/../health")]

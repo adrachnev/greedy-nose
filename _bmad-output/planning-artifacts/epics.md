@@ -439,6 +439,27 @@ database, not in memory
 **And** the `state` is never logged; tests cover missing, wrong, used and expired `state`, and the
 happy path (NFR7, NFR8)
 
+**As built (2026-10-01):** `POST /connect-links` (behind the API key; `/connect-links` is a
+different path segment, so the `/connect` exemption does not cover it) returns `{ url }` built from
+the origin of `RedirectUrl`; `GET /connect?token=` spends the link once, mints the `state` in the
+same write and redirects to the bank; `GET /callback` spends the `state` *before* trading the code.
+New table `PendingConsents` (migration `AddPendingConsents`, applied manually to the dev DB): only
+SHA-256 hashes of token and state (unique indexes), `Version` concurrency token, 30 minute lifetime,
+cascade FK to `Users`; expired rows are deleted when a new link is created. Failures: 400 (bad,
+used, expired or lost-race secret — indistinguishable), 502 (Enable Banking failed, a network
+fault, or the consent could not be stored); the bank body, session id, IBANs and any `?error=`
+text are never shown; both pages send `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+`ConsentStore` lost its in-memory pending state and the premature `AspspName` overwrite;
+`Complete(...)` takes the bank from the record. Endpoint code moved to `Consent/ConsentEndpoints.cs`.
+398 tests (346 + 52 new, in the container), two review passes (no MUST FIX; both SHOULD FIX
+rounds applied). **Verified live** against the dev Postgres: no key → 401, link → 302 once then 400,
+no/garbage token → 400, unknown state → 400, `?error=<script>` not echoed, headers present, raw
+token not in the DB, and **a real race — two parallel requests on one link gave exactly one 302 and
+one 400**. Not run live: a completed callback (needs a real bank code) and the log grep (my check
+failed; the unit tests assert it). The helper is `tools/connect-bank.sh` (`GN_NO_OPEN=1` skips the
+browser). Deliberately not done: rate limiting, and an `https` check on the bank's redirect URL
+(see `TODO.md`).
+
 ### Story 1.5: One "current user" lookup
 
 As the owner,

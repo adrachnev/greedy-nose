@@ -14,8 +14,10 @@ public sealed class ApiKeyMiddleware
 {
     private const string Scheme = "Bearer";
 
-    // The only paths reachable without the key: browser pages that cannot send a header.
-    // Removed in Story 1.4.
+    // The only paths reachable without the key: browser pages that cannot send a header. The
+    // exemption stays (Story 1.4): each page authenticates by its own one-time secret instead —
+    // /connect by the link token, /callback by the OAuth state (see ConsentEndpoints). The link is
+    // created by POST /connect-links, a different path segment, which this middleware protects.
     private static readonly PathString[] Exempt = [new("/connect"), new("/callback")];
 
     private readonly RequestDelegate _next;

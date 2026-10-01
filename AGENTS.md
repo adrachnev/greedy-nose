@@ -84,6 +84,11 @@ the single source of truth for product behavior; where anything else disagrees, 
   characters, no leading/trailing whitespace) — `dotnet user-secrets set "Api:Key" "<random>"`.
   Put the same value into `app/src/data/apiKey.local.ts`. Every endpoint except `/connect` and
   `/callback` (closed in Story 1.4) answers 401 without `Authorization: Bearer <key>`.
+- Connecting a bank (Story 1.4): `/connect` and `/callback` are browser pages and need no header;
+  each is protected by its own one-time secret. Start with `bash tools/connect-bank.sh [bank]
+  [country] [base-url]` — it asks `POST /connect-links` (API key) for a one-time link and opens it in
+  the browser. The link works once and expires after 30 minutes; the callback state is single use too;
+  a failed or interrupted attempt needs a new link. The callback page shows no session id or IBAN.
 - App backend key (Story 1.2): in backend mode the app sends `Authorization: Bearer <key>`. Copy
   `app/src/data/apiKey.local.example.ts` to `apiKey.local.ts` (gitignored) and put the key in it;
   without it the app sends no backend request and the dev badge says "API key not configured".

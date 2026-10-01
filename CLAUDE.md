@@ -20,7 +20,7 @@ stories**: Epic 1 (backend I can trust to deploy, 8), Epic 2 (N26 live on Azure,
 and ING-DiBa, 8), Epic 4 (never silently without alerts, 3). **Order decision:** the push retry and
 failure email (2.9, 2.10) come before the live proof (2.11), so N26 only counts as live once a
 failed push is no longer lost; the reconnect summary push is retried like every other push (R11a).
-Documents stay English; the console language follows the user. Next: plan each story in plan mode,
+**Built so far (Epic 1): 1.1 tests run in a Linux container, 1.2 the app sends the API key, 1.3 the backend requires it, 1.4 consent start protected (one-time link + state in `PendingConsents`) — 398 backend tests, 211 jest tests, all committed. Smart App Control blocks running AND testing the backend on the host: use the container recipes in `AGENTS.md` / `tools/`. Next: Story 1.5 (one "current user" lookup).** Documents stay English; the console language follows the user. Process: plan each story in plan mode,
 then an "automated run" for code-only stories (1.2–1.8, 2.1–2.4, 2.9, 2.10, 3.1–3.4, Epic 4);
 1.1 is a machine fix done in the main session; cloud, bank and phone stories run with the owner.
 

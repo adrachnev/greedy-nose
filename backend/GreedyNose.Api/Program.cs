@@ -1,6 +1,6 @@
-using System.Globalization;
 using System.Text.Json;
 using GreedyNose.Api.Auth;
+using GreedyNose.Api.Consent;
 using GreedyNose.Api.Data;
 using GreedyNose.Api.EnableBanking;
 using FirebaseAdmin.Messaging;
@@ -54,6 +54,9 @@ apiKey.Validate();
 builder.Services.AddSingleton(apiKey);
 
 builder.Services.AddSingleton(options);
+builder.Services.AddSingleton(
+    builder.Configuration.GetSection(PendingConsentOptions.SectionName).Get<PendingConsentOptions>()
+    ?? new PendingConsentOptions());
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<EnableBankingSigner>();
 builder.Services.AddSingleton(sp => new ConsentStore(
@@ -122,101 +125,12 @@ app.MapGet("/health", (ConsentStore consent, TimeProvider clock) => Results.Ok(n
 
 // --- Step 2: consent round trip ---------------------------------------------------------------
 
-// Open this in a browser. It starts authorization and forwards to the bank's own consent page;
-// the bank sends the user back to /callback with a code.
-app.MapGet("/connect", async (
-    EnableBankingClient eb,
-    ConsentStore consent,
-    TimeProvider clock,
-    string? aspsp,
-    string? country,
-    string? psuType,
-    CancellationToken ct) =>
-{
-    var bank = aspsp ?? options.DefaultAspsp;
-    var state = consent.StartAuthorization(bank);
-
-    var request = new AuthRequest(
-        new AccessRequest(
-            ValidUntil: clock.GetUtcNow().Add(options.ConsentValidity).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-            Balances: true,
-            Transactions: true),
-        new AspspRef(bank, country ?? options.DefaultCountry),
-        state,
-        options.RedirectUrl,
-        psuType ?? "personal");
-
-    var result = await eb.PostAsync("/auth", request, ct);
-    if (!result.IsSuccess)
-    {
-        return Results.Content(result.Body, "application/json", statusCode: result.StatusCode);
-    }
-
-    var url = Text(JsonDocument.Parse(result.Body).RootElement, "url");
-
-    return url is null
-        ? Results.Content(result.Body, "application/json", statusCode: 502)
-        : Results.Redirect(url);
-});
-
-// Where the bank sends the user back. Trades the code for a session and remembers the account.
-app.MapGet("/callback", async (
-    EnableBankingClient eb,
-    ConsentStore consent,
-    TimeProvider clock,
-    string? code,
-    string? state,
-    string? error,
-    CancellationToken ct) =>
-{
-    if (error is not null)
-    {
-        return Html($"<h1>Authorization failed</h1><p>The bank returned: <code>{error}</code></p>");
-    }
-
-    if (code is null)
-    {
-        return Html("<h1>No code</h1><p>The redirect carried no <code>code</code> parameter.</p>");
-    }
-
-    // The state proves this redirect belongs to the authorization we started, not to a stray link.
-    if (!consent.IsExpectedState(state))
-    {
-        return Html("<h1>Unexpected state</h1><p>Start again at <a href=\"/connect\">/connect</a>.</p>");
-    }
-
-    var result = await eb.PostAsync("/sessions", new SessionRequest(code), ct);
-    if (!result.IsSuccess)
-    {
-        return Html($"<h1>Session failed ({result.StatusCode})</h1><pre>{result.Body}</pre>");
-    }
-
-    var root = JsonDocument.Parse(result.Body).RootElement;
-    var sessionId = Text(root, "session_id");
-    if (sessionId is null)
-    {
-        // A 200 without a session id means the shape changed under us. Show what they sent rather
-        // than throwing: their body is the only thing that explains it.
-        return Html($"<h1>No session id in the response</h1><pre>{result.Body}</pre>");
-    }
-
-    var accounts = ReadAccounts(root);
-
-    consent.Complete(sessionId, accounts, clock.GetUtcNow(), ReadValidUntil(root));
-
-    var rows = string.Concat(accounts.Select(a =>
-        $"<tr><td><code>{a.Uid}</code></td><td>{a.Iban}</td><td>{a.Name}</td><td>{a.Currency}</td></tr>"));
-
-    return Html($"""
-        <h1>Connected</h1>
-        <p>Session <code>{sessionId}</code> at <b>{consent.AspspName}</b>.</p>
-        <table border="1" cellpadding="6" cellspacing="0">
-          <tr><th>account uid</th><th>iban</th><th>name</th><th>currency</th></tr>
-          {rows}
-        </table>
-        <p>Next: <a href="/debits">/debits</a> — the debits mapped from the bank's transactions.</p>
-        """);
-});
+// Story 1.4: starting a consent is protected. POST /connect-links (behind the API key) returns a
+// one-time browser URL; /connect?token= spends it and redirects to the bank; the bank returns to
+// /callback with a one-time state. The two pages authenticate by those secrets, not by the header.
+app.MapPost("/connect-links", ConsentEndpoints.CreateLinkAsync);
+app.MapGet("/connect", ConsentEndpoints.ConnectAsync);
+app.MapGet("/callback", ConsentEndpoints.CallbackAsync);
 
 // --- Step 4: the domain mapping ---------------------------------------------------------------
 
@@ -228,7 +142,7 @@ app.MapGet("/debits", async (EnableBankingClient eb, ConsentStore consent, Cance
     var account = consent.PrimaryAccount;
     if (account is null)
     {
-        return Results.Problem("No connected account. Visit /connect first.", statusCode: 409);
+        return Results.Problem("No connected account. Connect a bank first (POST /connect-links).", statusCode: 409);
     }
 
     var result = await eb.GetAsync($"/accounts/{account.Uid}/transactions", ct);
@@ -274,49 +188,3 @@ app.MapPost("/device-token", DeviceTokenEndpoint.HandleAsync);
 app.MapPost("/rules", RulesEndpoint.HandleAsync);
 
 app.Run();
-
-static IResult Html(string body) =>
-    Results.Content($"<!doctype html><meta charset=\"utf-8\"><body style=\"font-family:sans-serif\">{body}</body>",
-        "text/html");
-
-static List<ConnectedAccount> ReadAccounts(JsonElement root)
-{
-    if (!root.TryGetProperty("accounts", out var accounts) || accounts.ValueKind != JsonValueKind.Array)
-    {
-        return [];
-    }
-
-    return [.. accounts.EnumerateArray().Select(a => new ConnectedAccount(
-        Uid: Text(a, "uid") ?? "",
-        Iban: a.TryGetProperty("account_id", out var id) ? Text(id, "iban") : null,
-        Name: Text(a, "name"),
-        Currency: Text(a, "currency"),
-        // Enable Banking's own cross-session account identifier. See ConnectedAccount.Key for why
-        // it is the fallback and not the primary — it hashes the IBAN we already have.
-        IdentificationHash: Text(a, "identification_hash")))];
-}
-
-/// <summary>
-/// The consent lifetime the bank actually granted, which is not necessarily the one we asked for:
-/// ASPSPs cap it at their own maximum_consent_validity.
-/// </summary>
-static DateTimeOffset? ReadValidUntil(JsonElement root)
-{
-    if (!root.TryGetProperty("access", out var access))
-    {
-        return null;
-    }
-
-    return DateTimeOffset.TryParse(
-        Text(access, "valid_until"),
-        CultureInfo.InvariantCulture,
-        DateTimeStyles.AdjustToUniversal,
-        out var validUntil)
-        ? validUntil
-        : null;
-}
-
-static string? Text(JsonElement element, string property) =>
-    element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
-        ? value.GetString()
-        : null;
