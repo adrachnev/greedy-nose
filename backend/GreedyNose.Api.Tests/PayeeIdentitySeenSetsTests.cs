@@ -222,7 +222,7 @@ public class PayeeIdentitySeenSetsTests
 
         await using (var db = NewInMemoryContext(dbName))
         {
-            await RulesEndpoint.HandleAsync(RuleFor("Shop Old Name", "SO"), db, clock, NullLoggerFactory.Instance, CancellationToken.None);
+            await RulesEndpoint.HandleAsync(RuleFor("Shop Old Name", "SO"), db, TestUsers.Owner, clock, NullLoggerFactory.Instance, CancellationToken.None);
         }
 
         var consent = NewConsentStore(clock);
@@ -252,7 +252,7 @@ public class PayeeIdentitySeenSetsTests
 
         await using (var db = NewInMemoryContext(dbName))
         {
-            await RulesEndpoint.HandleAsync(RuleFor("Shop From App", "SA"), db, clock, NullLoggerFactory.Instance, CancellationToken.None);
+            await RulesEndpoint.HandleAsync(RuleFor("Shop From App", "SA"), db, TestUsers.Owner, clock, NullLoggerFactory.Instance, CancellationToken.None);
         }
 
         await using var verify = NewInMemoryContext(dbName);
@@ -362,7 +362,7 @@ public class PayeeIdentitySeenSetsTests
         // the now-current row (writer B's spelling already on it) and reapplies writer A's own data
         // on top — the retry path under test.
         await RulesEndpoint.HandleAsync(
-            RuleFor("Concurrent From App", "CA"), dbA, clock, NullLoggerFactory.Instance, CancellationToken.None);
+            RuleFor("Concurrent From App", "CA"), dbA, TestUsers.Owner, clock, NullLoggerFactory.Instance, CancellationToken.None);
 
         await using var verify = NewInMemoryContext(dbName);
         var payee = await verify.Payees.SingleAsync(p => p.Id == "iban:" + CreditorIban);

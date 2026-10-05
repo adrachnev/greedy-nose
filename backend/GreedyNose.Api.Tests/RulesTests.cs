@@ -140,7 +140,7 @@ public class RulesTests
     public async Task An_invalid_request_gets_a_400_problem_without_touching_the_database()
     {
         var result = await RulesEndpoint.HandleAsync(
-            ValidRequest(classification: "nope"), db: null!, TimeProvider.System, NullLoggerFactory.Instance, CancellationToken.None);
+            ValidRequest(classification: "nope"), db: null!, TestUsers.Owner, TimeProvider.System, NullLoggerFactory.Instance, CancellationToken.None);
 
         var problem = Assert.IsType<ProblemHttpResult>(result);
         Assert.Equal(StatusCodes.Status400BadRequest, problem.StatusCode);
@@ -150,7 +150,7 @@ public class RulesTests
     public async Task A_missing_body_gets_a_400_problem_without_touching_the_database()
     {
         var result = await RulesEndpoint.HandleAsync(
-            request: null, db: null!, TimeProvider.System, NullLoggerFactory.Instance, CancellationToken.None);
+            request: null, db: null!, TestUsers.Owner, TimeProvider.System, NullLoggerFactory.Instance, CancellationToken.None);
 
         Assert.Equal(StatusCodes.Status400BadRequest, Assert.IsType<ProblemHttpResult>(result).StatusCode);
     }
@@ -175,7 +175,7 @@ public class RulesTests
         {
             var result = await RulesEndpoint.HandleAsync(
                 ValidRequest(classification: "good", amountEUR: 30m),
-                db, new FixedTimeProvider(firstSeen), NullLoggerFactory.Instance, CancellationToken.None);
+                db, TestUsers.Owner, new FixedTimeProvider(firstSeen), NullLoggerFactory.Instance, CancellationToken.None);
 
             Assert.IsType<NoContent>(result);
         }
@@ -213,14 +213,14 @@ public class RulesTests
         {
             await RulesEndpoint.HandleAsync(
                 ValidRequest(classification: "good", amountEUR: 30m, name: "Old Name", initials: "ON"),
-                db, new FixedTimeProvider(firstSeen), NullLoggerFactory.Instance, CancellationToken.None);
+                db, TestUsers.Owner, new FixedTimeProvider(firstSeen), NullLoggerFactory.Instance, CancellationToken.None);
         }
 
         await using (var db = NewInMemoryContext(dbName))
         {
             var result = await RulesEndpoint.HandleAsync(
                 ValidRequest(classification: "bad", amountEUR: null, name: "New Name", initials: "NN"),
-                db, new FixedTimeProvider(secondSave), NullLoggerFactory.Instance, CancellationToken.None);
+                db, TestUsers.Owner, new FixedTimeProvider(secondSave), NullLoggerFactory.Instance, CancellationToken.None);
 
             Assert.IsType<NoContent>(result);
         }
@@ -251,8 +251,8 @@ public class RulesTests
 
         await using (var db = NewInMemoryContext(dbName))
         {
-            await RulesEndpoint.HandleAsync(ValidRequest(payeeId: "iban:DE00"), db, now, NullLoggerFactory.Instance, CancellationToken.None);
-            await RulesEndpoint.HandleAsync(ValidRequest(payeeId: "iban:DE01"), db, now, NullLoggerFactory.Instance, CancellationToken.None);
+            await RulesEndpoint.HandleAsync(ValidRequest(payeeId: "iban:DE00"), db, TestUsers.Owner, now, NullLoggerFactory.Instance, CancellationToken.None);
+            await RulesEndpoint.HandleAsync(ValidRequest(payeeId: "iban:DE01"), db, TestUsers.Owner, now, NullLoggerFactory.Instance, CancellationToken.None);
         }
 
         await using var verify = NewInMemoryContext(dbName);

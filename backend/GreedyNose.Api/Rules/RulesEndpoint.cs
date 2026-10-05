@@ -1,3 +1,4 @@
+using GreedyNose.Api.Auth;
 using GreedyNose.Api.Data;
 using GreedyNose.Api.Domain;
 using GreedyNose.Api.EnableBanking;
@@ -53,13 +54,12 @@ public static class RulesEndpoint
     /// Scoped <see cref="GreedyNoseDbContext"/>, as every endpoint uses; only the step 6 worker goes
     /// through the context factory.
     /// </summary>
-    // PRAGMATIC: no authentication — login is deferred (one seeded user), same posture as
-    // DeviceTokenEndpoint. Anyone who can reach this endpoint can rewrite the seeded user's payees
-    // and rules. Fine while the backend only runs on the owner's machine; close before this backend
-    // is deployed anywhere — see TODO.md.
+    // PRAGMATIC: one owner, no per-user sign-in — the API key gates access and ICurrentUser always
+    // answers with the seeded owner. Per-user sign-in replaces OwnerCurrentUser, not this endpoint.
     public static async Task<IResult> HandleAsync(
         RulesRequest? request,
         GreedyNoseDbContext db,
+        ICurrentUser user,
         TimeProvider clock,
         ILoggerFactory loggers,
         CancellationToken ct)
@@ -71,6 +71,7 @@ public static class RulesEndpoint
 
         var logger = loggers.CreateLogger(Category);
         var now = clock.GetUtcNow();
+        var userId = user.UserId; // read once: the retry closure below must see one value
 
         // Same normalization TransactionMapper.ResolvePayeeKey itself uses — R3a's normalized-name
         // tier. Not validated.Name directly: this endpoint has no raw creditor name to offer the
@@ -93,13 +94,13 @@ public static class RulesEndpoint
         async Task ApplyAsync()
         {
             var payee = await db.Payees.SingleOrDefaultAsync(
-                p => p.UserId == SeedData.UserId && p.Id == validated.PayeeId, ct);
+                p => p.UserId == userId && p.Id == validated.PayeeId, ct);
 
             if (payee is null)
             {
                 payee = new Payee
                 {
-                    UserId = SeedData.UserId,
+                    UserId = userId,
                     Id = validated.PayeeId,
                     Name = validated.Name,
                     Initials = validated.Initials,
@@ -119,13 +120,13 @@ public static class RulesEndpoint
             }
 
             var rule = await db.Rules.SingleOrDefaultAsync(
-                r => r.UserId == SeedData.UserId && r.PayeeId == validated.PayeeId, ct);
+                r => r.UserId == userId && r.PayeeId == validated.PayeeId, ct);
 
             if (rule is null)
             {
                 db.Rules.Add(new Rule
                 {
-                    UserId = SeedData.UserId,
+                    UserId = userId,
                     PayeeId = validated.PayeeId,
                     Classification = validated.Classification,
                     AmountEUR = validated.AmountEUR,

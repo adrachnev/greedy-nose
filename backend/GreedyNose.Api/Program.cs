@@ -53,6 +53,9 @@ var apiKey = builder.Configuration.GetSection(ApiKeyOptions.SectionName).Get<Api
 apiKey.Validate();
 builder.Services.AddSingleton(apiKey);
 
+// Scoped: a real implementation will read the current request.
+builder.Services.AddScoped<ICurrentUser, OwnerCurrentUser>();
+
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(
     builder.Configuration.GetSection(PendingConsentOptions.SectionName).Get<PendingConsentOptions>()

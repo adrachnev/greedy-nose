@@ -1,3 +1,4 @@
+using GreedyNose.Api.Auth;
 using GreedyNose.Api.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -16,8 +17,8 @@ public sealed record DeviceTokenRequest(string? Token);
 /// token, with no "already sent" flag on its side, so this has to make the tenth identical request
 /// as harmless as the first: <c>204</c> whether the token is new or already stored.
 ///
-/// Every token registers for <see cref="SeedData.UserId"/> — see the PRAGMATIC note on
-/// <see cref="HandleAsync"/> for why there is no authentication.
+/// Every token registers for the <see cref="ICurrentUser"/> — today always the owner; see the
+/// PRAGMATIC note on <see cref="HandleAsync"/>.
 /// </summary>
 public static class DeviceTokenEndpoint
 {
@@ -41,13 +42,13 @@ public static class DeviceTokenEndpoint
     /// Kestrel's default (30 MB) would let an unauthenticated caller make us buffer and parse
     /// megabytes before validation ever runs.
     /// </summary>
-    // PRAGMATIC: no authentication — login is deferred (one seeded user), so anyone who can reach this
-    // endpoint can register a token for that user. Fine while the backend only runs on the owner's
-    // machine; close before this backend is deployed anywhere — see TODO.md.
+    // PRAGMATIC: one owner, no per-user sign-in — the API key gates access and ICurrentUser always
+    // answers with the seeded owner. Per-user sign-in replaces OwnerCurrentUser, not this endpoint.
     [RequestSizeLimit(8192)]
     public static async Task<IResult> HandleAsync(
         DeviceTokenRequest? request,
         GreedyNoseDbContext db,
+        ICurrentUser user,
         TimeProvider clock,
         ILoggerFactory loggers,
         CancellationToken ct)
@@ -76,7 +77,7 @@ public static class DeviceTokenEndpoint
         db.DeviceTokens.Add(new DeviceToken
         {
             Id = Guid.NewGuid(),
-            UserId = SeedData.UserId,
+            UserId = user.UserId,
             Token = token,
             UpdatedAt = now,
         });

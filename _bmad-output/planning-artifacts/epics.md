@@ -481,6 +481,18 @@ So that moving to per-user sign-in later changes one spot, not every endpoint.
 **And** the ingestion worker's own `SeedData.UserId` uses stay until Epic 3 (AR4); no new
 `SeedData.UserId` appears anywhere
 
+**As built (2026-10-05):** `Auth/ICurrentUser` (`Guid UserId`) and `Auth/OwnerCurrentUser`
+(returns `SeedData.UserId`), registered scoped in `Program.cs`. `RulesEndpoint` and
+`DeviceTokenEndpoint` take it as a parameter and no longer name `SeedData.UserId`. **Deviation
+from the AC wording:** `/debits` is untouched — it uses no user today (it still calls the bank
+live); Story 1.6 injects the service when it reads stored data (noted as a comment on bead
+`gn-ywx.6`). Also still on `SeedData.UserId`, deliberately: `ConsentEndpoints` (browser pages, no
+request user), `IngestionRunner` (Epic 3), the model seed. 400 tests (398 + 2 new, in the
+container), one review pass, no MUST FIX. **Gap, accepted:** the "different user" test covers
+`/rules` only — the device-token refresh uses `ExecuteUpdateAsync`, which EF InMemory lacks, so
+that endpoint needs a Postgres-backed test (bead `gn-vgm`); the refresh is keyed on `Token` only
+(bead `gn-oue`). Not run live: no behaviour change.
+
 ### Story 1.6: The debit list comes from stored data
 
 As the owner,

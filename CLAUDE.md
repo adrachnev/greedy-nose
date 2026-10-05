@@ -4,6 +4,11 @@
 
 ## Status
 
+**2026-10-05 — Story 1.5 built (uncommitted at time of writing): one "current user" lookup.**
+`ICurrentUser`/`OwnerCurrentUser` in `Auth/`; `/rules` and `/device-token` use it. 400 backend
+tests, one review pass, no MUST FIX; two findings became beads (`gn-vgm`, `gn-oue`). `/debits`
+is left for Story 1.6. Next: `bd ready` (1.6 and 1.7 are now unblocked).
+
 **2026-10-05 — Beads installed and filled; next story is found with `bd ready`.** `bd` 1.3.1
 (`npm i -g @beads/bd`), prefix `gn-`, embedded Dolt in `.beads/`, committed export
 `.beads/issues.jsonl`. Imported: 4 epics + 30 stories (parent-child, dependencies from the story

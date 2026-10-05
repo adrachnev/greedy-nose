@@ -101,7 +101,7 @@ public class DeviceTokenTests
     public async Task An_invalid_token_gets_a_400_problem_without_touching_the_database(string? token)
     {
         var result = await DeviceTokenEndpoint.HandleAsync(
-            new DeviceTokenRequest(token), db: null!, TimeProvider.System, NullLoggerFactory.Instance, CancellationToken.None);
+            new DeviceTokenRequest(token), db: null!, TestUsers.Owner, TimeProvider.System, NullLoggerFactory.Instance, CancellationToken.None);
 
         var problem = Assert.IsType<ProblemHttpResult>(result);
         Assert.Equal(StatusCodes.Status400BadRequest, problem.StatusCode);
@@ -112,7 +112,7 @@ public class DeviceTokenTests
     public async Task A_missing_body_gets_a_400_problem_without_touching_the_database()
     {
         var result = await DeviceTokenEndpoint.HandleAsync(
-            request: null, db: null!, TimeProvider.System, NullLoggerFactory.Instance, CancellationToken.None);
+            request: null, db: null!, TestUsers.Owner, TimeProvider.System, NullLoggerFactory.Instance, CancellationToken.None);
 
         Assert.Equal(StatusCodes.Status400BadRequest, Assert.IsType<ProblemHttpResult>(result).StatusCode);
     }
@@ -130,7 +130,7 @@ public class DeviceTokenTests
         foreach (var token in new[] { tooLong, badCharacters })
         {
             var result = await DeviceTokenEndpoint.HandleAsync(
-                new DeviceTokenRequest(token), db: null!, TimeProvider.System, NullLoggerFactory.Instance, CancellationToken.None);
+                new DeviceTokenRequest(token), db: null!, TestUsers.Owner, TimeProvider.System, NullLoggerFactory.Instance, CancellationToken.None);
 
             var problem = Assert.IsType<ProblemHttpResult>(result);
             Assert.DoesNotContain(token, System.Text.Json.JsonSerializer.Serialize(problem.ProblemDetails));
