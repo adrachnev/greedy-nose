@@ -4,6 +4,15 @@
 
 ## Status
 
+**2026-10-05 — Beads installed and filled; next story is found with `bd ready`.** `bd` 1.3.1
+(`npm i -g @beads/bd`), prefix `gn-`, embedded Dolt in `.beads/`, committed export
+`.beads/issues.jsonl`. Imported: 4 epics + 30 stories (parent-child, dependencies from the story
+order in `epics.md`; 1.1–1.4 closed with their commits) and all 74 open `TODO.md` items (label
+`todo-md`, some linked to their story). Split of roles: BMAD = what and why, Beads = state and
+order — see `AGENTS.md`, "Work tracking with Beads". `TODO.md` is frozen as archive. `bd init` made
+one local commit (`.beads` files) by itself; nothing pushed. The story order above ("Next: Story
+1.5") is now `bd ready`.
+
 **2026-10-01 — tracer docs renamed (committed); go-live requirements walked through and decided,
 epics list is next.** `TRACER-01-BANK-DATA.md` / `TRACER-02-NOTIFICATIONS.md` /
 `TRACER-03-GO-LIVE.md` are in place. `bmad-create-epics-and-stories` ran step 1:

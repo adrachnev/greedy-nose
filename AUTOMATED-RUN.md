@@ -22,7 +22,8 @@ next run needs a new explicit start. Work that is not named, or not approved in 
 normal mode.
 
 **The loop, per step — no questions, no plan mode:**
-1. Read the step, `TODO.md` and the previous steps' "as built" notes.
+1. Read the step, its bead (`bd show <id>`, related beads incl. open `todo-md` findings) and the
+   previous steps' "as built" notes. Claim the bead (`bd update <id> --claim`).
 2. Delegate: `coder-backend`/`coder-mobile` **in parallel** where independent. While they run, do
    the operational prep (Postgres, phone, secrets) — don't idle, don't poll. **Stop the main
    session's own backend before a coder builds** (a running backend locks the DLLs).
@@ -31,15 +32,16 @@ normal mode.
 4. Start one `coder-reviewer` per coder, in parallel. Constrain them: no writes to the dev
    database, no real pushes, no reserved ports, never print secrets.
 5. **Fix round:** send the same coder every MUST FIX and SHOULD FIX, plus every CONSIDER/NIT that
-   is cheap (comment- or test-only, or ≤ ~10 lines). Everything else goes into `TODO.md` with its
-   reason. At most **2 fix rounds** per review.
+   is cheap (comment- or test-only, or ≤ ~10 lines). Everything else becomes a bead
+   (`-l review-finding`, related to the step's bead) with its reason. At most **2 fix rounds** per review.
 6. **Second review only if the fix round changed production logic** (not only comments or tests) by
    more than the 10-line floor. Otherwise verify and move on.
 7. Do the real-world check from the step's "Done when" (device, curl, Postgres). A "no side
    effects / zero requests" check needs a **positive control**, and the thing under test must be
    confirmed running first.
 8. Docs in the same pass: the "as built" section (measured results, decisions, deferred items),
-   the Progress table, `CLAUDE.md`'s Status, `TODO.md`, and the status memory.
+   the Progress table, `CLAUDE.md`'s Status, the beads (close the step's bead with the commit hash,
+   refresh `.beads/issues.jsonl`), and the status memory.
 9. **Commit** on `main`, once per verified step — pre-authorized inside the run. Stage files
    explicitly (never `git add -A`; the tree holds gitignored secrets), message in the repo's
    style, end with the attribution line. **Never** push, amend, force or reset.

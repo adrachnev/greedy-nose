@@ -145,3 +145,30 @@ the single source of truth for product behavior; where anything else disagrees, 
   look, not that the alert can be silently discarded.
 
 <!-- /bmad:context -->
+
+## Work tracking with Beads (decided 2026-10-05)
+
+Beads (`bd`, issue prefix `gn-`, data in `.beads/`) holds the **state and order** of work. BMAD
+keeps the **what and why**: `epics.md` and `REQUIREMENTS.md` stay the only place for acceptance
+criteria — a story bead carries only a title and `--spec-id` pointing at its `epics.md` section,
+never a copy.
+
+- **Start of a session:** `bd ready` (what is unblocked), `bd show <id>` for one item. This replaces
+  reading the "Next:" prose in `CLAUDE.md`'s Status.
+- **Per story:** pick the bead, plan in plan mode as before, `bd update <id> --claim`, give the coder
+  the bead id. Never change the build/review process — Beads only tracks it.
+- **Review findings:** a MUST/SHOULD FIX goes back to the same coder as before. Anything deferred
+  becomes a new bead (`bd create ... -l review-finding`, then `bd dep relate` to its story) —
+  **not a new `TODO.md` entry**. `TODO.md` is frozen; its 74 open items were imported as beads on
+  2026-10-05 (label `todo-md`) and the file stays only as archive.
+- **Done:** `bd close <id> -r "<what> — commit <hash>"` in the same pass as the commit.
+- **Dependencies:** `bd dep add <blocked> <blocker>`; check `bd dep cycles` after bulk changes.
+- **Do not:** use `bmad-sprint-planning` (a second tracker), run `bd setup claude` or
+  `bd init` again (they rewrite `AGENTS.md`/`settings.json`; init was run with `--skip-agents
+  --skip-hooks`), install Beads git hooks, or push the Dolt remote (`bd dolt push`) without being asked.
+- **Git:** `.beads/issues.jsonl` is the committed export (`export.auto` is on); the Dolt database
+  itself (`.beads/embeddeddolt/`) is git-ignored. After bead changes run
+  `bd export > .beads/issues.jsonl` if the file is stale, and commit it only when asked, like
+  everything else. Usage metrics are switched off (`bd metrics off`).
+- The `bd` CLI was installed with `npm install -g @beads/bd`; it runs on this machine despite
+  Smart App Control (checked 2026-10-05).

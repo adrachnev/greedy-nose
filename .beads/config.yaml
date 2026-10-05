@@ -73,3 +73,5 @@
 
 sync:
     remote: "git+https://github.com/adrachnev/greedy-nose.git"
+export:
+    auto: true

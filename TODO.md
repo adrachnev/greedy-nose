@@ -1,5 +1,9 @@
 # Open items
 
+> **Frozen 2026-10-05 — archive only.** All 74 open items below were imported into Beads (label
+> `todo-md`, `bd list --label todo-md`). New findings and deferred review items go into Beads, not
+> here (see `AGENTS.md`, "Work tracking with Beads"). Items are not ticked off in this file any more.
+
 Code-level work that is known, deliberately deferred, and easy to forget. Product-level
 deferrals live in `REQUIREMENTS.md` (its "Refining these from real data" section and the mock
 gaps) and `CLAUDE.md`'s "Open / deferred" — this file is for *implementation* items, mostly
