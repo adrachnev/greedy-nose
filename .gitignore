@@ -44,3 +44,10 @@ app/src/data/apiKey.local.ts
 # scratch output (has its own self-contained .gitignore, kept here as a second line of defense).
 **/*.user.toml
 _bmad/render/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+*.gate.lock*
