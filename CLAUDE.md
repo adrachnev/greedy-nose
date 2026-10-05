@@ -4,6 +4,13 @@
 
 ## Status
 
+**2026-10-05 — Story 1.8 built (uncommitted at time of writing): every tick pages from the last
+fetch on; the first sync pulls 12 months.** 430 backend tests, three review passes, verified live on
+the Sandbox (first sync 4 pages, repeat = 0 duplicates, normal tick = 1 page). Owner decision: all
+ticks page (not only the first sync). **P1 beads `gn-xeq` / `gn-6k5`** (live-proof checklist: quota per
+page, old `date_from` rejected by DKB/ING, bank date filter vs mapper day) block Stories 2.11, 3.5,
+3.6. Next: Story 1.7 (needs an encryption key in user secrets, set with the owner).
+
 **2026-10-05 — Story 1.6 built (uncommitted at time of writing): `/debits` reads stored data.**
 `Debits/DebitsEndpoint`, no bank call any more; 409 backend tests, one review, no MUST FIX, verified
 live (no Enable Banking request caused by `/debits`). Three findings are beads (`gn-hw1` app

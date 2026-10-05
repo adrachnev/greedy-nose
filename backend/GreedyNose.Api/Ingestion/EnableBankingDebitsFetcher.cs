@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using GreedyNose.Api.EnableBanking;
 
@@ -20,9 +21,12 @@ public sealed class EnableBankingDebitsFetcher(
     EnableBankingOptions options,
     ILogger<EnableBankingDebitsFetcher> logger) : IDebitsFetcher
 {
+    /// <summary>Safety cap for the paging loop; 12 months is a handful of pages.</summary>
+    private const int MaxPages = 200;
+
     private bool _baseAddressChecked;
 
-    public async Task<MappedDebits> FetchAsync(ConnectedAccount account, CancellationToken ct)
+    public async Task<MappedDebits> FetchAsync(ConnectedAccount account, DateOnly dateFrom, CancellationToken ct)
     {
         var client = EnableBankingClient.Create(httpClientFactory, signer, clock);
 
@@ -42,7 +46,50 @@ public sealed class EnableBankingDebitsFetcher(
             }
         }
 
-        var result = await client.GetAsync($"/accounts/{account.Uid}/transactions", ct);
+        var path = $"/accounts/{account.Uid}/transactions";
+
+        // Every tick: from dateFrom to the end, every page (the caller decides the date).
+        var dateFromText = dateFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var transactions = new List<EbTransaction>();
+        var usedKeys = new HashSet<string>(StringComparer.Ordinal);
+        string? continuationKey = null;
+        var pages = 0;
+
+        do
+        {
+            if (pages >= MaxPages)
+            {
+                throw new InvalidOperationException(
+                    $"Enable Banking still offered a next page after {MaxPages} pages; giving up.");
+            }
+
+            var query = $"{path}?date_from={dateFromText}";
+            if (continuationKey is not null)
+            {
+                query += $"&continuation_key={Uri.EscapeDataString(continuationKey)}";
+            }
+
+            var page = await GetPageAsync(client, query, ct);
+            pages++;
+            transactions.AddRange(page.Transactions ?? []);
+
+            continuationKey = string.IsNullOrEmpty(page.ContinuationKey) ? null : page.ContinuationKey;
+            if (continuationKey is not null && !usedKeys.Add(continuationKey))
+            {
+                throw new InvalidOperationException("Enable Banking repeated a continuation key; giving up.");
+            }
+        }
+        while (continuationKey is not null);
+
+        logger.LogInformation("Tick fetched {Pages} page(s) of transactions from {DateFrom}.", pages, dateFromText);
+
+        // One Map call over everything, so the fallback ids' ordinals count across page boundaries.
+        return TransactionMapper.Map(new EbTransactionsResponse(transactions, null), account.Key);
+    }
+
+    private static async Task<EbTransactionsResponse> GetPageAsync(EnableBankingClient client, string pathAndQuery, CancellationToken ct)
+    {
+        var result = await client.GetAsync(pathAndQuery, ct);
 
         if (!result.IsSuccess)
         {
@@ -50,9 +97,7 @@ public sealed class EnableBankingDebitsFetcher(
             throw EnableBankingRequestException.FromResponse(result);
         }
 
-        var response = JsonSerializer.Deserialize<EbTransactionsResponse>(result.Body, EnableBankingClient.Json)
+        return JsonSerializer.Deserialize<EbTransactionsResponse>(result.Body, EnableBankingClient.Json)
             ?? throw new InvalidOperationException("Enable Banking returned a body we could not read.");
-
-        return TransactionMapper.Map(response, account.Key);
     }
 }

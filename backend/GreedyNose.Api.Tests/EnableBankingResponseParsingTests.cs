@@ -75,7 +75,7 @@ public sealed class EnableBankingResponseParsingTests : IDisposable
         var (_, factory) = Stub(HttpStatusCode.Unauthorized, ClosedSessionBody);
 
         var exception = await Assert.ThrowsAsync<EnableBankingRequestException>(() =>
-            NewFetcher(factory).FetchAsync(Account, CancellationToken.None));
+            NewFetcher(factory).FetchAsync(Account, new DateOnly(2026, 1, 1), CancellationToken.None));
 
         Assert.Equal(401, exception.StatusCode);
         Assert.Equal("CLOSED_SESSION", exception.ErrorCode);
@@ -89,7 +89,7 @@ public sealed class EnableBankingResponseParsingTests : IDisposable
         var (_, factory) = Stub(HttpStatusCode.Unauthorized, WrongSignatureBody);
 
         var exception = await Assert.ThrowsAsync<EnableBankingRequestException>(() =>
-            NewFetcher(factory).FetchAsync(Account, CancellationToken.None));
+            NewFetcher(factory).FetchAsync(Account, new DateOnly(2026, 1, 1), CancellationToken.None));
 
         Assert.Equal(401, exception.StatusCode);
         Assert.Null(exception.ErrorCode);
@@ -106,7 +106,7 @@ public sealed class EnableBankingResponseParsingTests : IDisposable
         var (_, factory) = Stub(HttpStatusCode.BadGateway, body);
 
         var exception = await Assert.ThrowsAsync<EnableBankingRequestException>(() =>
-            NewFetcher(factory).FetchAsync(Account, CancellationToken.None));
+            NewFetcher(factory).FetchAsync(Account, new DateOnly(2026, 1, 1), CancellationToken.None));
 
         Assert.Equal(502, exception.StatusCode);
         Assert.Null(exception.ErrorCode);

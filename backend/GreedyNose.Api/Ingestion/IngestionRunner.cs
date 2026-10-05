@@ -53,10 +53,34 @@ public sealed class IngestionRunner(
 
         var sessionHash = SessionFingerprint.Of(sessionId);
 
+        // The fetch depends on the mode (a first sync pulls 12 months), so it is decided before
+        // fetching, once, and used for the whole tick. Untracked, so a later ChangeTracker.Clear()
+        // cannot affect it; the end-of-tick hash update re-loads its own tracked row.
+        AccountSyncState? syncState;
+        await using (var modeDb = await dbContextFactory.CreateDbContextAsync(ct))
+        {
+            syncState = await modeDb.AccountSyncStates.AsNoTracking().SingleOrDefaultAsync(
+                s => s.UserId == SeedData.UserId && s.AccountKey == account.Key, ct);
+        }
+
+        var mode = DetermineMode(syncState, sessionHash);
+
+        DateTimeOffset? newestDebit = null;
+        if (mode != IngestionMode.FirstSync)
+        {
+            await using var dateDb = await dbContextFactory.CreateDbContextAsync(ct);
+            newestDebit = await dateDb.Debits
+                .Where(d => d.UserId == SeedData.UserId && d.AccountKey == account.Key)
+                .MaxAsync(d => (DateTimeOffset?)d.Timestamp, ct);
+        }
+
+        var dateFrom = ComputeDateFrom(
+            mode, DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime), newestDebit, syncState?.FirstSyncCompletedAt);
+
         MappedDebits mapped;
         try
         {
-            mapped = await fetcher.FetchAsync(account, ct);
+            mapped = await fetcher.FetchAsync(account, dateFrom, ct);
         }
         catch (EnableBankingRequestException exception) when (exception is { StatusCode: 401, ErrorCode: not null })
         {
@@ -98,12 +122,8 @@ public sealed class IngestionRunner(
         // state before this tick's own writes. Not "are there any Debits rows": a first sync cut
         // short after some rows, or an empty account, would then read as steady state.
         //
-        // Loaded here, after UpsertPayeesAsync, on purpose: that method (and the NotificationLog race
-        // catch below) calls ChangeTracker.Clear(), which detaches anything loaded earlier. Untracked
-        // for the same reason — this instance is only read; the end-of-tick hash update re-loads.
-        var syncState = await db.AccountSyncStates.AsNoTracking().SingleOrDefaultAsync(
-            s => s.UserId == SeedData.UserId && s.AccountKey == account.Key, ct);
-        var mode = DetermineMode(syncState, sessionHash);
+        // The mode is the one decided before the fetch (`mode`, from the untracked `syncState`); it is
+        // not re-read here, so the fetch and the commit path can never disagree.
         var isBootstrap = mode == IngestionMode.FirstSync;
 
         var isReconnect = mode == IngestionMode.Reconnect;
@@ -313,6 +333,36 @@ public sealed class IngestionRunner(
         FirstSync,
         Steady,
         Reconnect,
+    }
+
+    /// <summary>Days re-fetched before the newest known debit; known ids dedupe, so the overlap is harmless.</summary>
+    public const int OverlapDays = 7;
+
+    /// <summary>
+    /// Where this tick's fetch starts. First sync: 12 months back. Otherwise the day of the newest
+    /// stored debit (else the day the first sync finished) minus <see cref="OverlapDays"/>, never
+    /// earlier than 12 months back. Whole days only: fallback debit ids count per booking day.
+    /// </summary>
+    public static DateOnly ComputeDateFrom(
+        IngestionMode mode, DateOnly today, DateTimeOffset? newestDebit, DateTimeOffset? firstSyncCompletedAt)
+    {
+        var floor = today.AddMonths(-12);
+        var anchor = newestDebit ?? firstSyncCompletedAt;
+        if (mode == IngestionMode.FirstSync || anchor is null)
+        {
+            return floor;
+        }
+
+        // A debit booked in the future (value/transaction date fallback) must not push the start
+        // past today: the anchor is capped at today before the overlap is subtracted.
+        var anchorDay = DateOnly.FromDateTime(anchor.Value.UtcDateTime);
+        if (anchorDay > today)
+        {
+            anchorDay = today;
+        }
+
+        var candidate = anchorDay.AddDays(-OverlapDays);
+        return candidate < floor ? floor : candidate;
     }
 
     /// <summary>

@@ -131,7 +131,7 @@ public class PayeeIdentitySeenSetsTests
 
     private sealed class FakeDebitsFetcher(MappedDebits result) : IDebitsFetcher
     {
-        public Task<MappedDebits> FetchAsync(ConnectedAccount account, CancellationToken ct) => Task.FromResult(result);
+        public Task<MappedDebits> FetchAsync(ConnectedAccount account, DateOnly dateFrom, CancellationToken ct) => Task.FromResult(result);
     }
 
     private sealed class FakeSender : INotificationSender

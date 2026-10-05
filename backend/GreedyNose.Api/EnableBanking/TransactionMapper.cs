@@ -277,9 +277,9 @@ public static class TransactionMapper
     /// What does break it:
     /// - **The payee key is part of the id.** One spelling change at the bank re-keys the payee
     ///   and every debit under it at once, which R10b would read as a whole new history.
-    /// - **Pagination.** The ordinal counts within one response, so a same-day group split across
-    ///   a page boundary restarts at <c>#0</c> and collides. Harmless while `/debits` reads a
-    ///   single page; it must be solved before pagination is turned on.
+    /// - **Pagination** (solved). The ordinal counts within one <c>Map</c> call, so the fetcher
+    ///   merges all pages first and maps once; a same-day group split across a page boundary keeps
+    ///   counting. Anything that maps pages separately would reintroduce the collision.
     ///
     /// Either way this is a stopgap, not a design: the dump came from imported Mock ASPSP data,
     /// which may simply have dropped entry_reference in the import. Step 6 against the real bank

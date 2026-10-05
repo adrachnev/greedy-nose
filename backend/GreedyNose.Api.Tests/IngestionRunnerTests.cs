@@ -53,9 +53,12 @@ public class IngestionRunnerTests
     {
         public int CallCount { get; private set; }
 
-        public Task<MappedDebits> FetchAsync(ConnectedAccount account, CancellationToken ct)
+        public List<DateOnly> DateFroms { get; } = [];
+
+        public Task<MappedDebits> FetchAsync(ConnectedAccount account, DateOnly dateFrom, CancellationToken ct)
         {
             CallCount++;
+            DateFroms.Add(dateFrom);
             return Task.FromResult(result);
         }
     }
@@ -131,6 +134,9 @@ public class IngestionRunnerTests
         await db.SaveChangesAsync();
     }
 
+    /// <summary>How many days before the clock the seed helper dates its debit and sync row.</summary>
+    private const int SeedAgeDays = 30;
+
     private static async Task SeedBootstrappedAsync(string dbName, TimeProvider clock, string? sessionHash = null)
     {
         // The AccountSyncState row is what flips the first-sync check (R25); the single Debit row
@@ -140,7 +146,7 @@ public class IngestionRunnerTests
         {
             UserId = SeedData.UserId,
             AccountKey = AccountKey,
-            FirstSyncCompletedAt = clock.GetUtcNow().AddDays(-30),
+            FirstSyncCompletedAt = clock.GetUtcNow().AddDays(-SeedAgeDays),
             LastSessionIdHash = sessionHash,
         });
         db.Debits.Add(new Debit
@@ -149,11 +155,11 @@ public class IngestionRunnerTests
             Id = "seed",
             PayeeId = "name:SEED",
             AmountEUR = 1m,
-            Timestamp = clock.GetUtcNow().AddDays(-30),
+            Timestamp = clock.GetUtcNow().AddDays(-SeedAgeDays),
             HasTime = false,
             PaymentType = "Card payment",
             AccountKey = AccountKey,
-            FirstSeenAt = clock.GetUtcNow().AddDays(-30),
+            FirstSeenAt = clock.GetUtcNow().AddDays(-SeedAgeDays),
         });
         await db.SaveChangesAsync();
     }
@@ -265,6 +271,113 @@ public class IngestionRunnerTests
         var state = await verify.AccountSyncStates.SingleAsync();
         Assert.Equal(AccountKey, state.AccountKey);
         Assert.Equal(clock.GetUtcNow(), state.FirstSyncCompletedAt);
+        Assert.Equal([new DateOnly(2025, 9, 22)], fetcher.DateFroms);
+    }
+
+    [Fact]
+    public async Task The_first_sync_fetches_from_twelve_months_back_then_steady_ticks_from_the_newest_debit_minus_seven_days()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        var fetcher = new FakeDebitsFetcher(Mapped(Booked("2026-09-20", "SHOP A")));
+        var runner = NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), fetcher,
+            new FakeSender(_ => SendResult.Accepted("m")), clock);
+
+        await runner.RunOnceAsync(CancellationToken.None);
+        await runner.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal([new DateOnly(2025, 9, 22), new DateOnly(2026, 9, 13)], fetcher.DateFroms);
+    }
+
+    [Fact]
+    public async Task A_reconnect_tick_fetches_from_the_newest_debit_minus_seven_days_not_twelve_months()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        await SeedReconnectAsync(dbName, clock);
+        var fetcher = new FakeDebitsFetcher(Mapped());
+
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), fetcher,
+            new FakeSender(_ => SendResult.Accepted("m")), clock).RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal([new DateOnly(2026, 8, 16)], fetcher.DateFroms); // seeded debit 2026-08-23 minus 7 days
+    }
+
+    [Fact]
+    public async Task An_adopted_null_hash_row_fetches_from_the_newest_debit_minus_seven_days_not_twelve_months()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        await SeedBootstrappedAsync(dbName, clock, sessionHash: null);
+        var fetcher = new FakeDebitsFetcher(Mapped());
+
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), fetcher,
+            new FakeSender(_ => SendResult.Accepted("m")), clock).RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal([new DateOnly(2026, 8, 16)], fetcher.DateFroms); // seeded debit 2026-08-23 minus 7 days
+    }
+
+    [Fact]
+    public async Task A_steady_tick_on_an_empty_account_fetches_from_the_first_sync_day_minus_seven_days()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        await using (var db = NewInMemoryContext(dbName))
+        {
+            db.AccountSyncStates.Add(new AccountSyncState
+            {
+                UserId = SeedData.UserId,
+                AccountKey = AccountKey,
+                FirstSyncCompletedAt = new DateTimeOffset(2026, 9, 10, 8, 0, 0, TimeSpan.Zero),
+                LastSessionIdHash = SessionFingerprint.Of("session-1"),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var fetcher = new FakeDebitsFetcher(Mapped());
+        await NewRunner(new InMemoryDbContextFactory(dbName), NewConsentStore(clock), fetcher,
+            new FakeSender(_ => SendResult.Accepted("m")), clock).RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal([new DateOnly(2026, 9, 3)], fetcher.DateFroms);
+    }
+
+    [Theory]
+    [InlineData(IngestionRunner.IngestionMode.FirstSync, "2026-03-31", "2025-03-31")]
+    [InlineData(IngestionRunner.IngestionMode.FirstSync, "2028-02-29", "2027-02-28")]
+    [InlineData(IngestionRunner.IngestionMode.Steady, "2026-03-31", "2026-03-24")] // newest debit that day, minus 7
+    public void ComputeDateFrom_follows_the_mode(IngestionRunner.IngestionMode mode, string today, string expected)
+    {
+        var day = DateOnly.Parse(today, System.Globalization.CultureInfo.InvariantCulture);
+        var newest = new DateTimeOffset(day.Year, day.Month, day.Day, 15, 0, 0, TimeSpan.Zero);
+
+        var result = IngestionRunner.ComputeDateFrom(mode, day, newest, null);
+
+        Assert.Equal(DateOnly.Parse(expected, System.Globalization.CultureInfo.InvariantCulture), result);
+    }
+
+    [Fact]
+    public void ComputeDateFrom_never_starts_in_the_future_for_a_future_dated_newest_debit()
+    {
+        var today = new DateOnly(2026, 9, 22);
+        var future = new DateTimeOffset(2026, 10, 15, 0, 0, 0, TimeSpan.Zero);
+
+        var result = IngestionRunner.ComputeDateFrom(IngestionRunner.IngestionMode.Steady, today, future, null);
+
+        Assert.Equal(new DateOnly(2026, 9, 15), result); // today minus 7, not October
+        Assert.Equal(new DateOnly(2026, 9, 15), IngestionRunner.ComputeDateFrom(IngestionRunner.IngestionMode.Reconnect, today, null, future));
+    }
+
+    [Fact]
+    public void ComputeDateFrom_clamps_old_data_to_twelve_months_and_crosses_month_ends()
+    {
+        var today = new DateOnly(2026, 9, 22);
+        var old = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        Assert.Equal(new DateOnly(2025, 9, 22), IngestionRunner.ComputeDateFrom(IngestionRunner.IngestionMode.Steady, today, old, null));
+        Assert.Equal(new DateOnly(2025, 9, 22), IngestionRunner.ComputeDateFrom(IngestionRunner.IngestionMode.Reconnect, today, null, old));
+
+        // Newest debit 2028-03-03 minus 7 days lands in February of a leap year.
+        var march = new DateTimeOffset(2028, 3, 3, 0, 0, 0, TimeSpan.Zero);
+        Assert.Equal(new DateOnly(2028, 2, 25), IngestionRunner.ComputeDateFrom(IngestionRunner.IngestionMode.Steady, new DateOnly(2028, 4, 1), march, null));
     }
 
     [Fact]
@@ -341,7 +454,7 @@ public class IngestionRunnerTests
 
     private sealed class ThrowingDebitsFetcher : IDebitsFetcher
     {
-        public Task<MappedDebits> FetchAsync(ConnectedAccount account, CancellationToken ct) =>
+        public Task<MappedDebits> FetchAsync(ConnectedAccount account, DateOnly dateFrom, CancellationToken ct) =>
             throw new HttpRequestException("bank unreachable");
     }
 
@@ -428,6 +541,7 @@ public class IngestionRunnerTests
 
         await runner.RunOnceAsync(CancellationToken.None);
 
+        Assert.Equal([DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime.AddDays(-(SeedAgeDays + IngestionRunner.OverlapDays)))], fetcher.DateFroms);
         Assert.Single(sender.Sent);
         Assert.Equal("NEW SHOP · 10,00 €", sender.Sent[0].Title);
 
@@ -769,6 +883,64 @@ public class IngestionRunnerTests
         Assert.Equal("3 new debits while you were disconnected", push.Title);
         Assert.Equal("2 of them are bad. Tap to review them.", push.Body);
         await AssertCommittedAsync(dbName, newDebits: 3);
+    }
+
+    // --- The overlap window re-fetches stored debits; the dedup must make that invisible ------------
+
+    [Fact]
+    public async Task A_steady_tick_refetching_stored_debits_plus_one_new_bad_one_sends_one_push_and_stores_one_row()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        await SeedTokenAsync(dbName, clock);
+        var factory = new InMemoryDbContextFactory(dbName);
+        var consent = NewConsentStore(clock);
+        var old1 = Booked("2026-09-18", "OLD SHOP A", entryReference: "O1");
+        var old2 = Booked("2026-09-19", "OLD SHOP B", entryReference: "O2");
+
+        // Tick 1: the silent first sync stores the old debits.
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped(old1, old2)),
+            new FakeSender(_ => throw new InvalidOperationException("silent")), clock).RunOnceAsync(CancellationToken.None);
+
+        // Tick 2: steady; the overlap returns the old ones again plus one new unclassified (bad) debit.
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        var fetcher = new FakeDebitsFetcher(Mapped(old1, old2, Booked("2026-09-21", "NEW SHOP", entryReference: "N1")));
+        await NewRunner(factory, consent, fetcher, sender, clock).RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal([new DateOnly(2026, 9, 12)], fetcher.DateFroms); // newest stored 2026-09-19 minus 7
+        var push = Assert.Single(sender.Sent);
+        Assert.Equal("NEW SHOP · 10,00 €", push.Title);
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Equal(3, await verify.Debits.CountAsync());
+        Assert.Single(await verify.NotificationLog.ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_reconnect_tick_counts_only_new_debits_even_when_the_overlap_refetches_stored_ones()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        await SeedTokenAsync(dbName, clock);
+        var factory = new InMemoryDbContextFactory(dbName);
+        var old1 = Booked("2026-09-18", "OLD SHOP A", entryReference: "O1");
+        var old2 = Booked("2026-09-19", "OLD SHOP B", entryReference: "O2");
+
+        // Tick 1: first sync under the old session.
+        await NewRunner(factory, NewConsentStore(clock, sessionId: "old-session"), new FakeDebitsFetcher(Mapped(old1, old2)),
+            new FakeSender(_ => throw new InvalidOperationException("silent")), clock).RunOnceAsync(CancellationToken.None);
+
+        // Tick 2: a new session (reconnect); the overlap returns the old two plus one new bad debit.
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        var fetcher = new FakeDebitsFetcher(Mapped(old1, old2, Booked("2026-09-21", "NEW SHOP", entryReference: "N1")));
+        await NewRunner(factory, NewConsentStore(clock, sessionId: "session-1"), fetcher, sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        var (title, body) = ReconnectSummary.Build(newDebits: 1, badDebits: 1);
+        var push = Assert.Single(sender.Sent);
+        Assert.Equal(title, push.Title);
+        Assert.Equal(body, push.Body);
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.Equal(3, await verify.Debits.CountAsync());
     }
 
     [Fact]
@@ -1371,7 +1543,7 @@ public class IngestionRunnerTests
 
     private sealed class FailingDebitsFetcher(Exception exception) : IDebitsFetcher
     {
-        public Task<MappedDebits> FetchAsync(ConnectedAccount account, CancellationToken ct) => throw exception;
+        public Task<MappedDebits> FetchAsync(ConnectedAccount account, DateOnly dateFrom, CancellationToken ct) => throw exception;
     }
 
     private static async Task<(string DbName, FixedTimeProvider Clock, InMemoryDbContextFactory Factory)> SeedLiveSessionAsync()
