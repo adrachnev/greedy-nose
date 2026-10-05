@@ -4,6 +4,13 @@
 
 ## Status
 
+**2026-10-05 — Story 1.6 built (uncommitted at time of writing): `/debits` reads stored data.**
+`Debits/DebitsEndpoint`, no bank call any more; 409 backend tests, one review, no MUST FIX, verified
+live (no Enable Banking request caused by `/debits`). Three findings are beads (`gn-hw1` app
+pull-to-refresh, `gn-dyv` `skipped` always 0, `gn-w67` no paging). Decided order for the rest of
+Epic 1, one at a time: 1.8, then 1.7 (needs an encryption key in user secrets, set together with
+the owner).
+
 **2026-10-05 — Story 1.5 built (uncommitted at time of writing): one "current user" lookup.**
 `ICurrentUser`/`OwnerCurrentUser` in `Auth/`; `/rules` and `/device-token` use it. 400 backend
 tests, one review pass, no MUST FIX; two findings became beads (`gn-vgm`, `gn-oue`). `/debits`

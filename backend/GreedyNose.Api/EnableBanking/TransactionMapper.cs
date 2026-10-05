@@ -12,6 +12,9 @@ namespace GreedyNose.Api.EnableBanking;
 /// </summary>
 public static class TransactionMapper
 {
+    /// <summary>The one UTC timestamp format on the wire; shared with DebitsEndpoint.</summary>
+    internal const string TimestampFormat = "yyyy-MM-ddTHH:mm:ssZ";
+
     /// <summary>Where a debit lands when the bank names no creditor at all — see <see cref="ResolvePayeeKey"/>.</summary>
     private const string UnknownPayeeKey = "unknown";
 
@@ -338,7 +341,7 @@ public static class TransactionMapper
     private readonly record struct BookedAt(string Timestamp, bool HasTime, string Day)
     {
         public static BookedAt On(DateTime utc, bool hasTime) => new(
-            utc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
+            utc.ToString(TimestampFormat, CultureInfo.InvariantCulture),
             hasTime,
             utc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
     }

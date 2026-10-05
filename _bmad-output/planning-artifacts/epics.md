@@ -523,6 +523,19 @@ So that opening the app never spends the bank's few daily fetches (FR3, AR1).
 **And** incoming money is never in it (R2a)
 **And** the app's pull-to-refresh only re-reads this endpoint
 
+**As built (2026-10-05):** `Debits/DebitsEndpoint.HandleAsync(ICurrentUser, GreedyNoseDbContext,
+CancellationToken)` replaces the inline lambda in `Program.cs`. It reads the user's stored debits
+(all accounts, newest first, `Id` as tie-break) and the payees they reference, and returns the
+unchanged `DebitsDto` shape; the timestamp format is one shared constant
+(`TransactionMapper.TimestampFormat`). No bank, consent or fetcher dependency; nothing stored → 200
+with empty lists (the old 409 is gone). 409 tests (400 + 9 new, in the container), one review pass,
+no MUST FIX. **Verified live** (container backend, dev Postgres, Sandbox application): `/debits` →
+200, 94 debits and 44 payees with the same field names as before, **zero** Enable Banking requests
+caused by it (request count 1 → 1 around the call; the one request is the worker's startup tick),
+401 without the key. **Not done, recorded as beads:** the app's pull-to-refresh (the app has no
+`RefreshControl` yet, `gn-hw1`), `skipped` is always 0 because stored data cannot recount refused
+charges (`gn-dyv`), no paging (`gn-w67`).
+
 ### Story 1.7: Consents live in an encrypted database table
 
 As the owner,

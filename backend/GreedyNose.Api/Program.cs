@@ -1,7 +1,7 @@
-using System.Text.Json;
 using GreedyNose.Api.Auth;
 using GreedyNose.Api.Consent;
 using GreedyNose.Api.Data;
+using GreedyNose.Api.Debits;
 using GreedyNose.Api.EnableBanking;
 using FirebaseAdmin.Messaging;
 using GreedyNose.Api.Ingestion;
@@ -140,42 +140,8 @@ app.MapGet("/callback", ConsentEndpoints.CallbackAsync);
 // What the app actually consumes: Payee and Debit exactly as app/src/domain/model.ts declares
 // them. No classification travels — R6 makes that the client's job, derived from the current rule,
 // which is what lets a rule edit re-label existing debits without the backend hearing about it.
-app.MapGet("/debits", async (EnableBankingClient eb, ConsentStore consent, CancellationToken ct) =>
-{
-    var account = consent.PrimaryAccount;
-    if (account is null)
-    {
-        return Results.Problem("No connected account. Connect a bank first (POST /connect-links).", statusCode: 409);
-    }
-
-    var result = await eb.GetAsync($"/accounts/{account.Uid}/transactions", ct);
-    if (!result.IsSuccess)
-    {
-        return Results.Content(result.Body, "application/json", statusCode: result.StatusCode);
-    }
-
-    var response = JsonSerializer.Deserialize<EbTransactionsResponse>(result.Body, EnableBankingClient.Json);
-    if (response is null)
-    {
-        return Results.Problem("Enable Banking returned a body we could not read.");
-    }
-
-    // Account.Key, never Account.Uid — the uid changes every session, and debit identity must not.
-    var mapped = TransactionMapper.Map(response, account.Key);
-
-    // Loudly, one line each: a charge the mapper could not represent is invisible to the user, and
-    // an invisible charge is the failure R1 exists to prevent. Step 7 wants these counts.
-    //
-    // Only the *count* goes to the app, as DebitsDto.Skipped — these strings name merchants and
-    // amounts, and the app is not their audience. The mapper fills that count itself, so the
-    // payload here is already complete; nothing below patches it.
-    foreach (var skipped in mapped.Skipped)
-    {
-        app.Logger.LogWarning("Skipped a debit the mapper could not represent — {Detail}", skipped);
-    }
-
-    return Results.Ok(mapped.Payload);
-});
+// Story 1.6: served from the stored Debits/Payees; no bank call (see DebitsEndpoint).
+app.MapGet("/debits", DebitsEndpoint.HandleAsync);
 
 // --- Notification tracer bullet, step 2: device token registration ---------------------------
 
