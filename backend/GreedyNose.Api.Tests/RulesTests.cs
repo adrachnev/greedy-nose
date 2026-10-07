@@ -243,6 +243,59 @@ public class RulesTests
         }
     }
 
+    private static async Task PostAsync(string dbName, RulesRequest request)
+    {
+        await using var db = NewInMemoryContext(dbName);
+        await RulesEndpoint.HandleAsync(
+            request, db, TestUsers.Owner, new FixedTimeProvider(DateTimeOffset.UtcNow), NullLoggerFactory.Instance, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task A_placeholder_name_never_replaces_a_known_name_but_the_rule_still_updates()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await PostAsync(dbName, ValidRequest(classification: "bad", name: "Bäckerei Müller", initials: "BM", iban: "DE00"));
+
+        // A start-up resync for a payee the app does not know: placeholder name, no IBAN.
+        await PostAsync(dbName, ValidRequest(
+            classification: "good", amountEUR: 30m, name: "Unknown payee", initials: "UP", iban: ""));
+
+        await using var verify = NewInMemoryContext(dbName);
+        var payee = await verify.Payees.SingleAsync(p => p.UserId == SeedData.UserId && p.Id == "iban:DE00");
+        Assert.Equal("Bäckerei Müller", payee.Name);
+        Assert.Equal("BM", payee.Initials);
+        Assert.Equal("DE00", payee.Iban);
+
+        var rule = await verify.Rules.SingleAsync(r => r.UserId == SeedData.UserId && r.PayeeId == "iban:DE00");
+        Assert.Equal(Classification.Good, rule.Classification);
+        Assert.Equal(30m, rule.AmountEUR);
+    }
+
+    [Fact]
+    public async Task A_real_new_name_still_overwrites_the_old_one()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await PostAsync(dbName, ValidRequest(name: "Old Name", initials: "ON"));
+        await PostAsync(dbName, ValidRequest(name: "New Name", initials: "NN"));
+
+        await using var verify = NewInMemoryContext(dbName);
+        var payee = await verify.Payees.SingleAsync(p => p.UserId == SeedData.UserId && p.Id == "iban:DE00");
+        Assert.Equal("New Name", payee.Name);
+        Assert.Equal("NN", payee.Initials);
+    }
+
+    [Fact]
+    public async Task A_first_insert_with_the_placeholder_still_creates_payee_and_rule()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await PostAsync(dbName, ValidRequest(name: "Unknown payee", initials: "UP", iban: ""));
+
+        await using var verify = NewInMemoryContext(dbName);
+        var payee = await verify.Payees.SingleAsync(p => p.UserId == SeedData.UserId && p.Id == "iban:DE00");
+        Assert.Equal("Unknown payee", payee.Name);
+        Assert.Equal(1, await verify.Rules.CountAsync(r => r.UserId == SeedData.UserId && r.PayeeId == "iban:DE00"));
+    }
+
     [Fact]
     public async Task Two_different_payees_get_two_independent_rows()
     {

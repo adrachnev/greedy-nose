@@ -21,7 +21,7 @@ import {
 } from './backendFeed';
 import { USE_BACKEND } from './config';
 import { startDeviceRegistration } from './deviceStore';
-import { getRules, saveRule, subscribe as subscribeToRules } from './rulesStore';
+import { getRules, saveRule, startRulesResync, subscribe as subscribeToRules } from './rulesStore';
 
 // Every collection is read through useSyncExternalStore, so screens re-render
 // when one changes elsewhere — e.g. navigating back to the debit list after
@@ -138,4 +138,18 @@ export function useDataSource(): DataSource {
  */
 export function useDeviceRegistration(): void {
   useEffect(() => startDeviceRegistration(), []);
+}
+
+// --- Rules resync ---------------------------------------------------------------
+
+/**
+ * Resends every local rule to the backend once per app start — call it once,
+ * from the root component, next to useDeviceRegistration(). Reads nothing, so
+ * nothing re-renders; the store's own once-per-process guard makes a remount
+ * safe, and there is deliberately no foreground trigger. See startRulesResync.
+ */
+export function useRulesResync(): void {
+  useEffect(() => {
+    startRulesResync();
+  }, []);
 }

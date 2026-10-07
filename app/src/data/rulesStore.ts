@@ -17,8 +17,10 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Payee, Rule, RuleDraft } from '../domain/model';
+import { createPayeeLookup } from '../domain/payees';
 import { FIXTURE_SEED_RULES } from '../mocks/data';
 import { backendHeaders, hasApiKey } from './backendAuth';
+import { getPayees, getState as getFeedState, subscribe as subscribeToFeed } from './backendFeed';
 import { BACKEND_BASE_URL, BACKEND_TIMEOUT_MS, USE_BACKEND } from './config';
 
 /**
@@ -47,6 +49,8 @@ export function getRules(): Rule[] {
 }
 
 let hydrationStarted = false;
+/** Settles when hydrate() has finished; null until the first subscribe(). */
+let hydration: Promise<void> | null = null;
 
 /**
  * Subscribing is also what starts hydration, mirroring backendFeed.ts's
@@ -60,7 +64,7 @@ export function subscribe(listener: Listener): () => void {
     hydrationStarted = true;
     // Not awaited: hydration reports through the store itself (setRules +
     // notify), same as backendFeed.subscribe() kicking off refresh().
-    hydrate();
+    hydration = hydrate();
   }
   return () => {
     listeners.delete(listener);
@@ -255,18 +259,7 @@ export function saveRule(payee: Payee, draft: RuleDraft): void {
  * from the backend's (`name:LIDL CONNECT`) — see config.ts's own note on why a
  * rule saved under one scheme simply matches nothing under the other.
  *
- * **Known gap, deliberately not fixed here (see TODO.md):** unlike
- * deviceStore.ts's register(), which gets a fresh attempt on every launch,
- * there is no retry when this very first sync fails — offline, or the
- * backend down at exactly the moment the user saves. If it fails, that rule
- * can silently never reach Postgres, so that payee's charges can never
- * trigger a push until the user re-opens the rule and saves it again by
- * hand. AsyncStorage still holds the correct rule throughout (R6), so
- * nothing is lost *in the app* — only the backend's copy is stale. Building
- * a per-launch resync of every local rule (mirroring deviceStore.ts's
- * pattern) is bigger than this step's plan called for ("a sibling
- * fire-and-forget call... failure must not block local save"); tracked as a
- * follow-up rather than built now.
+ * A failed sync is retried by startRulesResync() on the next app start.
  */
 async function syncRuleToBackend(payee: Payee, rule: Rule): Promise<void> {
   if (!USE_BACKEND) {
@@ -308,5 +301,85 @@ async function syncRuleToBackend(payee: Payee, rule: Rule): Promise<void> {
     console.warn('[rulesStore] could not reach the backend to sync the rule', error);
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+// --- Resync at start (Story 2.1) -----------------------------------------------
+
+/** Once per process, never reset — same one-shot guard as deviceStore.ts. */
+let resyncStarted = false;
+
+/** Resolves once the feed's first load has finished, ready or error. */
+function feedSettled(): Promise<void> {
+  return new Promise(resolve => {
+    let done = false;
+    let unsubscribe: (() => void) | undefined;
+    // Capped: a feed stuck in 'loading' (e.g. a body read the abort does not
+    // cover) must not block the resync forever; placeholders go out instead.
+    const timer = setTimeout(() => finish(), BACKEND_TIMEOUT_MS * 2);
+    const finish = () => {
+      if (done) {
+        return;
+      }
+      done = true;
+      clearTimeout(timer);
+      unsubscribe?.();
+      resolve();
+    };
+    const check = () => {
+      const { status } = getFeedState();
+      if (status === 'ready' || status === 'error') {
+        finish();
+      }
+    };
+    unsubscribe = subscribeToFeed(check);
+    // The feed can settle synchronously inside subscribe() (no API key), before
+    // `unsubscribe` exists; this covers that, and an already-settled feed.
+    check();
+    if (done) {
+      unsubscribe();
+    }
+  });
+}
+
+/**
+ * Sends every local rule to the backend once per app start, so a rule whose
+ * first sync failed (offline at save time — see syncRuleToBackend) still
+ * reaches the server-side rule engine. The backend upserts, so resending is
+ * idempotent; no "synced" flag is kept, for the reason deviceStore.ts gives
+ * for its own missing flag. Deliberately not tied to foreground events.
+ *
+ * Waits for hydration and for the feed's first load (ready *or* error) so the
+ * real payee name goes out where the feed knows it. A stored rule carries no
+ * name, so an unknown payee goes out as the placeholder — the backend does not
+ * let that replace a real name. Sequential, not parallel: a dead backend costs
+ * one timeout per rule, never a burst of requests.
+ *
+ * Never rejects: syncRuleToBackend swallows its own failures, and the catch is
+ * for anything else the waiting could throw. Local rules are never touched.
+ */
+export function startRulesResync(): void {
+  if (!USE_BACKEND || !hasApiKey() || resyncStarted) {
+    return;
+  }
+  resyncStarted = true;
+  // Subscribing is what starts hydration; the listener itself has no work.
+  const unsubscribe = subscribe(() => {});
+  resyncRules(hydration ?? Promise.resolve())
+    .catch(error => console.warn('[rulesStore] could not resync the rules', error))
+    .finally(unsubscribe);
+}
+
+async function resyncRules(hydrated: Promise<void>): Promise<void> {
+  await hydrated;
+  await feedSettled();
+  const lookup = createPayeeLookup(getPayees());
+  for (const { payeeId } of [...rules]) {
+    // Re-read per rule: an edit made while earlier rules were in flight has
+    // already been sent by saveRule(), and a stale resend must not overwrite it.
+    const rule = rules.find(r => r.payeeId === payeeId);
+    if (rule) {
+      await syncRuleToBackend(lookup(payeeId), rule);
+    }
   }
 }

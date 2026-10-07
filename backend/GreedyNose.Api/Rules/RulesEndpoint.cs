@@ -29,6 +29,11 @@ public sealed record RulesRequest(
 /// inserted, and is never touched again here; step 6 must later overwrite it with the real (earlier)
 /// bank date once it starts reading real transactions for a payee this endpoint created first.
 ///
+/// On update, an existing payee's Name/Initials are refreshed only when the incoming name is a real
+/// one — not the "Unknown payee" placeholder or the raw IBAN (<see cref="TransactionMapper.IsFallbackDisplayName"/>),
+/// which is all the app can offer when it resyncs a rule at start-up for a payee it does not know.
+/// A non-blank IBAN is refreshed; a blank one never wipes a known one.
+///
 /// Idempotent: posting the same payee/rule twice, sequentially, leaves one row each with the
 /// second write winning. Two *concurrent* posts for the same brand-new payeeId are a narrower
 /// case — see the race handling in <see cref="HandleAsync"/> and its own caveat about whose
@@ -81,7 +86,8 @@ public static class RulesEndpoint
         // rather than normalized when it looks like exactly that — see IsFallbackDisplayName's own
         // doc comment (2026-09-28 review, Finding 1). This endpoint also has no creditor agent to
         // offer (the app never sends one), so RecordSeen's third argument is always null below.
-        var normalizedName = TransactionMapper.IsFallbackDisplayName(validated.Name, validated.Iban)
+        var isFallbackName = TransactionMapper.IsFallbackDisplayName(validated.Name, validated.Iban);
+        var normalizedName = isFallbackName
             ? ""
             : TransactionMapper.NormalizeName(validated.Name);
 
@@ -112,10 +118,21 @@ public static class RulesEndpoint
             }
             else
             {
-                // Refreshed on every save; FirstSeenAt is never touched here — see the class summary.
-                payee.Name = validated.Name;
-                payee.Initials = validated.Initials;
-                payee.Iban = validated.Iban;
+                // FirstSeenAt is never touched here — see the class summary. Name/Initials are refreshed
+                // only when the app sent a real name: a start-up resync of a rule whose payee the app
+                // no longer knows can only offer the placeholder (or the raw IBAN), and that must not
+                // replace a name we already hold. Likewise a blank IBAN never wipes a known one.
+                if (!isFallbackName)
+                {
+                    payee.Name = validated.Name;
+                    payee.Initials = validated.Initials;
+                }
+
+                if (!string.IsNullOrWhiteSpace(validated.Iban))
+                {
+                    payee.Iban = validated.Iban;
+                }
+
                 payee.RecordSeen(validated.Iban, normalizedName, creditorAgent: null);
             }
 
