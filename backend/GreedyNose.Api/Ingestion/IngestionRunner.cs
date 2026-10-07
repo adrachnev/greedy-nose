@@ -18,7 +18,7 @@ namespace GreedyNose.Api.Ingestion;
 /// <c>IngestionRunnerTests</c> exercises with an in-memory database, a fake <see cref="IDebitsFetcher"/>
 /// and a fake <see cref="INotificationSender"/> — no network, no real Postgres.
 ///
-/// Fault isolation is deliberately **not** here: a tick that throws is <see cref="IngestionWorker"/>'s
+/// Fault isolation is deliberately **not** here: a tick that throws is the timer Function's (<c>IngestionTimerFunction</c>)
 /// problem (its per-tick try/catch), so this class can fail loudly and let the caller decide.
 /// </summary>
 public sealed class IngestionRunner(
@@ -28,7 +28,7 @@ public sealed class IngestionRunner(
     ISessionStatusChecker sessionStatus,
     INotificationSender sender,
     TimeProvider clock,
-    ILogger<IngestionRunner> logger)
+    ILogger<IngestionRunner> logger) : IIngestionTick
 {
     public async Task RunOnceAsync(CancellationToken ct)
     {
@@ -465,14 +465,14 @@ public sealed class IngestionRunner(
         catch (DbUpdateConcurrencyException)
         {
             // An already-existing payee's row moved under us — a concurrent POST /rules updated it
-            // (or another tick, though IngestionWorker itself runs ticks strictly sequentially in
+            // (or another tick, though the timer trigger runs ticks strictly sequentially in
             // one process; the same "not this deployment's shape" caveat as the insert race below)
             // between our read above and our write here. Unlike the insert race, last-write-wins
             // would silently drop whichever writer's RecordSeen additions lost, with no exception
             // and no log line — exactly what Payee.Version exists to prevent. One retry: clear the
             // poisoned tracked state, re-read the now-current rows, and reapply this tick's own
             // payee data on top of them. A second conflict inside the same tick is left to
-            // propagate — IngestionWorker's own per-tick try/catch logs it and the next scheduled
+            // propagate — the timer Function's own per-tick try/catch logs it and the next scheduled
             // tick (or the next POST /rules) picks the payee back up, the same self-heals posture
             // as every other race in this method.
             logger.LogInformation("A payee row changed underneath this tick's own upsert (concurrent POST /rules); re-reading and retrying once.");
@@ -549,7 +549,7 @@ public sealed class IngestionRunner(
         // R11 guard, defense in depth: under normal operation this debit id cannot already be in
         // NotificationLog — it isn't even inserted yet at this point — so this only matters against
         // a second process concurrently ingesting the same account (not a shape this tracer bullet
-        // deploys; IngestionWorker runs ticks strictly sequentially in one process). Cheap, and it
+        // deploys; the timer trigger runs ticks strictly sequentially in one process). Cheap, and it
         // reads the same table the unique-index catch below guards on the write side.
         var alreadyLogged = await db.NotificationLog.AnyAsync(
             n => n.UserId == SeedData.UserId && n.DebitId == debit.Id, ct);

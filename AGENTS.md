@@ -80,6 +80,15 @@ the single source of truth for product behavior; where anything else disagrees, 
   127.0.0.1, so `adb reverse tcp:5199 tcp:5199` still works; run it in the background and stop it
   with `docker rm -f <name>`). It mounts the user-secrets file and the Firebase / Enable Banking
   key files read-only and prints no secret. Verified live 2026-10-01 (Story 1.3).
+- Polling (Story 2.3): the API no longer polls the bank — ingestion runs only in the Functions host
+  (`backend/GreedyNose.Functions`, a timer trigger), until Story 2.4 merges both hosts. Start it with
+  `bash tools/run-functions-container.sh <name>` (Docker, dev Postgres and Azurite up:
+  `docker compose -f backend/docker-compose.yml up -d`); it publishes in the SDK image and runs the
+  official Functions image. Default schedule: every 6 h (`IngestionSchedule`, a flat name on purpose —
+  the host resolves `%name%` through configuration). Schedules under 6 h are refused unless
+  `Ingestion__AllowShortInterval=true`; for local tests pass
+  `-e "IngestionSchedule=*/30 * * * * *" -e Ingestion__AllowShortInterval=true` (Sandbox only — N26
+  allows ~4 fetches a day). Verified live 2026-10-07.
 - Backend API key (Story 1.3): the backend refuses to start without `Api:Key` (at least 32
   characters, no leading/trailing whitespace) — `dotnet user-secrets set "Api:Key" "<random>"`.
   Put the same value into `app/src/data/apiKey.local.ts`. Every endpoint except `/connect` and

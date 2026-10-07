@@ -7,10 +7,10 @@ namespace GreedyNose.Api.Ingestion;
 /// <summary>
 /// The one production implementation of <see cref="IDebitsFetcher"/>, and the fix for the
 /// captive-dependency bug flagged in TRACER-02-NOTIFICATIONS.md's step 6 plan: a singleton
-/// <see cref="IngestionWorker"/> cannot hold a transient typed <c>HttpClient</c>
+/// the timer Function cannot hold a transient typed <c>HttpClient</c>
 /// (<see cref="EnableBankingClient"/>) for the process lifetime — the handler would never rotate.
 /// Instead this builds a fresh <see cref="EnableBankingClient"/> every call from
-/// <see cref="IHttpClientFactory"/>, reusing <c>Program.cs</c>'s existing BaseAddress/Timeout
+/// <see cref="IHttpClientFactory"/>, reusing <c>GreedyNoseCoreServices</c>'s existing BaseAddress/Timeout
 /// configuration for the <c>nameof(EnableBankingClient)</c>-named client
 /// (<c>AddHttpClient&lt;EnableBankingClient&gt;</c> registers under the type's short name).
 /// </summary>

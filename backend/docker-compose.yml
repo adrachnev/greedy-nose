@@ -21,5 +21,21 @@ services:
       timeout: 3s
       retries: 10
 
+  # Storage emulator for the Functions host (Story 2.3): the timer trigger keeps its singleton lock
+  # (a blob lease) in AzureWebJobsStorage. Nothing real lives here; the account key is Azurite's
+  # public well-known dev key. Only the Functions host container uses it, over the compose network.
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: greedy-nose-azurite
+    restart: unless-stopped
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --skipApiVersionCheck --location /data
+    ports:
+      - "127.0.0.1:10000:10000"
+      - "127.0.0.1:10001:10001"
+      - "127.0.0.1:10002:10002"
+    volumes:
+      - greedy-nose-azurite:/data
+
 volumes:
   greedy-nose-pgdata:
+  greedy-nose-azurite:

@@ -1,0 +1,9 @@
+{
+  "version": "2.0",
+  "logging": {
+    "logLevel": {
+      "Default": "Information",
+      "Host.Triggers.Timer": "Information"
+    }
+  }
+}

@@ -32,7 +32,6 @@ docker run --rm --name "$NAME" --network backend_default -p 127.0.0.1:5199:5199 
   -e Firebase__ServiceAccountPath=/secrets/firebase.json \
   -e EnableBanking__PrivateKeyPath=/secrets/eb.pem \
   -e "ConnectionStrings__Postgres=$PG" \
-  -e Ingestion__PollIntervalSeconds=21600 \
   "$@" \
   -w /src mcr.microsoft.com/dotnet/sdk:10.0 \
   bash -c "${GN_CMD:-dotnet run --project GreedyNose.Api --artifacts-path /tmp/artifacts --no-launch-profile}"

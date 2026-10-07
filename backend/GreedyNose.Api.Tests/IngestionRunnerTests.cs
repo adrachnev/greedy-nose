@@ -747,7 +747,7 @@ public class IngestionRunnerTests
             Assert.Empty(await verify.NotificationLog.ToListAsync());
         }
 
-        // A later, uncancelled tick (IngestionWorker's next timer fire) sees the same debit as
+        // A later, uncancelled tick (the next timer fire) sees the same debit as
         // still-new — because nothing committed for it — and retries the whole thing, this time to
         // completion.
         var retryRunner = NewRunner(new InMemoryDbContextFactory(dbName), consent, fetcher, sender, clock);

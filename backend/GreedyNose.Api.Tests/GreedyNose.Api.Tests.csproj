@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GreedyNose.Api\GreedyNose.Api.csproj" />
+    <ProjectReference Include="..\GreedyNose.Functions\GreedyNose.Functions.csproj" />
   </ItemGroup>
 
   <!-- The fixture is the test's input, so it has to sit next to the assembly at run time.
