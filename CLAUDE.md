@@ -4,6 +4,21 @@
 
 ## Status
 
+**2026-10-07 (evening) — Stories 2.1, 2.2, 2.3, 2.4 and 2.9 built, reviewed, live-verified and committed
+(nothing pushed).** 2.1 the app resends all local rules at start (backend keeps real payee names);
+2.2 channel `alerts` (HIGH) + monochrome bell icon, heads-up confirmed on the phone; 2.3 the poller is a
+timer Function (`IngestionSchedule`, flat name on purpose; 6 h floor unless `Ingestion__AllowShortInterval`);
+2.4 **one host**, `backend/GreedyNose.Functions` serves the API (HTTP functions, key as Functions middleware),
+the first-sync queue function and the timer — `GreedyNose.Api` is a library now; 2.9 `PendingPushes` mark +
+retry every tick for 24 h (live: `NoToken` retried, sent once after the token returned). 536 backend tests,
+dev DB migrated (`AddPendingPushes`). Run the host with `bash tools/run-functions-container.sh <name>` (alias
+`run-backend-container.sh`), migrations with `tools/ef-container.sh` (`EF_RW=1 … migrations add <Name>`);
+a backgrounded debug app sends no request after a code change — `adb shell am force-stop com.greedynose`
+first. Next: `bd ready` — 2.10 (email after 3 failed pushes; code, a mail service such as Brevo) or 2.5
+(Neon, needs the owner's account). Open P1 beads before go-live: `gn-xeq`, `gn-6k5`, `gn-7h4`; new
+follow-ups: `gn-a64` (poison queue unwatched, P2), `gn-emh` (alert on failing consent restore, P2),
+`gn-l8j`, `gn-ct3`, `gn-a5f`, `gn-bo6`, `gn-0jn`, `gn-1ql`, `gn-apj`. The backend is still on the SANDBOX app.
+
 **2026-10-07 — Story 1.7 built (uncommitted at time of writing): consents live encrypted in the database.**
 `BankConsents` + AES-256-GCM (`ConsentCipher`), key `Consent:EncryptionKey` in user secrets (the backend
 refuses to start without it, and stops on a wrong key); `consent.local.json` is no longer used (not
