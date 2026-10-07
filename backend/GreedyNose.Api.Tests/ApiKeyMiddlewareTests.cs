@@ -1,11 +1,12 @@
 using GreedyNose.Api.Auth;
+using GreedyNose.Functions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
 namespace GreedyNose.Api.Tests;
 
 /// <summary>
-/// Story 1.3: the API key gate, run against <see cref="DefaultHttpContext"/> — no server. The key
+/// Story 1.3: the API key gate (shared by every host, here through the Functions middleware), run against <see cref="DefaultHttpContext"/> — no server. The key
 /// below is a throwaway test value, not a real secret.
 /// </summary>
 public class ApiKeyMiddlewareTests
@@ -16,14 +17,11 @@ public class ApiKeyMiddlewareTests
     {
         public bool NextCalled { get; private set; }
         public CapturingLogger Logger { get; } = new();
-        private readonly ApiKeyMiddleware _middleware;
+        private readonly ApiKeyFunctionsMiddleware _middleware;
 
         public Harness()
         {
-            _middleware = new ApiKeyMiddleware(
-                _ => { NextCalled = true; return Task.CompletedTask; },
-                new ApiKeyOptions { Key = Key },
-                Logger);
+            _middleware = new ApiKeyFunctionsMiddleware(new ApiKeyGate(new ApiKeyOptions { Key = Key }), Logger);
         }
 
         public async Task<HttpContext> SendAsync(string path, string? authorization)
@@ -35,7 +33,7 @@ public class ApiKeyMiddlewareTests
                 context.Request.Headers.Authorization = authorization;
             }
 
-            await _middleware.InvokeAsync(context);
+            await _middleware.InvokeAsync(context, () => { NextCalled = true; return Task.CompletedTask; });
             return context;
         }
     }
@@ -190,7 +188,7 @@ public class ApiKeyMiddlewareTests
         new ApiKeyOptions { Key = new string('k', 32) }.Validate();
     }
 
-    private sealed class CapturingLogger : ILogger<ApiKeyMiddleware>
+    private sealed class CapturingLogger : ILogger<ApiKeyFunctionsMiddleware>
     {
         public List<string> Entries { get; } = [];
 

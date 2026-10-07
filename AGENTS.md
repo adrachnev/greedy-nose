@@ -80,11 +80,16 @@ the single source of truth for product behavior; where anything else disagrees, 
   127.0.0.1, so `adb reverse tcp:5199 tcp:5199` still works; run it in the background and stop it
   with `docker rm -f <name>`). It mounts the user-secrets file and the Firebase / Enable Banking
   key files read-only and prints no secret. Verified live 2026-10-01 (Story 1.3).
-- Polling (Story 2.3): the API no longer polls the bank — ingestion runs only in the Functions host
-  (`backend/GreedyNose.Functions`, a timer trigger), until Story 2.4 merges both hosts. Start it with
-  `bash tools/run-functions-container.sh <name>` (Docker, dev Postgres and Azurite up:
-  `docker compose -f backend/docker-compose.yml up -d`); it publishes in the SDK image and runs the
-  official Functions image. Default schedule: every 6 h (`IngestionSchedule`, a flat name on purpose —
+- Host (Stories 2.3 + 2.4): there is **one** host, `backend/GreedyNose.Functions` — the API (HTTP
+  functions, same paths, no `/api` prefix, key checked by Functions middleware), the first-sync queue
+  function (the consent callback enqueues a message) and the ingestion timer. `GreedyNose.Api` is only
+  a library now. Start it with `bash tools/run-functions-container.sh <name>` (or its alias
+  `tools/run-backend-container.sh`; Docker, dev Postgres and Azurite up:
+  `docker compose -f backend/docker-compose.yml up -d`); the API answers on 127.0.0.1:5199, so
+  `adb reverse` and `tools/connect-bank.sh` work as before. Migrations: `tools/ef-container.sh`. The
+  first run of a started app after a code change needs a hard restart (`adb shell am force-stop
+  com.greedynose`) — a backgrounded app keeps its old state and sends no request. Default schedule:
+  every 6 h (`IngestionSchedule`, a flat name on purpose —
   the host resolves `%name%` through configuration). Schedules under 6 h are refused unless
   `Ingestion__AllowShortInterval=true`; for local tests pass
   `-e "IngestionSchedule=*/30 * * * * *" -e Ingestion__AllowShortInterval=true` (Sandbox only — N26
@@ -188,5 +193,6 @@ never a copy.
   random bytes, e.g. `dotnet user-secrets set "Consent:EncryptionKey" "$(openssl rand -base64 32)"
   --project backend/GreedyNose.Api` — never print or commit the value). Consents live encrypted in the
   `BankConsents` table; `consent.local.json` is no longer used. Apply the migration before the first
-  start (container recipe: `GN_CMD` in `tools/run-backend-container.sh`). A wrong key stops the
+  start (container recipe: `bash tools/ef-container.sh database update`; `migrations list` is
+  read-only). A wrong key stops the
   backend at startup on purpose. After switching, connect a bank again with `bash tools/connect-bank.sh`.

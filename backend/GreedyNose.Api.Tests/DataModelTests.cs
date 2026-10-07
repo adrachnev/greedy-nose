@@ -116,6 +116,6 @@ public class DataModelTests
 
         Assert.False(
             context.Database.HasPendingModelChanges(),
-            "The model has changes no migration covers. Run `dotnet ef migrations add <Name> --project GreedyNose.Api`.");
+            "The model has changes no migration covers. Run `dotnet ef migrations add <Name> --project GreedyNose.Api` with ConnectionStrings__Postgres set (design-time factory: Data/DesignTimeDbContextFactory.cs; on the host use the container recipe in AGENTS.md).");
     }
 }

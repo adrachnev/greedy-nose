@@ -1,9 +1,22 @@
 {
   "version": "2.0",
+  "functionTimeout": "00:10:00",
   "logging": {
     "logLevel": {
       "Default": "Information",
       "Host.Triggers.Timer": "Information"
+    }
+  },
+  "extensions": {
+    "http": {
+      "routePrefix": ""
+    },
+    "queues": {
+      "batchSize": 1,
+      "newBatchThreshold": 0,
+      "maxDequeueCount": 3,
+      "visibilityTimeout": "00:02:00",
+      "messageEncoding": "base64"
     }
   }
 }

@@ -9,9 +9,8 @@ using Microsoft.EntityFrameworkCore;
 namespace GreedyNose.Api;
 
 /// <summary>
-/// The non-HTTP service registration shared by the API host and the Functions host (Story 2.3), so
-/// the ingestion tick runs with exactly the services the API uses — one place for the startup checks,
-/// no second copy to drift. Nothing here knows about HTTP or the API key.
+/// The non-HTTP service registration of the Functions host (Stories 2.3, 2.4): one place for the
+/// services every Function uses and for the startup checks. Nothing here knows about HTTP or the API key.
 /// </summary>
 public static class GreedyNoseCoreServices
 {
@@ -69,7 +68,7 @@ public static class GreedyNoseCoreServices
         });
 
         // One FirebaseApp for the process, created from the service-account key the first time the
-        // sender is resolved — which RunGreedyNoseStartupChecksAsync does right after Build(), so a
+        // sender is resolved — which RunGreedyNoseKeyChecks does right after Build(), so a
         // missing or unreadable key stops the host at startup rather than on the first alert.
         // Singletons on purpose: FirebaseMessaging holds the credential and its token cache.
         var firebase = configuration.GetSection(FirebaseOptions.SectionName).Get<FirebaseOptions>()
@@ -92,6 +91,7 @@ public static class GreedyNoseCoreServices
 
         return services;
     }
+
     /// <summary>
     /// Fail loudly at startup rather than on the first request or tick: a missing key or application
     /// ID is a setup mistake, and finding it later costs more than finding it here. Needs no database.
@@ -103,16 +103,5 @@ public static class GreedyNoseCoreServices
 
         // Resolving the sender loads the Firebase key (see FirebaseAppFactory).
         services.GetRequiredService<INotificationSender>();
-    }
-
-    /// <summary>
-    /// The API's full startup: the key checks plus a consent restore, so restarting does not cost a
-    /// click. The restore throws (and so stops startup) on a wrong key or an unreachable database —
-    /// never a silently empty store. The Functions host does NOT call this: it restores per tick.
-    /// </summary>
-    public static async Task RunGreedyNoseStartupChecksAsync(this IServiceProvider services)
-    {
-        services.RunGreedyNoseKeyChecks();
-        await services.GetRequiredService<ConsentStore>().RestoreAsync(TimeProvider.System.GetUtcNow());
     }
 }

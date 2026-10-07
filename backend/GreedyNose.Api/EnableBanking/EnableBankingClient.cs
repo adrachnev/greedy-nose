@@ -27,7 +27,7 @@ public sealed class EnableBankingClient(HttpClient http, EnableBankingSigner sig
     /// A fresh client per call from <see cref="IHttpClientFactory"/>, for the singletons that cannot
     /// hold a typed <see cref="HttpClient"/> for the process lifetime (the ingestion worker and its
     /// helpers). <c>AddHttpClient&lt;EnableBankingClient&gt;</c> registers under the type's short name,
-    /// carrying <c>Program.cs</c>'s BaseAddress/Timeout.
+    /// carrying GreedyNoseCoreServices' BaseAddress/Timeout.
     /// </summary>
     public static EnableBankingClient Create(IHttpClientFactory factory, EnableBankingSigner signer, TimeProvider clock) =>
         new(factory.CreateClient(nameof(EnableBankingClient)), signer, clock);

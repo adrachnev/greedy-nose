@@ -3,7 +3,7 @@ namespace GreedyNose.Api.EnableBanking;
 /// <summary>
 /// The key that encrypts stored consents (Story 1.7): <c>Consent:EncryptionKey</c>, the base64 of
 /// exactly 32 random bytes. Comes from user secrets locally (Key Vault later, Epic 2), never from the
-/// committed <c>appsettings.json</c>, and is never logged.
+/// committed settings files, and is never logged.
 /// </summary>
 public sealed class ConsentEncryptionOptions
 {

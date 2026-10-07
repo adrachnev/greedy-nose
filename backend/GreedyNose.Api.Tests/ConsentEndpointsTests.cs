@@ -36,6 +36,7 @@ public sealed class ConsentEndpointsTests : IDisposable
     private readonly ConsentStore _consent;
     private readonly FakeClock _clock = new(T0);
     private readonly CapturingLoggerFactory _logs = new();
+    private readonly FakeFirstSync _firstSync = new();
 
     // What the next Enable Banking call answers, by path.
     private Func<string, (HttpStatusCode Status, string Body)> _bank;
@@ -74,6 +75,18 @@ public sealed class ConsentEndpointsTests : IDisposable
          "access":{"valid_until":"2027-01-01T00:00:00Z"},
          "accounts":[{"uid":"uid-1","account_id":{"iban":"{{BankIban}}"},"name":"Main","currency":"EUR"}]}
         """;
+
+    private sealed class FakeFirstSync : IFirstSyncTrigger
+    {
+        public int Requests;
+        public Exception? Throws;
+
+        public Task RequestAsync(CancellationToken ct)
+        {
+            Requests++;
+            return Throws is null ? Task.CompletedTask : Task.FromException(Throws);
+        }
+    }
 
     private sealed class FakeClock(DateTimeOffset now) : TimeProvider
     {
@@ -170,7 +183,7 @@ public sealed class ConsentEndpointsTests : IDisposable
     {
         await using var db = NewDb(lostRace);
         return await ConsentEndpoints.CallbackAsync(
-            code, state, error, db, NewClient(), _consent, _clock, _logs, CancellationToken.None);
+            code, state, error, db, NewClient(), _consent, _firstSync, _clock, _logs, CancellationToken.None);
     }
 
     /// <summary>Link created and used; returns the state the bank was given.</summary>
@@ -520,6 +533,64 @@ public sealed class ConsentEndpointsTests : IDisposable
         Assert.Contains("Connected to &lt;b&gt;Evil&lt;/b&gt; &amp; Co. You can close this page.", html);
     }
 
+    // --- Story 2.4: the first sync is requested once, after the consent is stored ------------------
+
+    [Fact]
+    public async Task A_completed_consent_requests_the_first_sync_exactly_once()
+    {
+        var state = await StartedState();
+
+        Assert.Equal(200, Page(await Callback("the-code", state)).Status);
+        Assert.Equal(1, _firstSync.Requests);
+
+        // A replay is refused before anything is stored, so it must not request another sync.
+        Assert.Equal(400, Page(await Callback("the-code", state)).Status);
+        Assert.Equal(1, _firstSync.Requests);
+    }
+
+    [Fact]
+    public async Task No_first_sync_is_requested_when_the_consent_was_not_completed()
+    {
+        var refusedState = await StartedState();
+        var failingStore = await StartedState();
+
+        // The bank refuses the session request.
+        _bank = _ => (HttpStatusCode.Unauthorized, """{"error":"x"}""");
+        await Callback("the-code", refusedState);
+
+        // An unknown state, and the bank reporting an error.
+        await Callback("c", "never-issued");
+        await Callback(null, null, "access_denied");
+
+        // The bank answers, but the consent cannot be stored.
+        _bank = path => path == "/auth" ? (HttpStatusCode.OK, $$"""{"url":"{{BankUrl}}"}""") : (HttpStatusCode.OK, SessionBody());
+        var broken = new ConsentStore(
+            new FakeConsentPersistence { SaveFails = new InvalidOperationException("x") },
+            TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
+        await using (var db = NewDb())
+        {
+            await ConsentEndpoints.CallbackAsync(
+                "the-code", failingStore, null, db, NewClient(), broken, _firstSync, _clock, _logs, CancellationToken.None);
+        }
+
+        Assert.Equal(0, _firstSync.Requests);
+    }
+
+    [Fact]
+    public async Task A_failed_first_sync_request_still_shows_Connected_and_logs_only_the_type()
+    {
+        var state = await StartedState();
+        _firstSync.Throws = new InvalidOperationException($"secret detail {BankSessionId}");
+
+        var (status, html) = Page(await Callback("the-code", state));
+
+        Assert.Equal(200, status);
+        Assert.Contains("Connected to", html);
+        Assert.Equal(BankSessionId, _consent.SessionId);
+        Assert.Contains(_logs.Lines, l => l.Contains("InvalidOperationException"));
+        Assert.DoesNotContain(_logs.Lines, l => l.Contains("secret detail") || l.Contains(BankSessionId));
+    }
+
     [Fact]
     public async Task When_the_session_request_fails_the_page_is_generic_and_no_consent_is_stored()
     {
@@ -699,7 +770,7 @@ public sealed class ConsentEndpointsTests : IDisposable
         await using var db = NewDb();
 
         var result = await ConsentEndpoints.CallbackAsync(
-            "the-code", state, null, db, NewClient(), broken, _clock, _logs, CancellationToken.None);
+            "the-code", state, null, db, NewClient(), broken, _firstSync, _clock, _logs, CancellationToken.None);
 
         var (status, html) = Page(result);
         Assert.Equal(502, status);

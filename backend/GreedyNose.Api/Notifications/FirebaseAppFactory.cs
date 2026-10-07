@@ -5,7 +5,7 @@ namespace GreedyNose.Api.Notifications;
 
 /// <summary>
 /// Loads the service-account key and turns it into the process's one <see cref="FirebaseApp"/>.
-/// Called once, from the singleton registration in Program.cs, and resolved at startup — so a missing
+/// Called once, from the singleton registration in GreedyNoseCoreServices, and resolved at startup — so a missing
 /// or unreadable key stops the backend there, with the command that fixes it, rather than surfacing
 /// as an opaque 500 on the first alert (same reasoning as <c>EnableBankingSigner</c>).
 /// </summary>

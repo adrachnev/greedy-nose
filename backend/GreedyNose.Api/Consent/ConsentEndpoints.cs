@@ -37,6 +37,9 @@ public static class ConsentEndpoints
     private const int MaxSecretLength = 200;
     private const int MaxLoggedErrorLength = 50;
 
+    // The browser is waiting on the page; a slow queue must not hold it for long.
+    private static readonly TimeSpan FirstSyncRequestTimeout = TimeSpan.FromSeconds(10);
+
     private static readonly string[] PsuTypes = ["personal", "business"];
 
     public static async Task<IResult> CreateLinkAsync(
@@ -203,6 +206,7 @@ public static class ConsentEndpoints
         GreedyNoseDbContext db,
         EnableBankingClient eb,
         ConsentStore consent,
+        IFirstSyncTrigger firstSync,
         TimeProvider clock,
         ILoggerFactory loggers,
         CancellationToken ct)
@@ -298,6 +302,20 @@ public static class ConsentEndpoints
         }
 
         logger.LogInformation("Consent completed for {Aspsp}, {AccountCount} account(s).", record.AspspName, accounts.Count);
+
+        // Only after the consent is stored, never on a failure above. Best effort: if the request fails
+        // the owner still has a working consent, and the next scheduled tick runs the same first sync.
+        try
+        {
+            using var enqueueTimeout = new CancellationTokenSource(FirstSyncRequestTimeout);
+            await firstSync.RequestAsync(enqueueTimeout.Token);
+        }
+        catch (Exception ex)
+        {
+            // Type only: a message can carry a connection string.
+            logger.LogWarning(
+                "The first sync could not be requested ({ExceptionType}); the next scheduled tick will run it.", ex.GetType().Name);
+        }
 
         return Page(StatusCodes.Status200OK, $"<h1>Connected</h1><p>Connected to {Encode(record.AspspName)}. You can close this page.</p>");
     }

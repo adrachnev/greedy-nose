@@ -34,6 +34,9 @@ public static class DeviceTokenEndpoint
     /// </summary>
     public const string TokenIndexName = "IX_DeviceTokens_Token";
 
+    /// <summary>Body cap (see <see cref="HandleAsync"/>); the Functions wrapper enforces it, the attribute documents it.</summary>
+    public const int MaxBodyBytes = 8192;
+
     /// <summary>
     /// Scoped <see cref="GreedyNoseDbContext"/>, as every endpoint uses; only the step 6 worker goes
     /// through the context factory.
@@ -44,7 +47,7 @@ public static class DeviceTokenEndpoint
     /// </summary>
     // PRAGMATIC: one owner, no per-user sign-in — the API key gates access and ICurrentUser always
     // answers with the seeded owner. Per-user sign-in replaces OwnerCurrentUser, not this endpoint.
-    [RequestSizeLimit(8192)]
+    [RequestSizeLimit(MaxBodyBytes)]
     public static async Task<IResult> HandleAsync(
         DeviceTokenRequest? request,
         GreedyNoseDbContext db,

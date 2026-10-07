@@ -2,8 +2,7 @@ namespace GreedyNose.Api.Auth;
 
 /// <summary>
 /// The shared secret the app sends as <c>Authorization: Bearer &lt;key&gt;</c> (Story 1.3). Comes from
-/// user secrets / app settings of the host (<c>Api:Key</c>), never from the committed
-/// <c>appsettings.json</c>, and is never logged.
+/// user secrets / app settings of the host (<c>Api:Key</c>), never from a committed settings file, and is never logged.
 /// </summary>
 public sealed class ApiKeyOptions
 {

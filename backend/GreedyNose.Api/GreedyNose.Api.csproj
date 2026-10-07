@@ -2,6 +2,9 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- A library since Story 2.4: the Functions host is the only host. Sdk.Web stays for the ASP.NET Core
+         framework reference and its implicit usings (IResult, HttpContext). -->
+    <OutputType>Library</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>cc71818b-1ac5-4dc8-9df9-7d86f0eb7498</UserSecretsId>

@@ -5,9 +5,9 @@ using Microsoft.Extensions.Logging;
 namespace GreedyNose.Functions;
 
 /// <summary>
-/// Reloads the consent from the database before every tick, so a bank connected or reconnected through
-/// the API process is seen without restarting this host (until Story 2.4 they are separate processes).
-/// The database is the source of truth; nothing is carried over from the previous run.
+/// Reloads the consent from the database before every tick, so a bank connected or reconnected is seen
+/// without restarting this host (and by another instance of it). The database is the source of truth;
+/// nothing is carried over from the previous run.
 /// A failing restore (wrong key, database down or waking up) skips this tick and is logged at Error —
 /// exception type only, never its message, which can carry connection details. The host keeps running.
 /// </summary>

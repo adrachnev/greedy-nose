@@ -6,45 +6,39 @@ using Microsoft.Extensions.Logging;
 namespace GreedyNose.Api.Auth;
 
 /// <summary>
-/// Requires <c>Authorization: Bearer &lt;key&gt;</c> on every request (Story 1.3). Protected by
+/// The API-key rule itself (Story 1.3), host-independent so every host runs the same check:
+/// <c>Authorization: Bearer &lt;key&gt;</c> on every request except the two browser pages. Protected by
 /// default, so a future endpoint cannot be forgotten; unknown paths also answer 401, so the check
 /// does not reveal which routes exist. The key is never logged — a rejection logs only the path.
 /// </summary>
-public sealed class ApiKeyMiddleware
+public sealed class ApiKeyGate
 {
     private const string Scheme = "Bearer";
 
     // The only paths reachable without the key: browser pages that cannot send a header. The
     // exemption stays (Story 1.4): each page authenticates by its own one-time secret instead —
     // /connect by the link token, /callback by the OAuth state (see ConsentEndpoints). The link is
-    // created by POST /connect-links, a different path segment, which this middleware protects.
+    // created by POST /connect-links, a different path segment, which this gate protects.
     private static readonly PathString[] Exempt = [new("/connect"), new("/callback")];
 
-    private readonly RequestDelegate _next;
     private readonly byte[] _expectedHash;
-    private readonly ILogger<ApiKeyMiddleware> _logger;
 
-    public ApiKeyMiddleware(RequestDelegate next, ApiKeyOptions options, ILogger<ApiKeyMiddleware> logger)
+    public ApiKeyGate(ApiKeyOptions options)
     {
         options.Validate();
-        _next = next;
-        _logger = logger;
         _expectedHash = SHA256.HashData(Encoding.UTF8.GetBytes(options.Key));
     }
 
-    public Task InvokeAsync(HttpContext context)
-    {
-        if (IsExempt(context.Request.Path) || HasValidKey(context.Request.Headers.Authorization.ToString()))
-        {
-            return _next(context);
-        }
+    public bool IsAllowed(HttpContext context) =>
+        IsExempt(context.Request.Path) || HasValidKey(context.Request.Headers.Authorization.ToString());
 
-        // Path only — never the header. The path is not secret; the key is.
+    /// <summary>Answers 401 and logs the (sanitized) path — never the header.</summary>
+    public static void Reject(HttpContext context, ILogger logger)
+    {
         // The caller controls the path, so it is sanitized and truncated before it reaches the log.
-        _logger.LogWarning("Rejected a request without a valid API key: {Path}", SanitizePath(context.Request.Path.Value));
+        logger.LogWarning("Rejected a request without a valid API key: {Path}", SanitizePath(context.Request.Path.Value));
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
         context.Response.Headers.WWWAuthenticate = Scheme;
-        return Task.CompletedTask;
     }
 
     internal const int MaxLoggedPathLength = 100;

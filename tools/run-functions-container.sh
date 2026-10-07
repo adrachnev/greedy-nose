@@ -1,5 +1,7 @@
 #!/bin/bash
-# Runs the ingestion Functions host (Story 2.3, backend/GreedyNose.Functions) in a Linux container.
+# Runs the Functions host (backend/GreedyNose.Functions: the API, the first-sync queue function and
+# the ingestion timer — Stories 2.3 and 2.4) in a Linux container. The API answers on
+# http://127.0.0.1:5199 (container port 80), so `adb reverse tcp:5199 tcp:5199` still works.
 #
 # Why a container: Smart App Control blocks every freshly built, unsigned DLL/exe on this machine
 # (see AGENTS.md), so the host cannot run the worker. Two steps: publish the project in the SDK
@@ -33,7 +35,7 @@ docker run --rm --network backend_default \
   dotnet publish GreedyNose.Functions -c Release -o /out --artifacts-path /tmp/artifacts
 
 # Step 2: run the Functions host on the published output.
-docker run --rm --name "$NAME" --network backend_default \
+docker run --rm --name "$NAME" --network backend_default -p 127.0.0.1:5199:80 \
   -v greedy-nose-func-out:/home/site/wwwroot \
   -v "$SECRETS_FILE:/home/.microsoft/usersecrets/$SID/secrets.json:ro" \
   -v "$FIREBASE_PATH:/secrets/firebase.json:ro" \

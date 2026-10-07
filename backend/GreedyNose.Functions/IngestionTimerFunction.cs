@@ -8,7 +8,7 @@ namespace GreedyNose.Functions;
 /// Runs exactly one <see cref="IIngestionTick"/> per timer trigger (Story 2.3, AR5). Keeps no state
 /// between runs: every tick re-reads everything it needs from the database.
 ///
-/// Schedule: app setting <c>IngestionSchedule</c> (NCRONTAB, UTC), floor enforced in Program.cs.
+/// Schedule: app setting <c>IngestionSchedule</c> (NCRONTAB, UTC), floor enforced in the host's Program.cs (MinPollInterval).
 /// <c>RunOnStartup = false</c>: a cold start or scale-out must not cost a bank fetch.
 /// <c>UseMonitor = false</c>: with the monitor on, the host persists schedule occurrences and fires a
 /// past-due run after a restart — an extra bank fetch we cannot afford (N26 ~4/day). With it off, a
