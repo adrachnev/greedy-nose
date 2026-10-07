@@ -285,6 +285,61 @@ namespace GreedyNose.Api.Data.Migrations
                     b.ToTable("Payees", (string)null);
                 });
 
+            modelBuilder.Entity("GreedyNose.Api.Data.PendingPush", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DebitId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("EndReason")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTimeOffset?>("EndedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<DateTimeOffset?>("LastAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastOutcome")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("SummaryBadCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("SummaryNewCount")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "DebitId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "EndedAt", "CreatedAt");
+
+                    b.ToTable("PendingPushes", (string)null);
+                });
+
             modelBuilder.Entity("GreedyNose.Api.Data.Rule", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -407,6 +462,20 @@ namespace GreedyNose.Api.Data.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("GreedyNose.Api.Data.PendingPush", b =>
+                {
+                    b.HasOne("GreedyNose.Api.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("GreedyNose.Api.Data.Debit", null)
+                        .WithMany()
+                        .HasForeignKey("UserId", "DebitId")
+                        .OnDelete(DeleteBehavior.NoAction);
                 });
 
             modelBuilder.Entity("GreedyNose.Api.Data.Rule", b =>

@@ -38,6 +38,8 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
 
     public DbSet<NotificationLogEntry> NotificationLog => Set<NotificationLogEntry>();
 
+    public DbSet<PendingPush> PendingPushes => Set<PendingPush>();
+
     public DbSet<AccountSyncState> AccountSyncStates => Set<AccountSyncState>();
 
     public DbSet<PendingConsent> PendingConsents => Set<PendingConsent>();
@@ -218,6 +220,33 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
             // ticks; the unique index is what makes the second insert fail instead of the second
             // push going out unnoticed.
             entry.HasIndex(n => new { n.UserId, n.DebitId }).IsUnique();
+        });
+
+        modelBuilder.Entity<PendingPush>(pending =>
+        {
+            pending.ToTable("PendingPushes");
+            pending.HasKey(p => p.Id);
+            pending.Property(p => p.Id).ValueGeneratedNever();
+
+            // Stored as text, so the column reads on its own in a query.
+            pending.Property(p => p.Kind).HasConversion<string>().HasMaxLength(30);
+            pending.Property(p => p.LastOutcome).HasMaxLength(200);
+            pending.Property(p => p.EndReason).HasMaxLength(20);
+
+            pending.HasOne<User>().WithMany().HasForeignKey(p => p.UserId).OnDelete(DeleteBehavior.Cascade);
+
+            // Nullable DebitId (a summary has none): Postgres treats a null as "no reference" for a
+            // composite FK. NoAction like the log: a lone debit delete is refused.
+            pending.HasOne<Debit>()
+                .WithMany()
+                .HasForeignKey(p => new { p.UserId, p.DebitId })
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // At most one mark per debit. Postgres allows many nulls, so summaries are not limited.
+            pending.HasIndex(p => new { p.UserId, p.DebitId }).IsUnique();
+
+            // The retry stage reads the open marks (EndedAt null), oldest first.
+            pending.HasIndex(p => new { p.UserId, p.EndedAt, p.CreatedAt });
         });
     }
 

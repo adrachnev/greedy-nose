@@ -30,7 +30,59 @@ public sealed class IngestionRunner(
     TimeProvider clock,
     ILogger<IngestionRunner> logger) : IIngestionTick
 {
+    /// <summary>
+    /// One tick: the ingestion part, then the retry stage for owed pushes (R11a). The owed marks are
+    /// read before ingestion, so a mark created by this very tick waits for the next one. The retry
+    /// stage runs in a <c>finally</c>: no bank call is needed, so a dead consent, a 401/429 or a failed
+    /// fetch must not stop it; the ingestion exception still propagates afterwards.
+    /// </summary>
     public async Task RunOnceAsync(CancellationToken ct)
+    {
+        var owedIds = await ReadOwedIdsAsync();
+
+        try
+        {
+            await IngestAsync(ct);
+        }
+        finally
+        {
+            // Its own time budget, deliberately NOT the tick token: that one is the Function's linked
+            // timeout, and a slow bank (several slow HTTP calls) eats it. Owed pushes must not be starved
+            // exactly when the bank is slow, or they would be given up silently after 24 h. Each item is
+            // an atomic unit, so a stop at the budget's end is safe.
+            using var budget = new CancellationTokenSource(RetryBudget);
+            await RetryOwedPushesAsync(owedIds, budget.Token);
+        }
+    }
+
+    /// <summary>Time the retry stage gets per tick, independent of the caller's token.</summary>
+    public static readonly TimeSpan RetryBudget = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Ids of the marks open when the tick begins (so one created by this tick waits for the next).
+    /// Can never stop ingestion: a failing read is logged and treated as "nothing owed" for this tick;
+    /// it has its own budget too, so an already-cancelled tick token does not matter.
+    /// </summary>
+    private async Task<IReadOnlyList<Guid>> ReadOwedIdsAsync()
+    {
+        try
+        {
+            using var budget = new CancellationTokenSource(RetryBudget);
+            await using var owedDb = await dbContextFactory.CreateDbContextAsync(budget.Token);
+            return await owedDb.PendingPushes
+                .Where(p => p.UserId == SeedData.UserId && p.EndedAt == null)
+                .OrderBy(p => p.CreatedAt)
+                .Select(p => p.Id)
+                .ToListAsync(budget.Token);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning("Reading the owed pushes failed ({ExceptionType}); no retries in this tick.", exception.GetType().Name);
+            return [];
+        }
+    }
+
+    private async Task IngestAsync(CancellationToken ct)
     {
         // One consistent read for the whole tick: account and session from the same instant, so a
         // /callback landing mid-tick cannot pair one login's account with another's session.
@@ -221,20 +273,27 @@ public sealed class IngestionRunner(
             if (badCount > 0)
             {
                 var tokens = await db.DeviceTokens.Where(t => t.UserId == SeedData.UserId).ToListAsync(ct);
-                if (tokens.Count == 0)
+                var (title, body) = ReconnectSummary.Build(insertedCount, badCount);
+                var sendResult = await SendToAllTokensAsync(db, tokens, title, body, ct);
+                if (!sendResult.AnySent)
                 {
-                    logger.LogWarning("No device token registered; cannot send the reconnect summary.");
-                }
-                else
-                {
-                    var (title, body) = ReconnectSummary.Build(insertedCount, badCount);
-                    var anySent = await SendToAllTokensAsync(db, tokens, title, body, ct);
-                    if (!anySent)
+                    // R11a: the summary is remembered with N and M frozen and retried by the next ticks;
+                    // the mark commits in the same save as the debits and the hash.
+                    logger.LogWarning(
+                        "The reconnect summary reached no device ({Outcome}); marked as owed, committing the debits.",
+                        sendResult.Failure);
+                    db.PendingPushes.Add(new PendingPush
                     {
-                        // Owner decision 2026-09-29: commit anyway, same as the per-debit path; the
-                        // summary is lost without a retry (TODO.md).
-                        logger.LogWarning("The reconnect summary reached no device; committing the debits regardless.");
-                    }
+                        Id = Guid.NewGuid(),
+                        UserId = SeedData.UserId,
+                        Kind = PendingPushKind.ReconnectSummary,
+                        SummaryNewCount = insertedCount,
+                        SummaryBadCount = badCount,
+                        CreatedAt = clock.GetUtcNow(),
+                        Attempts = 1,
+                        LastAttemptAt = clock.GetUtcNow(),
+                        LastOutcome = sendResult.Failure,
+                    });
                 }
             }
 
@@ -312,8 +371,8 @@ public sealed class IngestionRunner(
             return;
         }
 
-        var anySent = await SendToAllTokensAsync(db, tokens, ConnectionExpiredNotice.Title, ConnectionExpiredNotice.Body, ct);
-        if (anySent)
+        var sendResult = await SendToAllTokensAsync(db, tokens, ConnectionExpiredNotice.Title, ConnectionExpiredNotice.Body, ct);
+        if (sendResult.AnySent)
         {
             row.ExpiryNotifiedSessionHash = sessionHash;
             logger.LogInformation("The consent for account {AccountKey} is dead ({Reason}); sent the expiry push.", AccountKeyPreview(account.Key), reason);
@@ -566,14 +625,23 @@ public sealed class IngestionRunner(
         var tokens = await db.DeviceTokens.Where(t => t.UserId == SeedData.UserId).ToListAsync(ct);
         if (tokens.Count == 0)
         {
-            logger.LogWarning("No device token registered; cannot notify for debit {DebitId}.", DebitIdPreview(debit.Id));
-            await db.SaveChangesAsync(ct); // still commit the debit itself as seen
+            // R11a: remembered, not lost — the mark commits with the debit and the retry stage picks it up.
+            logger.LogWarning("No device token registered; debit {DebitId} is marked as owed.", DebitIdPreview(debit.Id));
+            db.PendingPushes.Add(NewDebitMark(debit.Id, reason, NoTokenOutcome));
+            await db.SaveChangesAsync(ct);
             return;
         }
 
-        var anySent = await SendToAllTokensAsync(db, tokens, title, reason, ct);
+        var sendResult = await SendToAllTokensAsync(db, tokens, title, reason, ct);
 
-        if (anySent)
+        if (!sendResult.AnySent)
+        {
+            logger.LogWarning(
+                "The push for debit {DebitId} reached no device ({Outcome}); marked as owed.",
+                DebitIdPreview(debit.Id), sendResult.Failure);
+            db.PendingPushes.Add(NewDebitMark(debit.Id, reason, sendResult.Failure));
+        }
+        else
         {
             // One row per debit regardless of how many tokens got Sent — matches the unique index.
             db.NotificationLog.Add(new NotificationLogEntry
@@ -610,15 +678,30 @@ public sealed class IngestionRunner(
         }
     }
 
+    /// <summary>What a send to all tokens came to: whether any took it, and — when none did — which outcomes said no.</summary>
+    /// <param name="AnySent">At least one token got <see cref="SendOutcome.Sent"/>.</param>
+    /// <param name="Failure">Outcome names of the failing tokens (<c>NoToken</c> for an empty list); empty when sent. Never a token or text.</param>
+    private sealed record SendAllResult(bool AnySent, string Failure);
+
+    private const string NoTokenOutcome = "NoToken";
+
     /// <summary>
-    /// Sends one message to every token; returns whether any got <see cref="SendOutcome.Sent"/>. Only
+    /// Sends one message to every token; reports whether any got <see cref="SendOutcome.Sent"/> and, if not,
+    /// the failing outcomes (what a <see cref="PendingPush"/> stores). Only
     /// <see cref="SendOutcome.TokenNoLongerValid"/> prunes (tracked removal, committed by the caller's
-    /// next save). Shared by the per-debit push and the reconnect summary.
+    /// next save); <see cref="SendOutcome.Rejected"/> never does and keeps the push owed. Shared by the
+    /// per-debit push, the reconnect summary, the retry stage and the expiry push.
     /// </summary>
-    private async Task<bool> SendToAllTokensAsync(
+    private async Task<SendAllResult> SendToAllTokensAsync(
         GreedyNoseDbContext db, IReadOnlyList<DeviceToken> tokens, string title, string body, CancellationToken ct)
     {
+        if (tokens.Count == 0)
+        {
+            return new SendAllResult(false, NoTokenOutcome);
+        }
+
         var anySent = false;
+        var failures = new SortedSet<string>(StringComparer.Ordinal);
         foreach (var token in tokens)
         {
             var result = await sender.SendAsync(new PushMessage(token.Token, title, body), ct);
@@ -632,6 +715,7 @@ public sealed class IngestionRunner(
                     // The only outcome that may prune, and it prunes just this one token,
                     // independent of how the others answered (decided 2026-09-22).
                     db.DeviceTokens.Remove(token);
+                    failures.Add(nameof(SendOutcome.TokenNoLongerValid));
                     logger.LogInformation(
                         "Pruned a token that FCM reported as no longer valid — {TokenPreview}", TokenPreview.Of(token.Token));
                     break;
@@ -639,11 +723,149 @@ public sealed class IngestionRunner(
                 case SendOutcome.Transient:
                     // Needs a human, or needs a later retry — either way, never pruned, never logged
                     // as sent here. FirebaseNotificationSender already logged the detail.
+                    failures.Add(result.Outcome.ToString());
                     break;
             }
         }
 
-        return anySent;
+        return new SendAllResult(anySent, anySent ? "" : string.Join(',', failures));
+    }
+
+    private PendingPush NewDebitMark(string debitId, string reason, string outcome) => new()
+    {
+        Id = Guid.NewGuid(),
+        UserId = SeedData.UserId,
+        Kind = PendingPushKind.Debit,
+        DebitId = debitId,
+        Reason = reason,
+        CreatedAt = clock.GetUtcNow(),
+        Attempts = 1,
+        LastAttemptAt = clock.GetUtcNow(),
+        LastOutcome = outcome,
+    };
+
+    /// <summary>How long a failed push stays owed (R11a); after that it is given up and the debit just stays in the list.</summary>
+    public static readonly TimeSpan GiveUpAfter = TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// The retry stage (R11a): every mark that was open when the tick began, oldest first, each in its own
+    /// context and save so one failing item never blocks another. Reads stored data only — no bank call —
+    /// which is why it also runs when ingestion returned early or threw. Never throws (except a caller's
+    /// cancellation): a failing item is logged and stays owed; the 24 h window ends it.
+    /// </summary>
+    private async Task RetryOwedPushesAsync(IReadOnlyList<Guid> owedIds, CancellationToken ct)
+    {
+        foreach (var id in owedIds)
+        {
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                await RetryOneAsync(id, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                logger.LogWarning("The retry budget ran out; the remaining owed pushes wait for the next tick.");
+                return;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                logger.LogWarning(
+                    "Retrying owed push {MarkId} failed ({ExceptionType}); it stays owed.", id, exception.GetType().Name);
+            }
+        }
+    }
+
+    private async Task RetryOneAsync(Guid markId, CancellationToken ct)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        var mark = await db.PendingPushes.SingleOrDefaultAsync(p => p.Id == markId, ct);
+        if (mark is null || mark.EndedAt is not null)
+        {
+            return;
+        }
+
+        var now = clock.GetUtcNow();
+        var what = mark.Kind == PendingPushKind.Debit ? $"debit {DebitIdPreview(mark.DebitId!)}" : "reconnect summary";
+
+        if (now - mark.CreatedAt > GiveUpAfter)
+        {
+            mark.EndedAt = now;
+            mark.EndReason = PendingPush.EndedGaveUp;
+            await db.SaveChangesAsync(ct);
+            logger.LogWarning(
+                "Gave up the owed push for {What} after {Attempts} attempts (last outcome {Outcome}); owed since {Since:o}.",
+                what, mark.Attempts, mark.LastOutcome, mark.CreatedAt);
+            return;
+        }
+
+        string title, body;
+        if (mark.Kind == PendingPushKind.Debit)
+        {
+            if (await db.NotificationLog.AnyAsync(n => n.UserId == SeedData.UserId && n.DebitId == mark.DebitId, ct))
+            {
+                // R11: already sent once; never twice. Just close the mark.
+                mark.EndedAt = now;
+                mark.EndReason = PendingPush.EndedSent;
+                await db.SaveChangesAsync(ct);
+                return;
+            }
+
+            var debit = await db.Debits.SingleAsync(d => d.UserId == SeedData.UserId && d.Id == mark.DebitId, ct);
+            var payee = await db.Payees.SingleAsync(p => p.UserId == SeedData.UserId && p.Id == debit.PayeeId, ct);
+            title = $"{payee.Name} · {RuleEngine.FormatAmountEUR(debit.AmountEUR)}";
+            body = mark.Reason!;
+        }
+        else
+        {
+            (title, body) = ReconnectSummary.Build(mark.SummaryNewCount!.Value, mark.SummaryBadCount!.Value);
+        }
+
+        var tokens = await db.DeviceTokens.Where(t => t.UserId == SeedData.UserId).ToListAsync(ct);
+        var result = await SendToAllTokensAsync(db, tokens, title, body, ct);
+
+        mark.Attempts++;
+        mark.LastAttemptAt = now;
+        mark.LastOutcome = result.AnySent ? nameof(SendOutcome.Sent) : result.Failure;
+
+        if (result.AnySent)
+        {
+            mark.EndedAt = now;
+            mark.EndReason = PendingPush.EndedSent;
+            if (mark.Kind == PendingPushKind.Debit)
+            {
+                db.NotificationLog.Add(new NotificationLogEntry
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = SeedData.UserId,
+                    DebitId = mark.DebitId!,
+                    SentAt = now,
+                    Reason = mark.Reason!,
+                });
+            }
+        }
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (result.AnySent && ex.InnerException is PostgresException
+                                           {
+                                               SqlState: PostgresErrorCodes.UniqueViolation,
+                                               ConstraintName: "IX_NotificationLog_UserId_DebitId",
+                                           })
+        {
+            // Someone logged this debit meanwhile (R11): the push just sent is a harmless duplicate;
+            // end the mark without a second log row.
+            db.ChangeTracker.Clear();
+            var again = await db.PendingPushes.SingleAsync(p => p.Id == markId, ct);
+            again.EndedAt = now;
+            again.EndReason = PendingPush.EndedSent;
+            await db.SaveChangesAsync(ct);
+        }
+
+        logger.LogInformation(
+            "Push retry for {What}: attempt {Attempts}, outcome {Outcome}, at {At:o}.",
+            what, mark.Attempts, mark.LastOutcome, now);
     }
 
     private static string DebitIdPreview(string debitId) => debitId.Length > 10 ? $"{debitId[..10]}…" : debitId;
