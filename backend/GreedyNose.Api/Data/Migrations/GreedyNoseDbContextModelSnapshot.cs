@@ -108,6 +108,31 @@ namespace GreedyNose.Api.Data.Migrations
                     b.ToTable("AccountSyncStates", (string)null);
                 });
 
+            modelBuilder.Entity("GreedyNose.Api.Data.BankConsent", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AspspName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<byte[]>("PayloadCipher")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<byte[]>("SessionIdCipher")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("UserId", "AspspName");
+
+                    b.ToTable("BankConsents", (string)null);
+                });
+
             modelBuilder.Entity("GreedyNose.Api.Data.Debit", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -319,6 +344,15 @@ namespace GreedyNose.Api.Data.Migrations
                 });
 
             modelBuilder.Entity("GreedyNose.Api.Data.AccountSyncState", b =>
+                {
+                    b.HasOne("GreedyNose.Api.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("GreedyNose.Api.Data.BankConsent", b =>
                 {
                     b.HasOne("GreedyNose.Api.Data.User", null)
                         .WithMany()

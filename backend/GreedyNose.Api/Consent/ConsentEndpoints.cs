@@ -284,12 +284,13 @@ public static class ConsentEndpoints
         var accounts = ReadAccounts(root);
         try
         {
-            consent.Complete(sessionId, record.AspspName, accounts, now, ReadValidUntil(root));
+            // Persisted with CancellationToken.None: the code is already traded, so a dropped browser connection must not lose the consent.
+            await consent.CompleteAsync(sessionId, record.AspspName, accounts, now, ReadValidUntil(root), CancellationToken.None);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // E.g. the consent file cannot be written. The code is already traded and the state spent,
-            // so the owner just requests a new link. Type only: a message can carry the file path.
+            // E.g. the database or the encryption fails. The code is already traded and the state spent,
+            // so the owner just requests a new link. Type only: a message can carry connection details.
             logger.LogError("Could not store the consent: {ExceptionType}.", ex.GetType().Name);
             return Rejected(
                 "Connection failed", "The bank connection could not be completed. Start again.",

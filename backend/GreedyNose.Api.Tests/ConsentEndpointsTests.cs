@@ -29,7 +29,6 @@ public sealed class ConsentEndpointsTests : IDisposable
     private static readonly DateTimeOffset T0 = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
 
     private readonly string _keyPath = Path.Combine(Path.GetTempPath(), $"consent-ep-key-{Guid.NewGuid():N}.pem");
-    private readonly string _consentPath = Path.Combine(Path.GetTempPath(), $"consent-ep-{Guid.NewGuid():N}.json");
     private readonly string _dbName = Guid.NewGuid().ToString();
     private readonly EnableBankingSigner _signer;
     private readonly EnableBankingOptions _options;
@@ -58,7 +57,7 @@ public sealed class ConsentEndpointsTests : IDisposable
             RedirectUrl = "https://greedy.example.com:8443/callback",
         };
         _signer = new EnableBankingSigner(_options);
-        _consent = new ConsentStore(_consentPath, TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
+        _consent = new ConsentStore(new FakeConsentPersistence(), TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
         _bank = path => path == "/auth"
             ? (HttpStatusCode.OK, $$"""{"url":"{{BankUrl}}"}""")
             : (HttpStatusCode.OK, SessionBody());
@@ -68,7 +67,6 @@ public sealed class ConsentEndpointsTests : IDisposable
     {
         _signer.Dispose();
         File.Delete(_keyPath);
-        File.Delete(_consentPath);
     }
 
     private static string SessionBody() => $$"""
@@ -695,28 +693,21 @@ public sealed class ConsentEndpointsTests : IDisposable
     public async Task A_consent_that_cannot_be_stored_gives_the_generic_502_and_logs_only_the_type()
     {
         var state = await StartedState();
+        var broken = new ConsentStore(
+            new FakeConsentPersistence { SaveFails = new InvalidOperationException($"secret detail {BankSessionId}") },
+            TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
+        await using var db = NewDb();
 
-        // A directory where the file should go: writing it throws UnauthorizedAccessException, which
-        // ConsentStore does not swallow (it only tolerates IOException).
-        var directory = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), $"consent-ep-dir-{Guid.NewGuid():N}"));
-        try
-        {
-            var broken = new ConsentStore(directory.FullName, TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
-            await using var db = NewDb();
+        var result = await ConsentEndpoints.CallbackAsync(
+            "the-code", state, null, db, NewClient(), broken, _clock, _logs, CancellationToken.None);
 
-            var result = await ConsentEndpoints.CallbackAsync(
-                "the-code", state, null, db, NewClient(), broken, _clock, _logs, CancellationToken.None);
-
-            var (status, html) = Page(result);
-            Assert.Equal(502, status);
-            Assert.DoesNotContain(directory.FullName, html);
-            Assert.DoesNotContain(_logs.Lines, l => l.Contains(directory.FullName));
-            Assert.Contains(_logs.Lines, l => l.Contains("UnauthorizedAccessException"));
-        }
-        finally
-        {
-            directory.Delete();
-        }
+        var (status, html) = Page(result);
+        Assert.Equal(502, status);
+        Assert.DoesNotContain("secret detail", html);
+        Assert.DoesNotContain(BankSessionId, html);
+        Assert.DoesNotContain(_logs.Lines, l => l.Contains("secret detail") || l.Contains(BankSessionId));
+        Assert.Contains(_logs.Lines, l => l.Contains("InvalidOperationException"));
+        Assert.Null(broken.SessionId);
     }
 
     [Fact]

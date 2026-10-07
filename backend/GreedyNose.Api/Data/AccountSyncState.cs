@@ -24,8 +24,8 @@ public sealed class AccountSyncState
     /// SHA-256 hex of the consent session id this account was last synced under — the hash, never the
     /// id (a credential; see <c>SessionFingerprint</c>). A different value on a later tick means the
     /// user logged in at the bank again: a reconnect. Null = the row predates this column, session
-    /// unknown, adopted silently on the next tick (no backfill is possible: the id lives only in the
-    /// consent file).
+    /// unknown, adopted silently on the next tick (no backfill is possible: the id is stored only
+    /// encrypted, in <c>BankConsents</c>, and this table must never hold it).
     /// </summary>
     public string? LastSessionIdHash { get; set; }
 

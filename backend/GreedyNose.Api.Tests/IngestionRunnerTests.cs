@@ -32,18 +32,13 @@ public class IngestionRunnerTests
 
     private static ConsentStore NewConsentStore(TimeProvider clock, bool connected = true, ConnectedAccount? account = null, string sessionId = "session-1", DateTimeOffset? expiresAt = null)
     {
-        // ConsentStore has no test seam — it is a concrete sealed class with real file I/O in
-        // Save(). A temp path keeps tests off the repo's real consent.local.json. Complete() sets
-        // Accounts directly (see ConsentStore.cs), so no authorization flow
-        // is needed to get a "connected" store for a test.
-        var store = new ConsentStore(
-            Path.Combine(Path.GetTempPath(), $"ingestion-test-consent-{Guid.NewGuid():N}.json"),
-            TimeSpan.FromDays(90),
-            NullLogger<ConsentStore>.Instance);
+        // A fake in-memory persistence (no database, no key). CompleteAsync sets the accounts directly,
+        // so no authorization flow is needed to get a "connected" store for a test.
+        var store = new ConsentStore(new FakeConsentPersistence(), TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
 
         if (connected)
         {
-            store.Complete(sessionId, "Test Bank", [account ?? Account], clock.GetUtcNow(), expiresAt);
+            store.CompleteAsync(sessionId, "Test Bank", [account ?? Account], clock.GetUtcNow(), expiresAt).GetAwaiter().GetResult();
         }
 
         return store;

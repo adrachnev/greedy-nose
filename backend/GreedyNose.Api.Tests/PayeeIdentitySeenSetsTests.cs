@@ -119,12 +119,9 @@ public class PayeeIdentitySeenSetsTests
 
     private static ConsentStore NewConsentStore(TimeProvider clock)
     {
-        var store = new ConsentStore(
-            Path.Combine(Path.GetTempPath(), $"payee-seen-test-consent-{Guid.NewGuid():N}.json"),
-            TimeSpan.FromDays(90),
-            NullLogger<ConsentStore>.Instance);
+        var store = new ConsentStore(new FakeConsentPersistence(), TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
 
-        store.Complete("session-1", "Test Bank", [new ConnectedAccount("uid-1", AccountKey, "Test Account", "EUR", null)], clock.GetUtcNow(), null);
+        store.CompleteAsync("session-1", "Test Bank", [new ConnectedAccount("uid-1", AccountKey, "Test Account", "EUR", null)], clock.GetUtcNow(), null).GetAwaiter().GetResult();
 
         return store;
     }

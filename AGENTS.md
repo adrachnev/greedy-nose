@@ -172,3 +172,12 @@ never a copy.
   everything else. Usage metrics are switched off (`bd metrics off`).
 - The `bd` CLI was installed with `npm install -g @beads/bd`; it runs on this machine despite
   Smart App Control (checked 2026-10-05).
+
+## Local backend setup notes (outside the managed block; added 2026-10-07)
+
+- Story 1.7: the backend also refuses to start without `Consent:EncryptionKey` (base64 of exactly 32
+  random bytes, e.g. `dotnet user-secrets set "Consent:EncryptionKey" "$(openssl rand -base64 32)"
+  --project backend/GreedyNose.Api` — never print or commit the value). Consents live encrypted in the
+  `BankConsents` table; `consent.local.json` is no longer used. Apply the migration before the first
+  start (container recipe: `GN_CMD` in `tools/run-backend-container.sh`). A wrong key stops the
+  backend at startup on purpose. After switching, connect a bank again with `bash tools/connect-bank.sh`.

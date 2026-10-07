@@ -42,6 +42,8 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
 
     public DbSet<PendingConsent> PendingConsents => Set<PendingConsent>();
 
+    public DbSet<BankConsent> BankConsents => Set<BankConsent>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<PendingConsent>(pending =>
@@ -65,6 +67,21 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
             pending.Property(p => p.Version).IsConcurrencyToken().HasDefaultValue(0);
 
             pending.HasOne<User>().WithMany().HasForeignKey(p => p.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<BankConsent>(consent =>
+        {
+            consent.ToTable("BankConsents");
+
+            // One row per user and bank: reconnecting replaces it, another bank's row is untouched.
+            consent.HasKey(c => new { c.UserId, c.AspspName });
+            consent.Property(c => c.AspspName).HasMaxLength(100);
+
+            // Ciphertext (ConsentCipher) — never plaintext, see BankConsent.
+            consent.Property(c => c.SessionIdCipher).HasColumnType("bytea");
+            consent.Property(c => c.PayloadCipher).HasColumnType("bytea");
+
+            consent.HasOne<User>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<User>(user =>

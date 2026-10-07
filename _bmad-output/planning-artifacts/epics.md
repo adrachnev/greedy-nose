@@ -571,6 +571,26 @@ from the database
 **And** the ingestion worker behaves as before with one consent, and all ingestion tests pass
 (multi-consent is Epic 3)
 
+**As built (2026-10-07):** table `BankConsents` (PK `UserId` + `AspspName`, FK to `Users` with cascade),
+`SessionIdCipher` and `PayloadCipher` as `bytea`. `ConsentCipher` = AES-256-GCM, random 12-byte nonce
+per value, layout `[version][nonce][tag][ciphertext]`, associated data `{user}|{bank}|{column}` (a value
+moved to another row or column fails to decrypt). Key = `Consent:EncryptionKey` (base64, 32 bytes),
+validated at startup; Key Vault comes in Epic 2. `ConsentStore` keeps its in-memory surface but persists
+through `IConsentPersistence`/`DbConsentPersistence`: `CompleteAsync` saves first and updates memory only if
+the save worked (a failed save throws and the callback shows its generic 502 page, nothing leaked);
+`RestoreAsync` loads the most recently connected row, an expired consent still loads as `Expired`, and a
+wrong key stops the backend with a clear `ConsentDecryptionException` — never a silently empty store.
+`consent.local.json` is no longer read or written and `ConsentFilePath` is gone. **Decision:** the old
+consent file is not migrated (N26 is connected fresh through the cloud in 2.7; the local Sandbox consent
+was redone once). 465 tests (430 + 35), one review pass, no MUST FIX. **Verified live** (Sandbox, dev
+Postgres, container): migration applied; the backend starts with no consent from the empty table; after a
+real Mock ASPSP consent in the browser there is one row with 65-byte and 445-byte ciphertexts and no
+plaintext markers in them, the old file untouched; a restart restores the consent as Active with the
+expiry the bank gave; a start with a wrong key fails loudly at startup; the following Reconnect tick found
+0 new debits and sent no push. **Open (beads):** `gn-7h4` (Epic 2: startup retry on transient DB errors,
+run migrations before the first start, key rotation needs a re-consent), `gn-uxv` (Epic 3: normalize the
+bank name, walk all rows).
+
 ### Story 1.8: The first sync pulls 12 months, all pages
 
 As the owner,

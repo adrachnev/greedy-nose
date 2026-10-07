@@ -53,6 +53,13 @@ var apiKey = builder.Configuration.GetSection(ApiKeyOptions.SectionName).Get<Api
 apiKey.Validate();
 builder.Services.AddSingleton(apiKey);
 
+// Same for the consent encryption key (Story 1.7): stored consents are unreadable without it, and
+// there is no default. The message never contains the key.
+var consentKey = (builder.Configuration.GetSection(ConsentEncryptionOptions.SectionName).Get<ConsentEncryptionOptions>()
+                  ?? new ConsentEncryptionOptions()).Validate();
+builder.Services.AddSingleton(new ConsentCipher(consentKey));
+builder.Services.AddSingleton<IConsentPersistence, DbConsentPersistence>();
+
 // Scoped: a real implementation will read the current request.
 builder.Services.AddScoped<ICurrentUser, OwnerCurrentUser>();
 
@@ -63,7 +70,7 @@ builder.Services.AddSingleton(
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<EnableBankingSigner>();
 builder.Services.AddSingleton(sp => new ConsentStore(
-    Path.Combine(sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath, options.ConsentFilePath),
+    sp.GetRequiredService<IConsentPersistence>(),
     options.ConsentValidity,
     sp.GetRequiredService<ILogger<ConsentStore>>()));
 builder.Services.AddHttpClient<EnableBankingClient>(client =>
@@ -109,8 +116,9 @@ app.Services.GetRequiredService<EnableBankingSigner>();
 // Same for the Firebase key: resolving the sender loads it (see FirebaseAppFactory).
 app.Services.GetRequiredService<INotificationSender>();
 
-// Pick up a consent left by an earlier run, so restarting the backend does not cost a click.
-app.Services.GetRequiredService<ConsentStore>().Restore(TimeProvider.System.GetUtcNow());
+// Pick up a consent left by an earlier run, so restarting the backend does not cost a click. Throws
+// (and so stops startup) on a wrong key or an unreachable database — never a silently empty store.
+await app.Services.GetRequiredService<ConsentStore>().RestoreAsync(TimeProvider.System.GetUtcNow());
 
 app.MapGet("/health", (ConsentStore consent, TimeProvider clock) => Results.Ok(new
 {

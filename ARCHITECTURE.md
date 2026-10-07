@@ -146,10 +146,16 @@ wipe the user's rule if this weren't enforced, and deleting a debit could otherw
 `NotificationLog` row — which would make the next fetch see that debit as new and re-notify,
 breaking R11.
 
-**`BankConsents` doesn't exist as a table**, despite the component table above listing it under
-Data Store. The real consent store is a gitignored file (`ConsentStore`, `consent.local.json`),
-not Postgres — a deliberate, narrower stand-in scoped to this tracer bullet (single user, no need
-for a real table yet), the same kind of built-vs-designed gap as the Ingestion Worker row above.
+**Built 2026-10-07 (Story 1.7): `BankConsents` is a real table.** Until then the consent lived in a
+gitignored file (`consent.local.json`); that file is no longer read or written (an old one is just
+ignored, nothing was migrated — a consent is re-done once with `tools/connect-bank.sh`). Each row
+is `(UserId, AspspName)` with the session id and the rest of the consent as **AES-256-GCM**
+ciphertext (`ConsentCipher`; row and column bound as associated data; key = `Consent:EncryptionKey`,
+base64 of 32 bytes, from user secrets locally and Key Vault in Epic 2). The backend refuses to start
+without the key, and also stops if a stored consent cannot be decrypted (wrong key) — never a
+silently empty store. The migration is not applied automatically: run it before the first start.
+`ConsentStore` still keeps one live consent in memory (the most recently connected row); walking
+several banks is Epic 3.
 
 **Decided 2026-10-01: for the go-live it becomes a real table.** `BankConsents` holds one row per
 `(UserId, bank)` — today's file has no user at all. The session id (it reads the real account) is

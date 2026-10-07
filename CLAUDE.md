@@ -4,6 +4,14 @@
 
 ## Status
 
+**2026-10-07 — Story 1.7 built (uncommitted at time of writing): consents live encrypted in the database.**
+`BankConsents` + AES-256-GCM (`ConsentCipher`), key `Consent:EncryptionKey` in user secrets (the backend
+refuses to start without it, and stops on a wrong key); `consent.local.json` is no longer used (not
+migrated — consents are redone). 465 backend tests, one review pass, verified live on the Sandbox with a
+real browser consent, a restart and a wrong-key start. **Epic 1 is complete once this is committed (8 of 8).**
+Next: Epic 2 (N26 live on Azure) — stories 2.1, 2.2, 2.5 are free; 2.6 onwards involve your Azure account.
+Open P1 beads before go-live: `gn-xeq`, `gn-6k5` (paging/quota live proof), `gn-7h4` (deploy notes).
+
 **2026-10-05 — Story 1.8 built (uncommitted at time of writing): every tick pages from the last
 fetch on; the first sync pulls 12 months.** 430 backend tests, three review passes, verified live on
 the Sandbox (first sync 4 pages, repeat = 0 duplicates, normal tick = 1 page). Owner decision: all
