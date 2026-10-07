@@ -23,6 +23,16 @@ public sealed class FirebaseNotificationSender : INotificationSender
     /// </summary>
     public static readonly TimeSpan TimeToLive = TimeSpan.FromHours(1);
 
+    // These two values are paired with the Android app and must change together with it: the app
+    // creates the notification channel in MainApplication and ships the drawable as
+    // res/drawable/ic_stat_alert.xml. An unknown channel makes Android fall back to the default
+    // (no heads-up); an unknown icon falls back to the generic one.
+    /// <summary>Id of the high-importance notification channel the app creates.</summary>
+    public const string AndroidChannelId = "alerts";
+
+    /// <summary>Name of the monochrome small-icon drawable (without extension) the app ships.</summary>
+    public const string AndroidIconName = "ic_stat_alert";
+
     private readonly FirebaseMessaging _messaging;
     private readonly ILogger<FirebaseNotificationSender> _logger;
 
@@ -164,8 +174,12 @@ public sealed class FirebaseNotificationSender : INotificationSender
     /// picks the phone up. High wakes it.
     ///
     /// The time-to-live is <see cref="TimeToLive"/>. There is no data payload yet (R12's tap-to-open
-    /// is deferred); a notification message with only title and body is displayed by the OS itself
-    /// while the app is in the background.
+    /// is deferred); the OS itself displays the notification while the app is in the background.
+    ///
+    /// The Android notification block names the channel (<see cref="AndroidChannelId"/>, high
+    /// importance, so the push shows as a heads-up) and the monochrome small icon
+    /// (<see cref="AndroidIconName"/>). Both are the same for every push kind — bad debit, reconnect
+    /// summary and expiry all pass through here.
     /// </summary>
     public static Message BuildMessage(PushMessage push)
     {
@@ -185,7 +199,12 @@ public sealed class FirebaseNotificationSender : INotificationSender
         {
             Token = push.Token,
             Notification = new Notification { Title = push.Title, Body = push.Body },
-            Android = new AndroidConfig { Priority = Priority.High, TimeToLive = TimeToLive },
+            Android = new AndroidConfig
+            {
+                Priority = Priority.High,
+                TimeToLive = TimeToLive,
+                Notification = new AndroidNotification { ChannelId = AndroidChannelId, Icon = AndroidIconName },
+            },
         };
 #pragma warning restore CS0618
     }

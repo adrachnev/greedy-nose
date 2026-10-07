@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Story 2.2: monochrome status-bar icon (white only, transparent background; Android tints it).
+     Line-style bell, round caps/joins, stroke 1.75 on a 24 viewport. The backend
+     (FirebaseNotificationSender.BuildMessage) references this drawable by name `ic_stat_alert`. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.75"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M6,17 L6,11 A6,6 0 0,1 18,11 L18,17 L20,19 L4,19 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.75"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M10,21.5 L14,21.5" />
+</vector>

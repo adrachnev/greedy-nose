@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- TRACER-BULLET (TRACER-02-NOTIFICATIONS.md step 0): required from Android 13 (API 33)
@@ -26,5 +27,17 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+      <!-- Story 2.2: fallback for FCM messages without per-message channel/icon. The backend
+           (FirebaseNotificationSender.BuildMessage) sets the same values per message: channel
+           `alerts` (created in MainApplication.kt) and icon `ic_stat_alert`. Keep in sync.
+           tools:replace: @react-native-firebase/messaging's own manifest already declares the
+           channel-id entry (empty, from firebase.json); ours must win the merge. -->
+      <meta-data
+        android:name="com.google.firebase.messaging.default_notification_channel_id"
+        android:value="alerts"
+        tools:replace="android:value" />
+      <meta-data
+        android:name="com.google.firebase.messaging.default_notification_icon"
+        android:resource="@drawable/ic_stat_alert" />
     </application>
 </manifest>

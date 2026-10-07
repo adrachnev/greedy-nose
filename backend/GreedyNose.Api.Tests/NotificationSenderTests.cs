@@ -211,6 +211,26 @@ public class NotificationSenderTests
         Assert.Equal(Priority.High, message.Android.Priority);
     }
 
+    /// <summary>
+    /// Literals on purpose: the app creates channel "alerts" and ships ic_stat_alert, so a rename on
+    /// one side only must fail here. Bad-debit, reconnect and expiry pushes all go through
+    /// BuildMessage; the texts below are one of each kind.
+    /// </summary>
+    [Theory]
+    [InlineData("Bäckerei Müller · 49,00 €", "Over your limit of 30,00 €.")]
+    [InlineData("3 bad debits while you were away", "Open the app to review them.")]
+    [InlineData("Bank connection expired", "Reconnect to keep getting alerts.")]
+    public void Every_push_kind_names_the_alerts_channel_and_the_small_icon(string title, string body)
+    {
+        var message = FirebaseNotificationSender.BuildMessage(new PushMessage(FakeToken, title, body));
+
+        Assert.Equal("alerts", message.Android.Notification.ChannelId);
+        Assert.Equal("ic_stat_alert", message.Android.Notification.Icon);
+        Assert.Equal(Priority.High, message.Android.Priority);
+        Assert.Equal(title, message.Notification.Title);
+        Assert.Equal(body, message.Notification.Body);
+    }
+
     [Fact]
     public void The_message_expires_after_one_hour_because_a_stale_alert_is_worthless()
     {
