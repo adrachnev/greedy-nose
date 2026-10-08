@@ -90,6 +90,10 @@ per-bank labels in the debit list, other users' accounts.
   `Brevo__SenderEmail/SenderName`, `Alerts__RecipientEmail`, `EnableBanking__ApplicationId` and
   `EnableBanking__RedirectUrl`. **Both Enable Banking values are still the Sandbox ones — Story 2.7 switches them
   to the Production application and the Azure redirect URL.** `AzureWebJobsStorage` is never a Key Vault reference.
+- **Rotating `Consent__EncryptionKey` means re-consent:** the stored consents carry a version byte but no key id,
+  so a new key cannot read the old rows — change the Key Vault secret, then connect each bank again.
+  Migrations are never applied by the app: after a schema change run `DB=neon bash tools/ef-container.sh database
+  update` before `bash tools/azure-deploy.sh`.
 - **Scripts** (all use the Azure CLI in a container, `tools/az.sh`, nothing to install; `bash tools/az.sh login
   --use-device-code` once):
   - `tools/azure-setup.sh` — creates everything above; safe to run again.
