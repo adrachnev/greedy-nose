@@ -31,8 +31,8 @@ public class DataModelTests
         var crossTable = foreignKeys.Except(toUser).ToList();
 
         // Guards against this passing vacuously (users: tokens, payees, rules, debits, sync states, log,
-        // pending consents, bank consents, pending pushes): rule → payee, debit → payee, log → debit, pending push → debit.
-        Assert.Equal(9, toUser.Count);
+        // pending consents, bank consents, pending pushes, push health): rule → payee, debit → payee, log → debit, pending push → debit.
+        Assert.Equal(10, toUser.Count);
         Assert.Equal(4, crossTable.Count);
 
         // Deleting the user must still empty everything (account deletion is a real delete)…

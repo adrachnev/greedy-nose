@@ -4,6 +4,18 @@
 
 ## Status
 
+**2026-10-08 — Story 2.10 built, reviewed, live-verified and committed (nothing pushed): one email when
+pushes keep failing.** After three failed push attempts in a row (across ticks; per-debit and summary
+pushes, not the expiry push) one mail goes out through Brevo, once per incident; when pushes work again one
+short follow-up. State in the new `PushHealth` table (migration `AddPushHealth`, applied to the dev DB);
+code in `backend/GreedyNose.Api/Alerts/`. **The backend now refuses to start without** `Brevo:ApiKey`,
+`Brevo:SenderEmail`, `Brevo:SenderName`, `Alerts:RecipientEmail` (user secrets, set 2026-10-08; the Brevo
+account exists, "Authorized IPs" blocking is off on purpose). 557 backend tests. Verified live with the
+device token removed and one owed mark: exactly one failure mail, no second, one follow-up after the token
+came back. New beads: `gn-3bc` (mail may repeat if the flag save fails), `gn-xoe` (count per tick instead
+of per attempt?); deploy note added to `gn-7h4`. Next: `bd ready` — 2.5 (Neon, needs the owner's account),
+then 2.6 onwards (Azure).
+
 **2026-10-07 (evening) — Stories 2.1, 2.2, 2.3, 2.4 and 2.9 built, reviewed, live-verified and committed
 (nothing pushed).** 2.1 the app resends all local rules at start (backend keeps real payee names);
 2.2 channel `alerts` (HIGH) + monochrome bell icon, heads-up confirmed on the phone; 2.3 the poller is a

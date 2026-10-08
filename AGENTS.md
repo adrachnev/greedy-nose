@@ -189,6 +189,11 @@ never a copy.
 
 ## Local backend setup notes (outside the managed block; added 2026-10-07)
 
+- Story 2.10: the backend also refuses to start without `Brevo:ApiKey`, `Brevo:SenderEmail`,
+  `Brevo:SenderName` and `Alerts:RecipientEmail` (user secrets, project `backend/GreedyNose.Api`; never
+  print or commit the key). The failure mail is sent through Brevo; keep Brevo's "Authorized IPs"
+  blocking off. Apply migration `AddPushHealth` (`bash tools/ef-container.sh database update`).
+
 - Story 1.7: the backend also refuses to start without `Consent:EncryptionKey` (base64 of exactly 32
   random bytes, e.g. `dotnet user-secrets set "Consent:EncryptionKey" "$(openssl rand -base64 32)"
   --project backend/GreedyNose.Api` — never print or commit the value). Consents live encrypted in the

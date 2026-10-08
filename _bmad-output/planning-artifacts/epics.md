@@ -1316,6 +1316,24 @@ tick (the once-per-incident flag is set only after Brevo accepted the mail)
 **And** the sender sits behind an interface; tests use a fake and cover the three-in-a-row rule,
 once per incident, the follow-up and a failing sender
 
+**As built (2026-10-08):** `Alerts/` holds `IAlertMailSender`, `BrevoAlertMailSender` (POST
+`/v3/smtp/email`, failures are results, never exceptions), `PushFailureMail` (the texts as pure
+functions: counts, ages, outcome names and the bank name only) and `PushFailureWatch`. State lives
+in the new `PushHealth` table (one row per user; migration `AddPushHealth`). `IngestionRunner` calls
+`RecordAttemptAsync` after each debit push, summary push and retry, and `EvaluateAsync` once per tick
+in the `finally` after the retry stage; both have their own budget and never throw. The expiry push
+(R19) does not count. Config is mandatory at startup: `Brevo:ApiKey`, `Brevo:SenderEmail`,
+`Brevo:SenderName`, `Alerts:RecipientEmail` (user secrets; Key Vault / app settings in Azure). 557
+backend tests (536 + 21), one review pass, no MUST FIX. **Decisions and gaps:** every push attempt
+counts, so three failing pushes inside one tick already mail (bead for per-tick counting); failing
+again between the failure mail and the follow-up is the same incident (no second mail); the banks
+line shows the active consent's bank only (Epic 3 makes it multi-bank); if Brevo accepts the mail but
+the flag save then fails, the next tick mails again (at-least-once, bead). **Verified live:** with the
+device token removed and one owed mark, three ticks gave exactly one failure mail, further failures
+no second one; after the token came back the push was sent and exactly one follow-up arrived; both
+mails read correctly. The Brevo IP block ("Authorized IPs") has to stay off — home and Azure
+addresses are not fixed.
+
 ### Story 2.11: A real charge produces a push on my phone
 
 As the owner,

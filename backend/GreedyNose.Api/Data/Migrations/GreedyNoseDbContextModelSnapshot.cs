@@ -340,6 +340,38 @@ namespace GreedyNose.Api.Data.Migrations
                     b.ToTable("PendingPushes", (string)null);
                 });
 
+            modelBuilder.Entity("GreedyNose.Api.Data.PushHealth", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ConsecutiveFailures")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("FailureMailSentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("FirstFailureAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("LastFailureAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastOutcome")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset?>("RecoveredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("RecoveryMailPending")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("PushHealth", (string)null);
+                });
+
             modelBuilder.Entity("GreedyNose.Api.Data.Rule", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -476,6 +508,15 @@ namespace GreedyNose.Api.Data.Migrations
                         .WithMany()
                         .HasForeignKey("UserId", "DebitId")
                         .OnDelete(DeleteBehavior.NoAction);
+                });
+
+            modelBuilder.Entity("GreedyNose.Api.Data.PushHealth", b =>
+                {
+                    b.HasOne("GreedyNose.Api.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("GreedyNose.Api.Data.Rule", b =>

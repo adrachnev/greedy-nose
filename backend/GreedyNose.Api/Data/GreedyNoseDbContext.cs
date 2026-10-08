@@ -40,6 +40,8 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
 
     public DbSet<PendingPush> PendingPushes => Set<PendingPush>();
 
+    public DbSet<PushHealth> PushHealth => Set<PushHealth>();
+
     public DbSet<AccountSyncState> AccountSyncStates => Set<AccountSyncState>();
 
     public DbSet<PendingConsent> PendingConsents => Set<PendingConsent>();
@@ -201,6 +203,15 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
             // Cascade: deleting the account (R18) empties this table, so a fresh connection runs as
             // a first sync again (R20b) instead of inheriting a stale "done".
             state.HasOne<User>().WithMany().HasForeignKey(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PushHealth>(health =>
+        {
+            health.ToTable("PushHealth");
+            health.HasKey(h => h.UserId);
+            health.Property(h => h.UserId).ValueGeneratedNever();
+            health.Property(h => h.LastOutcome).HasMaxLength(200);
+            health.HasOne<User>().WithMany().HasForeignKey(h => h.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<NotificationLogEntry>(entry =>

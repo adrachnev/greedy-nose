@@ -1,4 +1,5 @@
 using System.Globalization;
+using GreedyNose.Api.Alerts;
 using GreedyNose.Api.Data;
 using GreedyNose.Api.Domain;
 using GreedyNose.Api.EnableBanking;
@@ -28,7 +29,8 @@ public sealed class IngestionRunner(
     ISessionStatusChecker sessionStatus,
     INotificationSender sender,
     TimeProvider clock,
-    ILogger<IngestionRunner> logger) : IIngestionTick
+    ILogger<IngestionRunner> logger,
+    PushFailureWatch? failureWatch = null) : IIngestionTick
 {
     /// <summary>
     /// One tick: the ingestion part, then the retry stage for owed pushes (R11a). The owed marks are
@@ -52,6 +54,12 @@ public sealed class IngestionRunner(
             // an atomic unit, so a stop at the budget's end is safe.
             using var budget = new CancellationTokenSource(RetryBudget);
             await RetryOwedPushesAsync(owedIds, budget.Token);
+
+            // Story 2.10: once per tick, after the retries. Never throws (own budget, own context).
+            if (failureWatch is not null)
+            {
+                await failureWatch.EvaluateAsync();
+            }
         }
     }
 
@@ -275,6 +283,7 @@ public sealed class IngestionRunner(
                 var tokens = await db.DeviceTokens.Where(t => t.UserId == SeedData.UserId).ToListAsync(ct);
                 var (title, body) = ReconnectSummary.Build(insertedCount, badCount);
                 var sendResult = await SendToAllTokensAsync(db, tokens, title, body, ct);
+                await RecordAttemptAsync(sendResult.AnySent, sendResult.Failure);
                 if (!sendResult.AnySent)
                 {
                     // R11a: the summary is remembered with N and M frozen and retried by the next ticks;
@@ -627,12 +636,14 @@ public sealed class IngestionRunner(
         {
             // R11a: remembered, not lost — the mark commits with the debit and the retry stage picks it up.
             logger.LogWarning("No device token registered; debit {DebitId} is marked as owed.", DebitIdPreview(debit.Id));
+            await RecordAttemptAsync(false, NoTokenOutcome);
             db.PendingPushes.Add(NewDebitMark(debit.Id, reason, NoTokenOutcome));
             await db.SaveChangesAsync(ct);
             return;
         }
 
         var sendResult = await SendToAllTokensAsync(db, tokens, title, reason, ct);
+        await RecordAttemptAsync(sendResult.AnySent, sendResult.Failure);
 
         if (!sendResult.AnySent)
         {
@@ -677,6 +688,10 @@ public sealed class IngestionRunner(
             await db.SaveChangesAsync(ct);
         }
     }
+
+    /// <summary>Story 2.10: one debit or summary push attempt for the failed-in-a-row count. Not used for the expiry push.</summary>
+    private Task RecordAttemptAsync(bool success, string outcome) =>
+        failureWatch is null ? Task.CompletedTask : failureWatch.RecordAttemptAsync(success, outcome);
 
     /// <summary>What a send to all tokens came to: whether any took it, and — when none did — which outcomes said no.</summary>
     /// <param name="AnySent">At least one token got <see cref="SendOutcome.Sent"/>.</param>
@@ -822,6 +837,7 @@ public sealed class IngestionRunner(
 
         var tokens = await db.DeviceTokens.Where(t => t.UserId == SeedData.UserId).ToListAsync(ct);
         var result = await SendToAllTokensAsync(db, tokens, title, body, ct);
+        await RecordAttemptAsync(result.AnySent, result.Failure);
 
         mark.Attempts++;
         mark.LastAttemptAt = now;

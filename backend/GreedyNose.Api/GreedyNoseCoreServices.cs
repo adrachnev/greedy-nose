@@ -1,4 +1,5 @@
 using FirebaseAdmin.Messaging;
+using GreedyNose.Api.Alerts;
 using GreedyNose.Api.Consent;
 using GreedyNose.Api.Data;
 using GreedyNose.Api.EnableBanking;
@@ -84,6 +85,18 @@ public static class GreedyNoseCoreServices
         var ingestion = configuration.GetSection(IngestionOptions.SectionName).Get<IngestionOptions>()
                         ?? new IngestionOptions();
         services.AddSingleton(ingestion);
+        // Operator mail (Story 2.10). Only bound here; the required-settings check runs in
+        // RunGreedyNoseKeyChecks, like the Firebase key, and its message never contains a value.
+        services.AddSingleton(configuration.GetSection(BrevoOptions.SectionName).Get<BrevoOptions>() ?? new BrevoOptions());
+        services.AddSingleton(configuration.GetSection(AlertOptions.SectionName).Get<AlertOptions>() ?? new AlertOptions());
+        services.AddHttpClient(BrevoAlertMailSender.HttpClientName, client =>
+        {
+            client.BaseAddress = new Uri("https://api.brevo.com");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddSingleton<IAlertMailSender, BrevoAlertMailSender>();
+        services.AddSingleton<PushFailureWatch>();
+
         services.AddSingleton<IDebitsFetcher, EnableBankingDebitsFetcher>();
         services.AddSingleton<ISessionStatusChecker, EnableBankingSessionStatusChecker>();
         services.AddSingleton<IngestionRunner>();
@@ -103,5 +116,10 @@ public static class GreedyNoseCoreServices
 
         // Resolving the sender loads the Firebase key (see FirebaseAppFactory).
         services.GetRequiredService<INotificationSender>();
+
+        // The operator mail is required (Story 2.10): a host that could not report a dead push channel
+        // should not start. Names the missing settings, never their values.
+        AlertOptionsValidation.Validate(
+            services.GetRequiredService<BrevoOptions>(), services.GetRequiredService<AlertOptions>());
     }
 }
