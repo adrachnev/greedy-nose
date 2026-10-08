@@ -18,6 +18,9 @@
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Storage.Queues" Version="5.5.5" />
     <!-- The client that enqueues the first-sync message (the extension above only binds the trigger). -->
     <PackageReference Include="Azure.Storage.Queues" Version="12.28.1" />
+    <!-- Identity-based storage connection in Azure (Flex Consumption): DefaultAzureCredential for the queue client. -->
+    <!-- Explicit so Azure.Identity ships in the worker root (identity-based queue connection in Azure). -->
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
     <PackageReference Include="NCrontab" Version="3.4.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.12" />
   </ItemGroup>

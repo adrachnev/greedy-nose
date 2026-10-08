@@ -20,7 +20,9 @@ public static class FirebaseAppFactory
     /// </summary>
     public static FirebaseApp GetOrCreate(FirebaseOptions options)
     {
-        var credential = LoadCredential(options.ServiceAccountPath);
+        var credential = !string.IsNullOrWhiteSpace(options.ServiceAccountJson)
+            ? LoadCredentialFromJson(options.ServiceAccountJson)
+            : LoadCredential(options.ServiceAccountPath);
 
         return FirebaseApp.DefaultInstance ?? FirebaseApp.Create(new AppOptions { Credential = credential });
     }
@@ -34,14 +36,31 @@ public static class FirebaseAppFactory
     /// material is what a parser would be looking at when it fails, and this message goes to the
     /// console and the log.
     /// </summary>
-    internal static GoogleCredential LoadCredential(string? path)
+    public static GoogleCredential LoadCredentialFromJson(string json)
+    {
+        try
+        {
+            return CredentialFactory.FromJson<ServiceAccountCredential>(json).ToGoogleCredential();
+        }
+        catch (Exception ex)
+        {
+            // Type only, never chained: the JSON holds the private key.
+            throw new InvalidOperationException(
+                $"Firebase:ServiceAccountJson could not be read as a Firebase service-account key ({ex.GetType().Name}). " +
+                "Use the full contents of the *-firebase-adminsdk-*.json from the Firebase console " +
+                "(Project settings → Service accounts → Generate new private key).");
+        }
+    }
+
+    public static GoogleCredential LoadCredential(string? path)
     {
         const string Hint = "Set it with `dotnet user-secrets set \"Firebase:ServiceAccountPath\" \"<path to the " +
                             "*-firebase-adminsdk-*.json downloaded from the Firebase console>\"`.";
 
         if (string.IsNullOrWhiteSpace(path))
         {
-            throw new InvalidOperationException($"Firebase:ServiceAccountPath is not set. {Hint}");
+            throw new InvalidOperationException(
+                $"Neither Firebase:ServiceAccountJson nor Firebase:ServiceAccountPath is set. {Hint}");
         }
 
         if (!File.Exists(path))

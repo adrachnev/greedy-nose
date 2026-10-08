@@ -21,6 +21,12 @@ public sealed class EnableBankingOptions
     public string PrivateKeyPath { get; set; } = "";
 
     /// <summary>
+    /// The PEM text itself, for hosts without a file system for keys (Azure: a Key Vault reference
+    /// in an app setting). Takes precedence over <see cref="PrivateKeyPath"/> when set.
+    /// </summary>
+    public string PrivateKey { get; set; } = "";
+
+    /// <summary>
     /// How long a generated JWT stays valid. Enable Banking caps this at 24h; short is fine
     /// because we mint one per request from a key that is already in memory.
     /// </summary>

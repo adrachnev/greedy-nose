@@ -15,4 +15,10 @@ public sealed class FirebaseOptions
     /// settings → service accounts). Gitignored by <c>*firebase-adminsdk*.json</c> at the repo root.
     /// </summary>
     public string ServiceAccountPath { get; set; } = "";
+
+    /// <summary>
+    /// The service-account JSON text itself, for hosts without a file system for keys (Azure: a Key
+    /// Vault reference in an app setting). Takes precedence over <see cref="ServiceAccountPath"/> when set.
+    /// </summary>
+    public string ServiceAccountJson { get; set; } = "";
 }

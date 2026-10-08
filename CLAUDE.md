@@ -4,6 +4,19 @@
 
 ## Status
 
+**2026-10-08 (evening) — Story 2.6 built, reviewed and live-verified (not yet committed when written; nothing
+pushed): the backend runs in Azure.** `https://func-greedy-nose-611f0.azurewebsites.net`, Flex Consumption in
+Germany West Central, resource group `rg-greedy-nose`, subscription "Azure subscription 1" (new Microsoft
+account; pay-as-you-go, budget alert 5 €). Storage through the app's identity, Key Vault `kv-greedynose-611f0` with
+six references (all resolved), Application Insights. https only, 401 without/with a wrong key, 200 with the right
+one, tick without a consent does nothing, cold start 4.6 s. The Azure CLI runs in a container: `bash tools/az.sh
+<args>` (login done); `tools/azure-setup.sh`, `azure-secret.sh`, `azure-deploy.sh` (a code change = run
+`bash tools/azure-deploy.sh`). Code: inline `EnableBanking:PrivateKey` / `Firebase:ServiceAccountJson`, identity-based
+first-sync queue. 601 backend tests. **Still the Sandbox values in Azure** (application id, redirect URL) — Story 2.7
+switches them to Production. The Neon password and the Brevo key stay as they are (owner's decision). Open: cost
+check after 2–3 days. Next: 2.7 (real N26 through the cloud, owner step, real quota), or 2.8 (release app), or the
+code-only stories 3.1, 3.4, 4.1.
+
 **2026-10-08 (later) — Story 2.5 built, reviewed, live-verified and committed (nothing pushed): the cloud
 database is ready.** Neon free tier (eu-central-1, direct host), secret `ConnectionStrings:Neon`; all 12
 migrations applied, seed user present. `DB=neon bash tools/ef-container.sh database update` /

@@ -1191,6 +1191,21 @@ an app setting — nothing secret in the repository or in plain logs
 **And** the cold start is measured and recorded; the deploy steps and the cloud address are
 written in `TRACER-03-GO-LIVE.md`
 
+**As built (2026-10-08):** Flex Consumption (Linux, dotnet-isolated 10.0, 512 MB) in Germany West Central,
+app `func-greedy-nose-611f0` in resource group `rg-greedy-nose`, storage reached through the app's own identity
+(no storage key anywhere), Application Insights, Key Vault `kv-greedynose-611f0` with six Key Vault references
+(all `Resolved`). Code: `EnableBanking:PrivateKey` (PEM text) and `Firebase:ServiceAccountJson` as inline
+alternatives to the file paths (quotes, `\n` and CRLF tolerated, no value in any message), and
+`QueueFirstSyncTrigger` resolves an identity-based queue target (`AzureWebJobsStorage__accountName`) with an
+explicit `Azure.Identity` reference — the review found it missing from the publish output, which would have broken
+the first-sync enqueue in Azure only. 601 backend tests (576 + 25), one review pass, one MUST FIX fixed.
+Tooling: `tools/az.sh` (Azure CLI in a container), `azure-setup.sh`, `azure-secret.sh`, `azure-deploy.sh`.
+**Verified live:** `http://` → 301 to https; no key / wrong key / unknown path → 401; right key → 200 with an
+empty list from Neon; all references resolved; `IngestionTick` run by hand → "No active consent; skipping this
+tick", no secrets in the logs; cold start 4.6 s after 12 min idle (warm 0.17 s). **Open:** cost check in Cost
+Analysis after 2–3 days; the Enable Banking application id and redirect URL are still the Sandbox ones until
+Story 2.7; the Neon password and the Brevo key were not rotated (owner's decision).
+
 ### Story 2.7: N26 is connected through the cloud
 
 As the owner,
