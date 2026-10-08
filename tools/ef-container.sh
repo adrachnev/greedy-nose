@@ -10,6 +10,7 @@
 #   EF_RW=1 bash tools/ef-container.sh migrations add <Name>
 #       # writes the new migration files back into backend/GreedyNose.Api/Data/Migrations
 #       # (the model snapshot included); review the files, then commit them like code.
+#   DB=neon bash tools/ef-container.sh database update   # the Neon database (secret ConnectionStrings:Neon)
 # Needs Docker and the dev Postgres up (backend/docker-compose.yml). The connection string is the
 # dev one from the compose file (throwaway data), passed as ConnectionStrings__Postgres; the
 # design-time factory (GreedyNose.Api/Data/DesignTimeDbContextFactory.cs) reads it.
@@ -21,8 +22,22 @@ if [ "${EF_RW:-}" = "1" ]; then
   MODE=rw
   COPYBACK="&& cp -r /work/GreedyNose.Api/Data/Migrations/. /src/GreedyNose.Api/Data/Migrations/"
 fi
-docker run --rm --network backend_default \
-  -e "ConnectionStrings__Postgres=Host=greedy-nose-postgres;Port=5432;Database=greedynose;Username=greedynose;Password=greedynose-dev" \
+if [ "${DB:-}" = "neon" ]; then
+  # Story 2.5: the Neon database. The connection string is the user secret ConnectionStrings:Neon
+  # (the direct, not the pooled, host); nothing is printed. No dev network needed.
+  CONN=$(dotnet user-secrets list --project C:/Workspace/greedy-nose/backend/GreedyNose.Api \
+    | grep '^ConnectionStrings:Neon ' | sed 's/^[^=]*= *//')
+  if [ -z "$CONN" ]; then
+    echo "The user secret ConnectionStrings:Neon is not set." >&2
+    exit 1
+  fi
+  NET=()
+else
+  CONN="Host=greedy-nose-postgres;Port=5432;Database=greedynose;Username=greedynose;Password=greedynose-dev"
+  NET=(--network backend_default)
+fi
+docker run --rm "${NET[@]}" \
+  -e "ConnectionStrings__Postgres=$CONN" \
   -v "C:/Workspace/greedy-nose/backend:/src:$MODE" -v greedy-nose-nuget:/root/.nuget/packages \
   mcr.microsoft.com/dotnet/sdk:10.0 bash -c "
     mkdir /work && cd /src && tar cf - --exclude=bin --exclude=obj . | tar xf - -C /work && cd /work &&

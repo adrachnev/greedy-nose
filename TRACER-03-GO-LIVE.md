@@ -56,12 +56,28 @@ per-bank labels in the debit list, other users' accounts.
 - Whether `DELETE /sessions/{id}` also revokes the consent at a real bank.
 - Behaviour of the target phone when the app is force-stopped.
 
+## Cloud database (Neon) — Story 2.5
+
+- Neon free tier, region eu-central-1 (Frankfurt), database `neondb`. Use the **direct** host (no
+  `-pooler`): the EF migrations take advisory locks that a pooler does not support.
+- The connection string lives only as the user secret `ConnectionStrings:Neon` (format:
+  `Host=…;Port=5432;Database=…;Username=…;Password=…;SSL Mode=Require;Timeout=30;Command Timeout=60`).
+  In Azure it becomes a Key Vault / app setting (Story 2.6). Never in Git, logs or docs. The backend
+  refuses a non-local host without `SSL Mode=Require|VerifyCA|VerifyFull`, and one with
+  `Trust Server Certificate=true` (`PostgresConnectionCheck`); `UseNpgsql` retries transient errors
+  (5 times, up to 15 s apart) so the first query after Neon's idle suspend (5 min) can wait for the resume.
+- **Apply migrations by hand, from this machine, never at startup:**
+  `DB=neon bash tools/ef-container.sh migrations list` (read-only), then
+  `DB=neon bash tools/ef-container.sh database update`. The seeded user comes with the migrations.
+  Run the local backend against Neon with `DB=neon bash tools/run-functions-container.sh <name>`.
+- Resetting the password in the Neon console means setting the secret again.
+
 ## Progress
 
 | Step | State |
 |---|---|
 | Slice into epics and stories (`bmad-create-epics-and-stories`) | **done 2026-10-01** — 4 epics, 30 stories in `_bmad-output/planning-artifacts/epics.md`; push retry and failure email (2.9, 2.10) come before the live proof (2.11) |
 | Epic 1 — a backend I can trust to deploy (1.1–1.8) | in progress — **1.4 done 2026-10-01** (consent start protected: one-time link + state in `PendingConsents`, 398 tests, race verified live); **1.3 done 2026-10-01** (API key middleware, 346 tests, live check in a container; the backend no longer runs on the host — `tools/run-backend-container.sh`); **1.2 done 2026-10-01** (app sends `Authorization: Bearer <key>`, 211 jest tests, bundle check passed); **1.1 done 2026-10-01**: Smart App Control (not a managed policy) blocked every fresh DLL; tests now run in a Linux container (command in `AGENTS.md`), **baseline 310 passed, 0 failed**, ~11 s, repeatable; the 1.2–1.8 stories are next |
-| Epic 2 — N26 live on Azure, end to end (2.1–2.11) | not started |
+| Epic 2 — N26 live on Azure, end to end (2.1–2.11) | in progress — 2.1–2.4, 2.9, 2.10 done (2026-10-07/08); **2.5 done 2026-10-08** (Neon project in eu-central-1, all 12 migrations applied, seed user present; see "Cloud database (Neon)" below) |
 | Epic 3 — DKB and ING-DiBa watched too (3.1–3.8) | not started |
 | Epic 4 — never silently without alerts (4.1–4.3) | not started |

@@ -1140,6 +1140,21 @@ setting in the cloud) — never in Git, logs or docs
 
 **And** the migration command is written down in `TRACER-03-GO-LIVE.md`
 
+**As built (2026-10-08):** Neon project in eu-central-1 (free tier, database `neondb`, direct host,
+no pooler). The connection string is the user secret `ConnectionStrings:Neon`; the tools take it with
+`DB=neon` (`tools/ef-container.sh`, `tools/run-functions-container.sh`), print nothing, and the dev
+database stays the default. All 12 migrations applied from this machine; 12 tables + history, the seed
+user exists, `Debits` empty. Code: `UseNpgsql(..., EnableRetryOnFailure(5, 15 s))`, and
+`Data/PostgresConnectionCheck.RequireTlsForRemoteHost` (a non-local host needs `SSL Mode`
+Require/VerifyCA/VerifyFull and no `Trust Server Certificate=true`; messages never carry a value),
+called by `AddGreedyNoseCore` and by the design-time factory. 576 backend tests (557 + 19), one review
+pass, no MUST FIX; three findings fixed (the migration path runs the check too, the trust-certificate
+hole, a test that pins the wiring). **Verified live:** after 6 minutes of idle the first `GET /debits`
+against Neon answered 200 with an empty list in 2.4 s (warm: 0.08 s); no key → 401; the log holds
+neither host nor password. Retry covers the resume, so point (1) of bead `gn-7h4` (a transient DB
+failure killing the consent restore) is handled for EF queries. Not done on purpose: running the
+migrations from the deployed app; the connection string goes to Key Vault in Story 2.6.
+
 ### Story 2.6: The backend is deployed to Azure
 
 As the owner,

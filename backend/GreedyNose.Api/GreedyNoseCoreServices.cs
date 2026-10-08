@@ -32,6 +32,9 @@ public static class GreedyNoseCoreServices
                 "(the local database is started by backend/docker-compose.yml).");
         }
 
+        // Remote databases (Neon, Story 2.5) must use TLS; the message never contains a value.
+        PostgresConnectionCheck.RequireTlsForRemoteHost(postgres);
+
         // A factory rather than plain AddDbContext: the ingestion tick is not a request and cannot
         // take a scoped context, so it injects IDbContextFactory<GreedyNoseDbContext> — never
         // GreedyNoseDbContext itself — and makes one short-lived context per tick.
@@ -43,7 +46,11 @@ public static class GreedyNoseCoreServices
         // Never set `Include Error Detail` in the connection string and never call
         // `EnableSensitiveDataLogging()`: either one puts the full device token (a delivery credential)
         // into logs and the dev error page — see DeviceTokenEndpoint.
-        services.AddDbContextFactory<GreedyNoseDbContext>(db => db.UseNpgsql(postgres));
+        //
+        // Neon sleeps after 5 minutes idle and needs a few seconds to wake, so the first query may fail
+        // transiently: retry. Safe because the code opens no manual transactions (checked 2026-10-08).
+        services.AddDbContextFactory<GreedyNoseDbContext>(db => db.UseNpgsql(postgres, npgsql =>
+            npgsql.EnableRetryOnFailure(maxRetryCount: 5, maxRetryDelay: TimeSpan.FromSeconds(15), errorCodesToAdd: null)));
 
         // Same for the consent encryption key (Story 1.7): stored consents are unreadable without it,
         // and there is no default. The message never contains the key.

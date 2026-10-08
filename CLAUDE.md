@@ -4,6 +4,16 @@
 
 ## Status
 
+**2026-10-08 (later) — Story 2.5 built, reviewed, live-verified and committed (nothing pushed): the cloud
+database is ready.** Neon free tier (eu-central-1, direct host), secret `ConnectionStrings:Neon`; all 12
+migrations applied, seed user present. `DB=neon bash tools/ef-container.sh database update` /
+`DB=neon bash tools/run-functions-container.sh <name>` use it; the dev DB stays the default. New in the
+backend: transient-error retry on the DB connection and a startup refusal of a remote database without
+TLS (`PostgresConnectionCheck`). Cold start checked: first `/debits` after 6 min idle = 200 in 2.4 s.
+576 backend tests. The Neon password was pasted into the chat once (the owner accepted it; reset it in
+the Neon console and set the secret again to rotate). Next: `bd ready` — 2.6 (deploy to Azure, needs the
+owner's Azure account), or the code-only stories 3.1, 3.4, 4.1.
+
 **2026-10-08 — Story 2.10 built, reviewed, live-verified and committed (nothing pushed): one email when
 pushes keep failing.** After three failed push attempts in a row (across ticks; per-debit and summary
 pushes, not the expiry push) one mail goes out through Brevo, once per incident; when pushes work again one

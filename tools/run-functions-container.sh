@@ -23,6 +23,11 @@ get() { dotnet user-secrets list --project GreedyNose.Api | grep "^$1 " | sed 's
 FIREBASE_PATH=$(get "Firebase:ServiceAccountPath")
 PEM_PATH=$(get "EnableBanking:PrivateKeyPath")
 PG=$(get "ConnectionStrings:Postgres" | sed -E 's/Host=[^;]+/Host=greedy-nose-postgres/; s/Port=[0-9]+/Port=5432/')
+if [ "${DB:-}" = "neon" ]; then
+  # Story 2.5: run against Neon (secret ConnectionStrings:Neon, taken as it is, nothing printed).
+  PG=$(get "ConnectionStrings:Neon")
+  [ -n "$PG" ] || { echo "The user secret ConnectionStrings:Neon is not set." >&2; exit 1; }
+fi
 AZURITE="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://greedy-nose-azurite:10000/devstoreaccount1;QueueEndpoint=http://greedy-nose-azurite:10001/devstoreaccount1;TableEndpoint=http://greedy-nose-azurite:10002/devstoreaccount1;"
 export MSYS_NO_PATHCONV=1
 

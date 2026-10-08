@@ -28,6 +28,9 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Gre
                 "(or the user secret) before running dotnet ef.");
         }
 
+        // Same TLS rule as the runtime: migrations against Neon must not go out in clear text.
+        PostgresConnectionCheck.RequireTlsForRemoteHost(connection);
+
         return new GreedyNoseDbContext(new DbContextOptionsBuilder<GreedyNoseDbContext>().UseNpgsql(connection).Options);
     }
 }
