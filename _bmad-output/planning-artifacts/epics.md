@@ -1275,6 +1275,12 @@ and the count is recorded
 **And** no raw bank data appears in logs or docs, only counts; the number of bank requests the
 first sync made is recorded as a finding
 
+**As run (2026-10-09):** Azure switched to the Production application (key in Key Vault, application id and the
+`https://func-greedy-nose-611f0.azurewebsites.net/callback` redirect), N26 consent approved in the browser; the first
+sync ran a minute later: 1 bank request / 1 page, 108 transactions, 101 debits and 55 payees in Neon, no push, no 429;
+`/debits` answers 200 from the database. No raw bank data in logs or docs, counts only. Details and the Entra
+"security defaults" detour: `TRACER-03-GO-LIVE.md`, "Findings: N26 through the cloud".
+
 ### Story 2.8: The release app is on my phone and talks to the cloud
 
 As the owner,

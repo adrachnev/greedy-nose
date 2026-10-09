@@ -140,6 +140,27 @@ Local host on the Production application, dev database, real N26. Counts only:
 - **Logs now say more:** "Tick fetched N page(s), M transaction(s) from <date>; oldest booking date …, newest …",
   and a 422/429 from Enable Banking carries its own `message` in the exception text.
 
+## Findings: N26 through the cloud (Story 2.7, 2026-10-09)
+
+- **Switch to Production in Azure:** the Production key went into the Key Vault secret `enablebanking-private-key`
+  (a new version; the reference has no version, so the restart picked it up), `EnableBanking__ApplicationId` =
+  the Production application, `EnableBanking__RedirectUrl` = `https://func-greedy-nose-611f0.azurewebsites.net/callback`
+  (registered in the Control Panel first). All references `Resolved`. The Production key path for the copy script
+  lives in the unused user secret `EnableBanking:ProductionPrivateKeyPath`.
+- **Consent and first sync:** `bash tools/connect-bank.sh N26 DE https://func-greedy-nose-611f0.azurewebsites.net`,
+  approved in N26. The first sync ran one minute later through the queue: **1 page, 108 transactions** from 2026-07-11,
+  **101 debits** stored in Neon (booking days 12 July – 8 October), 55 payees, one consent, one sync-state row,
+  **0 pushes, 0 notifications**, no 429. `GET /debits` with the key answers 200. Neon was empty before (no Sandbox data).
+- **Bank requests of the whole first sync: 1.** Together with the earlier local tests N26 saw about 3 fetches that day
+  and answered all of them.
+- **Azure CLI blocked by Entra security defaults (error 530035):** after the first deploy the CLI could not sign in
+  any more (also the Zip deploy asks for the extra scope `https://appservice.azure.com/.default`); a personal
+  Microsoft account cannot use `aka.ms/mfasetup`. Fix used: the owner switched **Security defaults to Disabled**
+  (Entra ID → Properties → Manage security defaults), then `bash tools/az.sh login --tenant <tenant id>
+  --use-device-code` and once more with `--scope https://appservice.azure.com/.default`, in a private browser window
+  at `microsoft.com/devicelogin`. Security defaults are **still disabled** — see the bead for re-enabling or a
+  service principal.
+
 ## Progress
 
 | Step | State |
@@ -148,5 +169,6 @@ Local host on the Production application, dev database, real N26. Counts only:
 | Epic 1 — a backend I can trust to deploy (1.1–1.8) | in progress — **1.4 done 2026-10-01** (consent start protected: one-time link + state in `PendingConsents`, 398 tests, race verified live); **1.3 done 2026-10-01** (API key middleware, 346 tests, live check in a container; the backend no longer runs on the host — `tools/run-backend-container.sh`); **1.2 done 2026-10-01** (app sends `Authorization: Bearer <key>`, 211 jest tests, bundle check passed); **1.1 done 2026-10-01**: Smart App Control (not a managed policy) blocked every fresh DLL; tests now run in a Linux container (command in `AGENTS.md`), **baseline 310 passed, 0 failed**, ~11 s, repeatable; the 1.2–1.8 stories are next |
 | Epic 2 — N26 live on Azure, end to end (2.1–2.11) | in progress — 2.1–2.4, 2.9, 2.10 done (2026-10-07/08); **2.5 done 2026-10-08** (Neon project in eu-central-1, all 12 migrations applied, seed user present; see "Cloud database (Neon)" above); **2.6 done 2026-10-08** (Function App on Flex Consumption in Frankfurt, Key Vault references resolved, https only, 401/200 checked, tick without consent harmless; see "Azure deployment" above) |
 | Story 2.6a — the first sync tried against real N26, locally | **done 2026-10-09** — see "Findings: first sync at N26" below |
+| Story 2.7 — N26 through the cloud | **done 2026-10-09** — see "Findings: N26 through the cloud" below; the first Steady tick (12:00 UTC) still to be read |
 | Epic 3 — DKB and ING-DiBa watched too (3.1–3.8) | not started |
 | Epic 4 — never silently without alerts (4.1–4.3) | not started |
