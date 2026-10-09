@@ -83,6 +83,39 @@ public sealed class EnableBankingResponseParsingTests : IDisposable
         Assert.IsAssignableFrom<InvalidOperationException>(exception);
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    public async Task A_message_with_an_iban_does_not_reach_the_exception_text_except_for_422_and_429(HttpStatusCode status)
+    {
+        var (_, factory) = Stub(status, """{"message":"Account DE11222233334444555566 failed","error":"SOME_ERROR"}""");
+
+        var exception = await Assert.ThrowsAsync<EnableBankingRequestException>(() =>
+            NewFetcher(factory).FetchAsync(Account, new DateOnly(2026, 1, 1), CancellationToken.None));
+
+        Assert.Equal("SOME_ERROR", exception.ErrorCode);
+        Assert.DoesNotContain("DE11222233334444555566", exception.Message);
+        Assert.Contains("SOME_ERROR", exception.Message);
+    }
+
+    [Fact]
+    public async Task A_422_message_is_in_the_exception_text_cut_at_200_characters_and_without_control_characters()
+    {
+        var longMessage = "Period wrong\\n\\r\\t" + new string('x', 300); // JSON escapes, decoded by the parser
+        var (_, factory) = Stub((HttpStatusCode)422, $$"""{"message":"{{longMessage}}","error":"WRONG_TRANSACTIONS_PERIOD"}""");
+
+        var exception = await Assert.ThrowsAsync<EnableBankingRequestException>(() =>
+            NewFetcher(factory).FetchAsync(Account, new DateOnly(2026, 1, 1), CancellationToken.None));
+
+        Assert.Equal(422, exception.StatusCode);
+        Assert.Contains("(WRONG_TRANSACTIONS_PERIOD): Period wrong", exception.Message);
+        Assert.DoesNotContain('\n', exception.Message);
+        Assert.DoesNotContain('\r', exception.Message);
+        Assert.DoesNotContain('\t', exception.Message);
+        Assert.DoesNotContain(new string('x', 201), exception.Message);
+        Assert.Contains(new string('x', 150), exception.Message);
+    }
+
     [Fact]
     public async Task A_401_without_an_error_field_wrong_signature_has_no_error_code()
     {

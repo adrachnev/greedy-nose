@@ -168,7 +168,7 @@ come from `ARCHITECTURE.md` and `TODO.md` findings that go-live makes real.
 - AR10: **Pagination.** Follow `continuation_key`; the fetcher must return the **complete**
   history or throw (first sync is all-or-nothing); fix the fallback-id ordinal colliding across
   pages; send `date_from` so banks do not return arbitrary history lengths. **Decided 2026-10-01:
-  the first sync pulls a fixed window of the last 12 months** (an upper limit — a bank may return
+  the first sync pulls a fixed window of the last 90 days** (an upper limit — a bank may return
   less). This **changes R25** ("as much as the ASPSP returns, no how-far-back setting"), so
   `REQUIREMENTS.md` must be updated first. To check while building: whether each page counts
   against the bank's ~4 fetches/day. Needed before DKB and
@@ -245,7 +245,7 @@ Source is `mocks/` and `REQUIREMENTS.md` ("Known mock gaps"); there is no `DESIG
 ### FR Coverage Map
 
 FR1: Epic 3 (Epic 2 for the N26 part) — several banks at once, one consent each, one merged list
-FR2: Epic 1 (first sync: 12 months, all pages), verified live in Epic 2 (N26) and Epic 3 (DKB, ING)
+FR2: Epic 1 (first sync: 90 days, all pages), verified live in Epic 2 (N26) and Epic 3 (DKB, ING)
 FR3: Epic 1 — debit list from stored data
 FR4: Epic 2 — new booked bad debit → one push, verified live (baseline, built)
 FR5: Epic 2 — push wording, plus the dedicated Android channel (baseline, built)
@@ -269,7 +269,7 @@ proven bank); Epic 3 adds the two unknown banks, still inside Tracer 3.
 The owner can rely on the backend to guard his data and to serve the debit list from stored data;
 the tests run, so every later story is verifiable. Epic 1 is the most technical epic: a backend
 that must be safe before deployment is the real value here.
-**FRs covered:** FR2 (first sync: 12 months, all pages), FR3
+**FRs covered:** FR2 (first sync: 90 days, all pages), FR3
 **Also:** AR1, AR2, AR3, AR10, AR17
 
 ### Epic 2: N26 live on Azure, end to end
@@ -592,6 +592,7 @@ run migrations before the first start, key rotation needs a re-consent), `gn-uxv
 bank name, walk all rows).
 
 ### Story 1.8: The first sync pulls 12 months, all pages
+> **Changed 2026-10-09 (Story 2.6a):** the window is now **90 days** (`IngestionRunner.FirstSyncWindowDays`), not 12 months — real N26 answered 422 `WRONG_TRANSACTIONS_PERIOD` to 12 months and to 180 days. The acceptance criteria below record what was built on 2026-10-05.
 
 As the owner,
 I want the first sync to pull the last 12 months completely,
@@ -944,6 +945,8 @@ from the database
 **And** the ingestion worker behaves as before with one consent, and all ingestion tests pass
 (multi-consent is Epic 3)
 
+> **Changed 2026-10-09 (Story 2.6a):** the window is now **90 days** (`IngestionRunner.FirstSyncWindowDays`), not 12 months — real N26 answered 422 `WRONG_TRANSACTIONS_PERIOD` to 12 months and to 180 days. The acceptance criteria below record what was built on 2026-10-05.
+
 ### Story 1.8: The first sync pulls 12 months, all pages
 
 As the owner,
@@ -1206,6 +1209,40 @@ tick", no secrets in the logs; cold start 4.6 s after 12 min idle (warm 0.17 s).
 Analysis after 2–3 days; the Enable Banking application id and redirect URL are still the Sandbox ones until
 Story 2.7; the Neon password and the Brevo key were not rotated (owner's decision).
 
+### Story 2.6a: The first sync is tried against the real N26, locally
+
+As the owner,
+I want to see what a first sync does against my real N26 account, on my own machine,
+So that I know the page count and the quota behaviour before the cloud connection (FR1, NFR-quota).
+
+**Owner step:** real bank data and real quota — not for an unattended run. No code change.
+
+**Acceptance Criteria:**
+
+**Given** the local backend runs on the Production application and the dev database
+**When** I connect N26 with `tools/connect-bank.sh N26 DE` and approve it in N26
+**Then** the consent is stored encrypted in the dev database and the first sync runs once, silently — no pushes
+
+**Given** the first sync has run
+**Then** the number of pages, the number of stored debits, the duration and whether a 429 occurred are recorded
+as counts only (answers `gn-xeq`, and the page-quota part of `gn-6k5`)
+
+**Given** a 429 stops the sync
+**Then** nothing is stored, the number of pages that succeeded is recorded, and no manual retry is made inside 6 hours
+
+**And** no PEM, IBAN, session id or raw bank data appears in logs or docs
+**And** the local secrets are set back to the Sandbox values and the container is removed afterwards
+
+**As run (2026-10-09):** local host on the Production application, N26 consent through a local TLS proxy (the
+Production application accepts only `https://localhost:5199/callback`). The dev database already knew the account, so
+the consent's own sync ran as a Reconnect (1 page, from 2026-09-29, one summary push). After the sync-state row was
+deleted by hand, the first-sync mode ran: **12 months → 422 `WRONG_TRANSACTIONS_PERIOD`; 180 days → 422; 90 days →
+200, 1 page, 108 transactions, oldest booking date 12 July, no push, no 429.** Decision: the first-sync window is
+**90 days for every bank** (R25 changed). Whether a second page counts against N26's daily fetches stays unmeasured
+(`gn-xeq`); with 90 days one page is the normal case. Code: `FirstSyncWindowDays = 90`, a log line with page,
+transaction count and oldest/newest booking date, Enable Banking's `message` in the exception text for 422/429 only
+(608 backend tests, one review pass, no MUST FIX).
+
 ### Story 2.7: N26 is connected through the cloud
 
 As the owner,
@@ -1227,7 +1264,7 @@ makes the bank a parameter) and approve it in N26
 accepted before
 
 **Given** the consent is stored
-**Then** the first sync runs once and stores up to 12 months of N26 debits silently — no pushes —
+**Then** the first sync runs once and stores up to 90 days of N26 debits silently — no pushes —
 and the count is recorded
 
 **Given** the app's key
@@ -1518,7 +1555,7 @@ by hand — is recorded as a finding (AR11)
 **Then** the story stops and we decide (for example a deep link), instead of working around it
 
 **Given** the consent is stored
-**Then** the first sync stores up to 12 months of DKB debits silently, with no pushes
+**Then** the first sync stores up to 90 days of DKB debits silently, with no pushes
 **And** the number of debits and of bank requests is recorded
 
 **Given** `/debits`
@@ -1546,7 +1583,7 @@ So that its charges are watched too (FR1, FR2, AR11).
 **Then** the story stops and we decide, instead of working around it
 
 **Given** the consent is stored
-**Then** the first sync stores up to 12 months of ING-DiBa debits silently, with no pushes
+**Then** the first sync stores up to 90 days of ING-DiBa debits silently, with no pushes
 **And** the number of debits and of bank requests is recorded
 
 **Given** `/debits`

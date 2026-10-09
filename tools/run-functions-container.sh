@@ -12,6 +12,8 @@
 # Local test with a short schedule (needs the opt-out, else the 6 h floor refuses to start):
 #   bash tools/run-functions-container.sh gn-func -e "IngestionSchedule=*/30 * * * * *" -e Ingestion__AllowShortInterval=true
 # Stop:   docker rm -f <container-name>
+# HOST_PORT=<port> publishes the API on another host port (default 5199) — used when a TLS proxy
+# takes 5199 (Story 2.6a: the Production application only accepts an https redirect URL).
 # Default schedule (no extra args) is every 6 hours, as in Azure. Nothing secret is printed; the
 # Azurite account key below is Azurite's public well-known dev key.
 set -e
@@ -40,7 +42,7 @@ docker run --rm --network backend_default \
   dotnet publish GreedyNose.Functions -c Release -o /out --artifacts-path /tmp/artifacts
 
 # Step 2: run the Functions host on the published output.
-docker run --rm --name "$NAME" --network backend_default -p 127.0.0.1:5199:80 \
+docker run --rm --name "$NAME" --network backend_default -p 127.0.0.1:${HOST_PORT:-5199}:80 \
   -v greedy-nose-func-out:/home/site/wwwroot \
   -v "$SECRETS_FILE:/home/.microsoft/usersecrets/$SID/secrets.json:ro" \
   -v "$FIREBASE_PATH:/secrets/firebase.json:ro" \

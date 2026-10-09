@@ -34,7 +34,8 @@ N26 + DKB + ING-DiBa  →  Enable Banking (Production)  →  Azure Functions + N
   the rest.
 - **Redirect:** `https://<name>.azurewebsites.net/callback`, no custom domain; consents are
   finished in the browser (no deep link back into the app); all three consents are granted fresh.
-- **First sync:** last 12 months (R25 changed), pagination with `continuation_key`.
+- **First sync:** last 90 days (R25 changed twice: 12 months on 2026-10-01, 90 days on 2026-10-09 after real N26
+  refused 12 months with 422 `WRONG_TRANSACTIONS_PERIOD`), pagination with `continuation_key`.
 - **Failed pushes** are retried (R11a, reverses the 2026-09-29 decision): "push owed" mark, 24 h
   limit, one email to the owner after 3 failed attempts in a row. The reconnect summary push (R20)
   is retried the same way (decided 2026-10-01).
@@ -114,6 +115,31 @@ per-bank labels in the debit list, other users' accounts.
 - **Left as they are on purpose (owner's decision 2026-10-08):** the Neon password and the Brevo key were
   pasted into the chat once and are not rotated.
 
+## Findings: first sync at N26 (Story 2.6a, 2026-10-09)
+
+Local host on the Production application, dev database, real N26. Counts only:
+
+- **History window:** `date_from` 12 months back → 422 `WRONG_TRANSACTIONS_PERIOD`; 180 days → 422; **90 days → 200**.
+  The limit lies between 90 and 180 days (not narrowed further). Both 422 answers came within ~2 s from Enable
+  Banking; whether a 422 costs quota is unknown. **Decision: the first-sync window is 90 days for every bank**
+  (R25; `IngestionRunner.FirstSyncWindowDays`).
+- **Pages:** the 90-day sync took **1 page, 108 transactions**, oldest booking date 12 July, newest 8 October,
+  3 s, no 429, no push. A second page was never seen, so **whether a further page counts against N26's ~4 fetches
+  a day is still unmeasured** (`gn-xeq`); with 90 days one page is the normal case. Enable Banking's support agent
+  could not say either, and PSU headers do not help at N26.
+- **Reconnect vs. first sync:** a database that already knows the account runs the consent's sync as a Reconnect
+  (from the last fetch, plus one summary push). To try a real first sync again, delete the account's row in
+  `AccountSyncStates` (by hand) and let a tick run.
+- **Production needs `https` for the redirect:** only `https://localhost:5199/callback` is registered. Locally a
+  Caddy container (`caddy reverse-proxy --from https://localhost:5199 --to http://<host container>:80`, self-signed
+  certificate, accept the browser warning) in front of the host on another port
+  (`HOST_PORT=5198 bash tools/run-functions-container.sh …`; `connect-bank.sh N26 DE http://127.0.0.1:5198`).
+  The one-time link takes its address from the redirect URL, so it already points to the https address.
+- **One-off tick:** a host schedule like `0 <minute> <hour> * * *` (daily, so the 6 h floor accepts it) fires once;
+  `/admin/functions/…` answers 401 locally.
+- **Logs now say more:** "Tick fetched N page(s), M transaction(s) from <date>; oldest booking date …, newest …",
+  and a 422/429 from Enable Banking carries its own `message` in the exception text.
+
 ## Progress
 
 | Step | State |
@@ -121,5 +147,6 @@ per-bank labels in the debit list, other users' accounts.
 | Slice into epics and stories (`bmad-create-epics-and-stories`) | **done 2026-10-01** — 4 epics, 30 stories in `_bmad-output/planning-artifacts/epics.md`; push retry and failure email (2.9, 2.10) come before the live proof (2.11) |
 | Epic 1 — a backend I can trust to deploy (1.1–1.8) | in progress — **1.4 done 2026-10-01** (consent start protected: one-time link + state in `PendingConsents`, 398 tests, race verified live); **1.3 done 2026-10-01** (API key middleware, 346 tests, live check in a container; the backend no longer runs on the host — `tools/run-backend-container.sh`); **1.2 done 2026-10-01** (app sends `Authorization: Bearer <key>`, 211 jest tests, bundle check passed); **1.1 done 2026-10-01**: Smart App Control (not a managed policy) blocked every fresh DLL; tests now run in a Linux container (command in `AGENTS.md`), **baseline 310 passed, 0 failed**, ~11 s, repeatable; the 1.2–1.8 stories are next |
 | Epic 2 — N26 live on Azure, end to end (2.1–2.11) | in progress — 2.1–2.4, 2.9, 2.10 done (2026-10-07/08); **2.5 done 2026-10-08** (Neon project in eu-central-1, all 12 migrations applied, seed user present; see "Cloud database (Neon)" above); **2.6 done 2026-10-08** (Function App on Flex Consumption in Frankfurt, Key Vault references resolved, https only, 401/200 checked, tick without consent harmless; see "Azure deployment" above) |
+| Story 2.6a — the first sync tried against real N26, locally | **done 2026-10-09** — see "Findings: first sync at N26" below |
 | Epic 3 — DKB and ING-DiBa watched too (3.1–3.8) | not started |
 | Epic 4 — never silently without alerts (4.1–4.3) | not started |

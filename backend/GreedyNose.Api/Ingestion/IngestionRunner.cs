@@ -113,7 +113,7 @@ public sealed class IngestionRunner(
 
         var sessionHash = SessionFingerprint.Of(sessionId);
 
-        // The fetch depends on the mode (a first sync pulls 12 months), so it is decided before
+        // The fetch depends on the mode (a first sync pulls the last FirstSyncWindowDays days), so it is decided before
         // fetching, once, and used for the whole tick. Untracked, so a later ChangeTracker.Clear()
         // cannot affect it; the end-of-tick hash update re-loads its own tracked row.
         AccountSyncState? syncState;
@@ -403,18 +403,21 @@ public sealed class IngestionRunner(
         Reconnect,
     }
 
+    /// <summary>How far back the first sync reads (R25), and the oldest start any tick may use.</summary>
+    public const int FirstSyncWindowDays = 90;
+
     /// <summary>Days re-fetched before the newest known debit; known ids dedupe, so the overlap is harmless.</summary>
     public const int OverlapDays = 7;
 
     /// <summary>
-    /// Where this tick's fetch starts. First sync: 12 months back. Otherwise the day of the newest
+    /// Where this tick's fetch starts. First sync: <see cref="FirstSyncWindowDays"/> days back. Otherwise the day of the newest
     /// stored debit (else the day the first sync finished) minus <see cref="OverlapDays"/>, never
-    /// earlier than 12 months back. Whole days only: fallback debit ids count per booking day.
+    /// earlier than <see cref="FirstSyncWindowDays"/> days back. Whole days only: fallback debit ids count per booking day.
     /// </summary>
     public static DateOnly ComputeDateFrom(
         IngestionMode mode, DateOnly today, DateTimeOffset? newestDebit, DateTimeOffset? firstSyncCompletedAt)
     {
-        var floor = today.AddMonths(-12);
+        var floor = today.AddDays(-FirstSyncWindowDays);
         var anchor = newestDebit ?? firstSyncCompletedAt;
         if (mode == IngestionMode.FirstSync || anchor is null)
         {

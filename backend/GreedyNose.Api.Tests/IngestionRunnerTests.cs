@@ -266,11 +266,11 @@ public class IngestionRunnerTests
         var state = await verify.AccountSyncStates.SingleAsync();
         Assert.Equal(AccountKey, state.AccountKey);
         Assert.Equal(clock.GetUtcNow(), state.FirstSyncCompletedAt);
-        Assert.Equal([new DateOnly(2025, 9, 22)], fetcher.DateFroms);
+        Assert.Equal([new DateOnly(2026, 6, 24)], fetcher.DateFroms);
     }
 
     [Fact]
-    public async Task The_first_sync_fetches_from_twelve_months_back_then_steady_ticks_from_the_newest_debit_minus_seven_days()
+    public async Task The_first_sync_fetches_from_ninety_days_back_then_steady_ticks_from_the_newest_debit_minus_seven_days()
     {
         var dbName = Guid.NewGuid().ToString();
         var clock = new FixedTimeProvider(new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
@@ -281,11 +281,11 @@ public class IngestionRunnerTests
         await runner.RunOnceAsync(CancellationToken.None);
         await runner.RunOnceAsync(CancellationToken.None);
 
-        Assert.Equal([new DateOnly(2025, 9, 22), new DateOnly(2026, 9, 13)], fetcher.DateFroms);
+        Assert.Equal([new DateOnly(2026, 6, 24), new DateOnly(2026, 9, 13)], fetcher.DateFroms);
     }
 
     [Fact]
-    public async Task A_reconnect_tick_fetches_from_the_newest_debit_minus_seven_days_not_twelve_months()
+    public async Task A_reconnect_tick_fetches_from_the_newest_debit_minus_seven_days_not_ninety_days()
     {
         var dbName = Guid.NewGuid().ToString();
         var clock = new FixedTimeProvider(new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
@@ -299,7 +299,7 @@ public class IngestionRunnerTests
     }
 
     [Fact]
-    public async Task An_adopted_null_hash_row_fetches_from_the_newest_debit_minus_seven_days_not_twelve_months()
+    public async Task An_adopted_null_hash_row_fetches_from_the_newest_debit_minus_seven_days_not_ninety_days()
     {
         var dbName = Guid.NewGuid().ToString();
         var clock = new FixedTimeProvider(new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
@@ -337,8 +337,8 @@ public class IngestionRunnerTests
     }
 
     [Theory]
-    [InlineData(IngestionRunner.IngestionMode.FirstSync, "2026-03-31", "2025-03-31")]
-    [InlineData(IngestionRunner.IngestionMode.FirstSync, "2028-02-29", "2027-02-28")]
+    [InlineData(IngestionRunner.IngestionMode.FirstSync, "2026-03-31", "2025-12-31")]
+    [InlineData(IngestionRunner.IngestionMode.FirstSync, "2028-02-29", "2027-12-01")]
     [InlineData(IngestionRunner.IngestionMode.Steady, "2026-03-31", "2026-03-24")] // newest debit that day, minus 7
     public void ComputeDateFrom_follows_the_mode(IngestionRunner.IngestionMode mode, string today, string expected)
     {
@@ -363,12 +363,12 @@ public class IngestionRunnerTests
     }
 
     [Fact]
-    public void ComputeDateFrom_clamps_old_data_to_twelve_months_and_crosses_month_ends()
+    public void ComputeDateFrom_clamps_old_data_to_ninety_days_and_crosses_month_ends()
     {
         var today = new DateOnly(2026, 9, 22);
         var old = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        Assert.Equal(new DateOnly(2025, 9, 22), IngestionRunner.ComputeDateFrom(IngestionRunner.IngestionMode.Steady, today, old, null));
-        Assert.Equal(new DateOnly(2025, 9, 22), IngestionRunner.ComputeDateFrom(IngestionRunner.IngestionMode.Reconnect, today, null, old));
+        Assert.Equal(new DateOnly(2026, 6, 24), IngestionRunner.ComputeDateFrom(IngestionRunner.IngestionMode.Steady, today, old, null));
+        Assert.Equal(new DateOnly(2026, 6, 24), IngestionRunner.ComputeDateFrom(IngestionRunner.IngestionMode.Reconnect, today, null, old));
 
         // Newest debit 2028-03-03 minus 7 days lands in February of a leap year.
         var march = new DateTimeOffset(2028, 3, 3, 0, 0, 0, TimeSpan.Zero);

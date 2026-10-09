@@ -343,7 +343,8 @@ Given the product owner's call that same-day notification is an acceptable user 
   above, not a re-opening of it. Without this exception, onboarding's "mark your payees" screen
   (R26) would have to wait up to 6h after consent for any data to review.
 
-**The first sync pulls a fixed window of the last 12 months** (R25, settled 2026-10-01): the
+**The first sync pulls a fixed window of the last 90 days** (R25, changed 2026-10-09 from 12 months: real N26
+answered 422 `WRONG_TRANSACTIONS_PERIOD` to a 12-month `date_from`): the
 fetcher sends `date_from`, follows `continuation_key` to the last page, and returns the complete
 window or throws — never a silent partial page. The fallback debit id's ordinal must not collide
 across pages. To verify while building: whether each page counts against the bank's ~4 fetches

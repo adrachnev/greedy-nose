@@ -21,7 +21,7 @@ public sealed class EnableBankingDebitsFetcher(
     EnableBankingOptions options,
     ILogger<EnableBankingDebitsFetcher> logger) : IDebitsFetcher
 {
-    /// <summary>Safety cap for the paging loop; 12 months is a handful of pages.</summary>
+    /// <summary>Safety cap for the paging loop; 90 days is a handful of pages.</summary>
     private const int MaxPages = 200;
 
     private bool _baseAddressChecked;
@@ -81,7 +81,16 @@ public sealed class EnableBankingDebitsFetcher(
         }
         while (continuationKey is not null);
 
-        logger.LogInformation("Tick fetched {Pages} page(s) of transactions from {DateFrom}.", pages, dateFromText);
+        // Counts and dates only — no payee, amount or account data in the log.
+        var bookingDates = transactions
+            .Select(t => t.BookingDate)
+            .Where(d => !string.IsNullOrEmpty(d))
+            .OrderBy(d => d, StringComparer.Ordinal)
+            .ToList();
+        logger.LogInformation(
+            "Tick fetched {Pages} page(s), {Count} transaction(s) from {DateFrom}; oldest booking date {Oldest}, newest {Newest}.",
+            pages, transactions.Count, dateFromText,
+            bookingDates.FirstOrDefault() ?? "none", bookingDates.LastOrDefault() ?? "none");
 
         // One Map call over everything, so the fallback ids' ordinals count across page boundaries.
         return TransactionMapper.Map(new EbTransactionsResponse(transactions, null), account.Key);

@@ -4,6 +4,16 @@
 
 ## Status
 
+**2026-10-09 — Story 2.6a (new): the first sync was tried against the real N26, locally; uncommitted, nothing
+pushed.** Real N26 refused a 12-month `date_from` and 180 days (422 `WRONG_TRANSACTIONS_PERIOD`) and accepted 90
+days: **1 page, 108 transactions**, no push, no 429. **R25 changed: the first-sync window is 90 days for every
+bank** (`IngestionRunner.FirstSyncWindowDays`); docs and `epics.md` updated, 608 backend tests, one review pass. Whether
+a second page counts against N26's ~4 fetches/day is still unmeasured (`gn-xeq`, no longer urgent). The Production
+application accepts only an `https` redirect, so a local test needs the Caddy proxy recipe in `TRACER-03-GO-LIVE.md`
+("Findings: first sync at N26"). Local secrets are back on the Sandbox. **Azure still runs the old 12-month code and
+the Sandbox values: run `bash tools/azure-deploy.sh` before Story 2.7.** Next: 2.7 (N26 through the cloud), 2.8, or
+the code-only stories 3.1, 3.4, 4.1.
+
 **2026-10-08 (evening) — Story 2.6 built, reviewed and live-verified (not yet committed when written; nothing
 pushed): the backend runs in Azure.** `https://func-greedy-nose-611f0.azurewebsites.net`, Flex Consumption in
 Germany West Central, resource group `rg-greedy-nose`, subscription "Azure subscription 1" (new Microsoft

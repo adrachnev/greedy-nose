@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using GreedyNose.Api.EnableBanking;
 using GreedyNose.Api.Ingestion;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GreedyNose.Api.Tests;
@@ -202,5 +203,84 @@ public sealed class EnableBankingFirstSyncPagingTests : IDisposable
         Assert.Equal(3, ids.Distinct().Count());
         var expected = TransactionMapper.Map(new EbTransactionsResponse([first, second, third], null), Account.Key);
         Assert.Equal(expected.Payload.Debits.Select(d => d.Id), ids);
+    }
+
+    [Fact]
+    public async Task No_strategy_parameter_is_sent_on_any_page()
+    {
+        var handler = new StubHandler((i, _) => i == 0
+            ? Page("k1", Booked("2026-09-01", "SHOP A", entryReference: "e1"))
+            : Page(null, Booked("2026-08-01", "SHOP B", entryReference: "e2")));
+
+        await NewFetcher(handler).FetchAsync(Account, DateFrom, CancellationToken.None);
+
+        Assert.All(handler.Queries, q => Assert.DoesNotContain("strategy", q));
+    }
+
+    private sealed class ListLogger : ILogger<EnableBankingDebitsFetcher>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, exception));
+    }
+
+    private EnableBankingDebitsFetcher NewFetcher(StubHandler handler, ILogger<EnableBankingDebitsFetcher> logger) =>
+        new(new StubHttpClientFactory(handler, new Uri(_options.BaseUrl)), _signer, new FixedTimeProvider(Now),
+            _options, logger);
+
+    [Fact]
+    public async Task The_fetch_log_has_counts_and_oldest_and_newest_booking_date_but_no_payee_or_amount()
+    {
+        var logger = new ListLogger();
+        var handler = new StubHandler((i, _) => i == 0
+            ? Page("k1", Booked("2026-09-01", "SECRET SHOP", amount: "123.45", entryReference: "e1"))
+            : Page(null, Booked("2026-07-15", "OTHER PAYEE", amount: "67.89", entryReference: "e2")));
+
+        await NewFetcher(handler, logger).FetchAsync(Account, DateFrom, CancellationToken.None);
+
+        var line = Assert.Single(logger.Messages, m => m.StartsWith("Tick fetched", StringComparison.Ordinal));
+        Assert.Contains("2 page(s)", line);
+        Assert.Contains("2 transaction(s)", line);
+        Assert.Contains("oldest booking date 2026-07-15", line);
+        Assert.Contains("newest 2026-09-01", line);
+        foreach (var secret in new[] { "SECRET SHOP", "OTHER PAYEE", "123.45", "67.89", Account.Key, "uid-1" })
+        {
+            Assert.DoesNotContain(secret, line);
+        }
+    }
+
+    [Fact]
+    public async Task The_fetch_log_says_none_when_there_are_no_booking_dates()
+    {
+        var logger = new ListLogger();
+        var handler = new StubHandler((_, _) => Page(null));
+
+        await NewFetcher(handler, logger).FetchAsync(Account, DateFrom, CancellationToken.None);
+
+        var line = Assert.Single(logger.Messages, m => m.StartsWith("Tick fetched", StringComparison.Ordinal));
+        Assert.Contains("0 transaction(s)", line);
+        Assert.Contains("oldest booking date none, newest none", line);
+    }
+
+
+    [Fact]
+    public async Task An_empty_page_that_still_carries_a_continuation_key_is_followed()
+    {
+        var handler = new StubHandler((i, _) => i switch
+        {
+            0 => Page("k1"),
+            1 => Page("k2"),
+            _ => Page(null, Booked("2026-08-01", "SHOP A", entryReference: "e1")),
+        });
+
+        var mapped = await NewFetcher(handler).FetchAsync(Account, DateFrom, CancellationToken.None);
+
+        Assert.Equal(3, handler.Queries.Count);
+        Assert.Single(mapped.Payload.Debits);
     }
 }

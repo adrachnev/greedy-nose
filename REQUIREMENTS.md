@@ -318,8 +318,9 @@ whole app — decided while reworking the mocks on 2026-08-14.)
 ## Bank connection
 
 **R25 — A connection starts with a first sync.** Granting consent triggers one bulk pull of the
-account's history for a **fixed window of the last 12 months** (settled 2026-10-01, was "as much
-as the ASPSP returns"; the window is an upper limit — a bank may return less). Every bank gets
+account's history for a **fixed window of the last 90 days** (settled 2026-10-09, was 12 months
+since 2026-10-01 and "as much as the ASPSP returns" before; real N26 refused a 12-month `date_from` with
+`WRONG_TRANSACTIONS_PERIOD`; the window is an upper limit — a bank may return less). Every bank gets
 the same window, so banks do not differ by their own defaults (R22). Every debit that pull produces is **already-seen** the moment it's fetched (R10c) and
 feeds directly into onboarding (R26); none of it can notify, no matter how many app launches or
 network retries it takes to finish pulling. If the pull is interrupted partway through, resuming

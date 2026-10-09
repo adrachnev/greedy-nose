@@ -13,8 +13,8 @@ public interface IDebitsFetcher
 {
     /// <summary>
     /// Pulls every transaction from <paramref name="dateFrom"/> on, following every page. The caller
-    /// picks the date (12 months back on a first sync, shortly before the newest known debit
-    /// otherwise). A failed request throws, so the caller stores nothing from a half-read history.
+    /// picks the date (the first-sync window back on a first sync, shortly before the newest known
+    /// debit otherwise). A failed request throws, so the caller stores nothing from a half-read history.
     /// </summary>
     Task<MappedDebits> FetchAsync(ConnectedAccount account, DateOnly dateFrom, CancellationToken ct);
 }
