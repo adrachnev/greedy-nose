@@ -4,6 +4,15 @@
 
 ## Status
 
+**2026-10-12 (late night) — Story 3.3 done locally: connecting a bank uses that bank's own limits (committed, not
+deployed, nothing pushed; no migration).** `AspspResolver` reads `GET /aspsps?country=XX` fresh at `/connect-links`
+(refuses an unknown or ambiguous bank with a clear message, creates nothing) and again at `/connect`;
+`valid_until = now + min(90 days, bank's maximum_consent_validity)`; the list's own spelling is stored, so `n26` and
+`N26` cannot become two consents. 688 backend tests, one review round (2 SHOULD FIX fixed). Owner decision this
+session: **the remaining local stories run one after the other, never in parallel, with plans I approve myself** (3.4,
+4.1, 4.3, 4.2; memory `feedback_self_approved_plans_local_batch`). Next: 3.4 (the coder had started it; the partial
+edits in `app/` and `mocks/` are uncommitted and belong to 3.4). Bead `gn-6bv` (a transient list failure burns the link).
+
 **2026-10-12 (night) — Story 3.2 done locally: the worker walks every bank (committed, not deployed, nothing
 pushed).** `ConsentStore` holds one consent per `(user, bank)`; `IngestionRunner` walks the banks in turn, least
 recently tried first, each in its own try/catch and under its own 40 s budget (`Ingestion:BankTimeout`); a failure is

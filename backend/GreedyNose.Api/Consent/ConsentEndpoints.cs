@@ -45,6 +45,7 @@ public static class ConsentEndpoints
     public static async Task<IResult> CreateLinkAsync(
         ConnectLinkRequest? request,
         GreedyNoseDbContext db,
+        AspspResolver resolver,
         EnableBankingOptions options,
         PendingConsentOptions pending,
         TimeProvider clock,
@@ -82,6 +83,28 @@ public static class ConsentEndpoints
             return Results.ValidationProblem(problems);
         }
 
+        // Refuse early, before a link is spent on a bank that cannot be started. The same lookup runs
+        // again when the link is used (the list is never cached).
+        var found = await resolver.ResolveAsync(aspsp, country, ct);
+        var refusal = found.Outcome switch
+        {
+            AspspLookup.NotFound => Results.Problem(
+                $"No bank named \"{aspsp}\" in {country} was found in Enable Banking's list.",
+                statusCode: StatusCodes.Status400BadRequest, title: "Bank not found"),
+            AspspLookup.Ambiguous => Results.Problem(
+                $"More than one bank named \"{aspsp}\" in {country} matches; nothing was started.",
+                statusCode: StatusCodes.Status400BadRequest, title: "Bank is ambiguous"),
+            AspspLookup.ListUnavailable => Results.Problem(
+                "Enable Banking's bank list could not be read; nothing was started. Try again later.",
+                statusCode: StatusCodes.Status502BadGateway, title: "Bank list unavailable"),
+            _ => null,
+        };
+        if (refusal is not null)
+        {
+            loggers.CreateLogger(Category).LogInformation("No consent link created for {Aspsp}: {Outcome}.", aspsp, found.Outcome);
+            return refusal;
+        }
+
         var now = clock.GetUtcNow();
 
         // Expired rows are dead weight (nothing can use them); clearing them here keeps the table
@@ -107,8 +130,10 @@ public static class ConsentEndpoints
         {
             Id = Guid.NewGuid(),
             UserId = SeedData.UserId,
-            AspspName = aspsp,
-            Country = country,
+            // The list's own spelling, not the caller's: this string becomes the consent key, and "n26"
+            // and "N26" must not become two consents for one bank.
+            AspspName = found.Name,
+            Country = found.Country,
             PsuType = psuType,
             LinkTokenHash = OneTimeSecret.Hash(token),
             CreatedAt = now,
@@ -117,7 +142,7 @@ public static class ConsentEndpoints
         await db.SaveChangesAsync(ct);
 
         loggers.CreateLogger(Category).LogInformation(
-            "Consent link created for {Aspsp}, valid for {Lifetime}.", aspsp, pending.Lifetime);
+            "Consent link created for {Aspsp}, valid for {Lifetime}.", found.Name, pending.Lifetime);
 
         // The origin of the registered redirect URL: whatever address Enable Banking sends the
         // browser back to is, by construction, an address the owner can reach.
@@ -130,6 +155,7 @@ public static class ConsentEndpoints
         string? token,
         GreedyNoseDbContext db,
         EnableBankingClient eb,
+        AspspResolver resolver,
         EnableBankingOptions options,
         TimeProvider clock,
         ILoggerFactory loggers,
@@ -170,12 +196,25 @@ public static class ConsentEndpoints
             return Rejected("Link not valid", "This link is not valid. Request a new one.");
         }
 
+        // The bank's own limit, read fresh now: the link may be older than the list it was checked against.
+        // A bank that is gone, ambiguous or unreadable starts nothing (the link stays spent, like any
+        // other failure here).
+        var bank = await resolver.ResolveAsync(record.AspspName, record.Country, ct);
+        if (bank.Outcome != AspspLookup.Resolved)
+        {
+            logger.LogWarning("The bank could not be resolved when the link was used: {Outcome}.", bank.Outcome);
+            return Rejected(
+                "Could not start", "The bank connection could not be started. Request a new link.",
+                StatusCodes.Status502BadGateway);
+        }
+
+        var validity = ConsentValidity.For(options.ConsentValidity, bank.MaximumConsentValiditySeconds);
         var auth = new AuthRequest(
             new AccessRequest(
-                ValidUntil: now.Add(options.ConsentValidity).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                ValidUntil: now.Add(validity).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                 Balances: true,
                 Transactions: true),
-            new AspspRef(record.AspspName, record.Country),
+            new AspspRef(bank.Name, bank.Country),
             state,
             options.RedirectUrl,
             record.PsuType);

@@ -44,6 +44,22 @@ public sealed class ConsentEndpointsTests : IDisposable
     private Exception? _bankThrows;
     private Action? _beforeBankThrows;
 
+    // GET /aspsps is answered apart from _bank and counted apart from _calls, so the existing
+    // "how many bank calls" assertions keep meaning "calls that start or complete a consent".
+    private (HttpStatusCode Status, string Body) _aspsps = (HttpStatusCode.OK, AspspList());
+    private readonly List<string> _aspspQueries = [];
+    private Exception? _aspspThrows;
+
+    private static string AspspList(string? bankMax = "15552000", string name = "Mock ASPSP") => $$"""
+        {"aspsps":[
+          {"name":"{{name}}","country":"DE","maximum_consent_validity":{{bankMax ?? "null"}}},
+          {"name":"N26","country":"DE","maximum_consent_validity":15552000},
+          {"name":"DKB","country":"DE"},
+          {"name":"ING","country":"DE","maximum_consent_validity":15552000},
+          {"name":"N26","country":"FR"},
+          {"name":"<b>Evil</b> & Co","country":"DE"}]}
+        """;
+
     public ConsentEndpointsTests()
     {
         using (var rsa = RSA.Create(2048))
@@ -99,14 +115,29 @@ public sealed class ConsentEndpointsTests : IDisposable
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            if (owner._bankThrows is { } fault)
+            var path = request.RequestUri!.AbsolutePath;
+            var isList = path == "/aspsps";
+            if (isList)
             {
-                owner._calls.Add((request.RequestUri!.AbsolutePath, ""));
+                owner._aspspQueries.Add(request.RequestUri.Query);
+            }
+
+            if ((isList ? owner._aspspThrows : owner._bankThrows) is { } fault)
+            {
+                if (!isList)
+                {
+                    owner._calls.Add((path, ""));
+                }
+
                 owner._beforeBankThrows?.Invoke();
                 throw fault;
             }
 
-            var path = request.RequestUri!.AbsolutePath;
+            if (isList)
+            {
+                return new HttpResponseMessage(owner._aspsps.Status) { Content = new StringContent(owner._aspsps.Body) };
+            }
+
             var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct);
             owner._calls.Add((path, body));
             var (status, answer) = owner._bank(path);
@@ -163,7 +194,8 @@ public sealed class ConsentEndpointsTests : IDisposable
     private async Task<IResult> CreateLink(ConnectLinkRequest? request = null)
     {
         await using var db = NewDb();
-        return await ConsentEndpoints.CreateLinkAsync(request, db, _options, _pending, _clock, _logs, CancellationToken.None);
+        return await ConsentEndpoints.CreateLinkAsync(
+            request, db, new AspspResolver(NewClient()), _options, _pending, _clock, _logs, CancellationToken.None);
     }
 
     private async Task<string> CreateToken(ConnectLinkRequest? request = null)
@@ -176,7 +208,9 @@ public sealed class ConsentEndpointsTests : IDisposable
     private async Task<IResult> Connect(string? token, bool lostRace = false)
     {
         await using var db = NewDb(lostRace);
-        return await ConsentEndpoints.ConnectAsync(token, db, NewClient(), _options, _clock, _logs, CancellationToken.None);
+        var client = NewClient();
+        return await ConsentEndpoints.ConnectAsync(
+            token, db, client, new AspspResolver(client), _options, _clock, _logs, CancellationToken.None);
     }
 
     private async Task<IResult> Callback(string? code, string? state, string? error = null, bool lostRace = false)
@@ -365,6 +399,233 @@ public sealed class ConsentEndpointsTests : IDisposable
         Assert.DoesNotContain("secret-detail", html);
         var (again, _) = Page(await Connect(token));
         Assert.Equal(400, again);
+    }
+
+    // --- Story 3.3: the bank is looked up in Enable Banking's list, and its own limit is used ----------
+
+    private AspspResolver NewResolver() => new(NewClient());
+
+    [Theory]
+    [InlineData("N26", "DE", "N26")]
+    [InlineData("n26", "de", "N26")]
+    [InlineData("MOCK aspsp", "DE", "Mock ASPSP")]
+    public async Task The_resolver_matches_name_and_country_exactly_ignoring_case(string name, string country, string expected)
+    {
+        var found = await NewResolver().ResolveAsync(name, country, CancellationToken.None);
+
+        Assert.Equal(AspspLookup.Resolved, found.Outcome);
+        Assert.Equal(expected, found.Name);
+        Assert.Equal("?country=" + country, Assert.Single(_aspspQueries));
+    }
+
+    [Theory]
+    [InlineData("N2", "DE")]        // a prefix is not a match
+    [InlineData("N26 Bank", "DE")]
+    [InlineData("DKB", "FR")]       // right name, wrong country
+    [InlineData("No Such Bank", "DE")]
+    public async Task The_resolver_finds_nothing_for_a_near_miss(string name, string country)
+    {
+        Assert.Equal(AspspLookup.NotFound, (await NewResolver().ResolveAsync(name, country, CancellationToken.None)).Outcome);
+    }
+
+    [Fact]
+    public async Task The_resolver_does_not_guess_between_two_matches()
+    {
+        _aspsps = (HttpStatusCode.OK, """{"aspsps":[{"name":"Twin","country":"DE"},{"name":"twin","country":"DE"}]}""");
+
+        Assert.Equal(AspspLookup.Ambiguous, (await NewResolver().ResolveAsync("Twin", "DE", CancellationToken.None)).Outcome);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.InternalServerError, """{"aspsps":[]}""")]
+    [InlineData(HttpStatusCode.OK, "not json at all")]
+    [InlineData(HttpStatusCode.OK, """{"something":"else"}""")]
+    [InlineData(HttpStatusCode.OK, """[1,2]""")]
+    public async Task The_resolver_reports_an_unreadable_list(HttpStatusCode status, string body)
+    {
+        _aspsps = (status, body);
+
+        Assert.Equal(AspspLookup.ListUnavailable, (await NewResolver().ResolveAsync("N26", "DE", CancellationToken.None)).Outcome);
+    }
+
+    [Fact]
+    public async Task The_resolver_reports_a_network_fault_or_timeout_as_unavailable()
+    {
+        _aspspThrows = new HttpRequestException("secret-detail");
+        Assert.Equal(AspspLookup.ListUnavailable, (await NewResolver().ResolveAsync("N26", "DE", CancellationToken.None)).Outcome);
+
+        _aspspThrows = new TaskCanceledException("secret-detail");
+        Assert.Equal(AspspLookup.ListUnavailable, (await NewResolver().ResolveAsync("N26", "DE", CancellationToken.None)).Outcome);
+    }
+
+    [Fact]
+    public async Task A_missing_maximum_is_null_and_a_stated_one_is_read_in_seconds()
+    {
+        var stated = await NewResolver().ResolveAsync("N26", "DE", CancellationToken.None);
+        var absent = await NewResolver().ResolveAsync("DKB", "DE", CancellationToken.None);
+
+        Assert.Equal(15552000L, stated.MaximumConsentValiditySeconds);
+        Assert.Null(absent.MaximumConsentValiditySeconds);
+    }
+
+    [Theory]
+    [InlineData(2592000L, 30)]      // the bank allows less than 90 days: respected
+    [InlineData(7776000L, 90)]      // exactly 90 days
+    [InlineData(15552000L, 90)]     // 180 days: 90 wins
+    [InlineData(null, 90)]          // not stated
+    [InlineData(0L, 90)]            // non-positive counts as not stated
+    [InlineData(-5L, 90)]
+    public void The_requested_validity_is_the_smaller_of_ninety_days_and_the_banks_maximum(long? max, int expectedDays)
+    {
+        Assert.Equal(TimeSpan.FromDays(expectedDays), ConsentValidity.For(TimeSpan.FromDays(90), max));
+    }
+
+    [Fact]
+    public void A_huge_maximum_does_not_overflow()
+    {
+        Assert.Equal(TimeSpan.FromDays(90), ConsentValidity.For(TimeSpan.FromDays(90), long.MaxValue));
+    }
+
+    [Theory]
+    [InlineData("No Such Bank", "DE", HttpStatusCode.OK, "{\"aspsps\":[]}", 400)]
+    [InlineData("Twin", "DE", HttpStatusCode.OK, "{\"aspsps\":[{\"name\":\"Twin\",\"country\":\"DE\"},{\"name\":\"Twin\",\"country\":\"DE\"}]}", 400)]
+    [InlineData("N26", "DE", HttpStatusCode.InternalServerError, "oops secret-detail", 502)]
+    [InlineData("N26", "DE", HttpStatusCode.OK, "garbage", 502)]
+    public async Task A_link_for_an_unknown_ambiguous_or_unlistable_bank_is_refused_and_creates_nothing(
+        string aspsp, string country, HttpStatusCode listStatus, string listBody, int expectedStatus)
+    {
+        _aspsps = (listStatus, listBody);
+
+        var result = Assert.IsType<ProblemHttpResult>(await CreateLink(new ConnectLinkRequest(aspsp, country, null)));
+
+        Assert.Equal(expectedStatus, result.StatusCode);
+        Assert.DoesNotContain("secret-detail", result.ProblemDetails.Detail);
+        Assert.False(string.IsNullOrWhiteSpace(result.ProblemDetails.Detail));
+        await using var db = NewDb();
+        Assert.Empty(db.PendingConsents);
+        Assert.Equal(0, BankCalls);
+    }
+
+    [Fact]
+    public async Task A_refusal_names_the_bank_and_country()
+    {
+        var result = Assert.IsType<ProblemHttpResult>(await CreateLink(new ConnectLinkRequest("No Such Bank", "DE", null)));
+
+        Assert.Contains("No Such Bank", result.ProblemDetails.Detail);
+        Assert.Contains("DE", result.ProblemDetails.Detail);
+    }
+
+    [Fact]
+    public async Task A_link_for_a_listed_bank_is_created_after_one_list_read_for_its_country()
+    {
+        await CreateToken(new ConnectLinkRequest("N26", "DE", "personal"));
+
+        Assert.Equal("?country=DE", Assert.Single(_aspspQueries));
+    }
+
+    private JsonElement StartedAuthRequest() =>
+        JsonDocument.Parse(Assert.Single(_calls, c => c.Path == "/auth").Body).RootElement;
+
+    [Theory]
+    [InlineData("2592000", 30)]    // 30 days: smaller than 90, respected
+    [InlineData("15552000", 90)]   // 180 days: 90 wins
+    [InlineData("7776000", 90)]    // exactly 90
+    [InlineData(null, 90)]         // not stated
+    [InlineData("0", 90)]
+    [InlineData("-100", 90)]
+    public async Task The_authorization_asks_for_the_smaller_of_ninety_days_and_the_banks_maximum(string? bankMax, int expectedDays)
+    {
+        _aspsps = (HttpStatusCode.OK, AspspList(bankMax));
+        var token = await CreateToken();
+
+        Assert.IsType<RedirectHttpResult>(Unwrap(await Connect(token)));
+
+        var validUntil = StartedAuthRequest().GetProperty("access").GetProperty("valid_until").GetString();
+        Assert.Equal(T0.AddDays(expectedDays).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"), validUntil);
+    }
+
+    [Fact]
+    public async Task The_banks_own_spelling_is_stored_sent_to_the_bank_and_becomes_the_consent_name()
+    {
+        var state = await StartedState(new ConnectLinkRequest("MOCK aspsp", "DE", null));
+
+        await using (var db = NewDb())
+        {
+            var row = Assert.Single(db.PendingConsents);
+            Assert.Equal("Mock ASPSP", row.AspspName);
+            Assert.Equal("DE", row.Country);
+        }
+
+        var aspsp = StartedAuthRequest().GetProperty("aspsp");
+        Assert.Equal("Mock ASPSP", aspsp.GetProperty("name").GetString());
+        Assert.Equal("DE", aspsp.GetProperty("country").GetString());
+
+        var (_, html) = Page(await Callback("the-code", state));
+        Assert.Contains("Connected to Mock ASPSP.", html);
+        Assert.Equal("Mock ASPSP", _consent.AspspName);
+    }
+
+    [Fact]
+    public async Task A_lowercase_n26_is_stored_as_N26()
+    {
+        await CreateToken(new ConnectLinkRequest("n26", "DE", null));
+
+        await using var db = NewDb();
+        Assert.Equal("N26", Assert.Single(db.PendingConsents).AspspName);
+    }
+
+    [Fact]
+    public async Task The_list_is_read_fresh_every_time_with_no_cache()
+    {
+        var first = await CreateToken();
+        var second = await CreateToken();
+        _aspspQueries.Clear();
+
+        await Connect(first);
+        await Connect(second);
+
+        Assert.Equal(2, _aspspQueries.Count);
+    }
+
+    [Fact]
+    public async Task The_limit_is_the_one_in_the_list_at_the_time_the_link_is_used()
+    {
+        var token = await CreateToken();
+        _aspsps = (HttpStatusCode.OK, AspspList("2592000")); // the bank lowered its limit after the link was made
+
+        await Connect(token);
+
+        var validUntil = StartedAuthRequest().GetProperty("access").GetProperty("valid_until").GetString();
+        Assert.Equal(T0.AddDays(30).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"), validUntil);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.InternalServerError, "secret-detail")]
+    [InlineData(HttpStatusCode.OK, "{\"aspsps\":[]}")]
+    public async Task When_the_list_fails_or_no_longer_matches_when_the_link_is_used_nothing_starts(
+        HttpStatusCode status, string body)
+    {
+        var token = await CreateToken();
+        _aspsps = (status, body);
+
+        var (page, html) = Page(await Connect(token));
+
+        Assert.Equal(502, page);
+        Assert.DoesNotContain("secret-detail", html);
+        Assert.Equal(0, BankCalls);                              // no /auth
+        Assert.Equal(400, Page(await Connect(token)).Status);    // the link is spent
+    }
+
+    [Fact]
+    public async Task The_bank_list_never_reaches_the_log()
+    {
+        _aspsps = (HttpStatusCode.OK, AspspList(name: "Mock ASPSP").Replace("\"DKB\"", "\"list-secret-marker\""));
+        var token = await CreateToken();
+        await Connect(token);
+        _aspsps = (HttpStatusCode.InternalServerError, "list-secret-marker");
+        await CreateLink();
+
+        Assert.DoesNotContain(_logs.Lines, l => l.Contains("list-secret-marker"));
     }
 
     // --- GET /callback ----------------------------------------------------------------------------
@@ -703,14 +964,15 @@ public sealed class ConsentEndpointsTests : IDisposable
         var token = await CreateToken();
         using var cts = new CancellationTokenSource();
 
-        // Cancelled from inside the bank call, so the exception really comes out of TryPostAsync (an
+        // Cancelled from inside the bank call, so the exception really comes out of the HTTP call (an
         // already-cancelled token would be thrown by the database query before that).
         _beforeBankThrows = cts.Cancel;
         _bankThrows = new OperationCanceledException(cts.Token);
 
         await using var db = NewDb();
+        var client = NewClient();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            ConsentEndpoints.ConnectAsync(token, db, NewClient(), _options, _clock, _logs, cts.Token));
+            ConsentEndpoints.ConnectAsync(token, db, client, new AspspResolver(client), _options, _clock, _logs, cts.Token));
     }
 
     [Fact]
@@ -723,7 +985,8 @@ public sealed class ConsentEndpointsTests : IDisposable
         // the endpoint then fails on its own save of the new row, not on the cleanup.
         await using var db = NewDb(lostRace: true);
         var ex = await Record.ExceptionAsync(() =>
-            ConsentEndpoints.CreateLinkAsync(null, db, _options, _pending, _clock, _logs, CancellationToken.None));
+            ConsentEndpoints.CreateLinkAsync(
+                null, db, new AspspResolver(NewClient()), _options, _pending, _clock, _logs, CancellationToken.None));
 
         Assert.IsType<DbUpdateConcurrencyException>(ex);
         Assert.Equal(1, db.ChangeTracker.Entries<PendingConsent>().Count(e => e.State == EntityState.Added));

@@ -75,6 +75,8 @@ public static class GreedyNoseCoreServices
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
+        services.AddTransient<AspspResolver>();
+
         // One FirebaseApp for the process, created from the service-account key the first time the
         // sender is resolved — which RunGreedyNoseKeyChecks does right after Build(), so a
         // missing or unreadable key stops the host at startup rather than on the first alert.

@@ -16,6 +16,7 @@ namespace GreedyNose.Functions.Http;
 public sealed class ConsentFunctions(
     GreedyNoseDbContext db,
     EnableBankingClient eb,
+    AspspResolver resolver,
     EnableBankingOptions options,
     PendingConsentOptions pending,
     ConsentStore consent,
@@ -34,14 +35,14 @@ public sealed class ConsentFunctions(
             return body.Error.ToActionResult();
         }
 
-        return (await ConsentEndpoints.CreateLinkAsync(body.Value, db, options, pending, clock, loggers, ct)).ToActionResult();
+        return (await ConsentEndpoints.CreateLinkAsync(body.Value, db, resolver, options, pending, clock, loggers, ct)).ToActionResult();
     }
 
     [Function("Connect")]
     public async Task<IActionResult> Connect(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "connect")] HttpRequest req,
         CancellationToken ct) =>
-        (await ConsentEndpoints.ConnectAsync(req.Query.Text("token"), db, eb, options, clock, loggers, ct)).ToActionResult();
+        (await ConsentEndpoints.ConnectAsync(req.Query.Text("token"), db, eb, resolver, options, clock, loggers, ct)).ToActionResult();
 
     [Function("Callback")]
     public async Task<IActionResult> Callback(
