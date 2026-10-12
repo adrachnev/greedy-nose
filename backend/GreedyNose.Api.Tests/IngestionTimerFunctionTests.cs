@@ -149,6 +149,7 @@ public class ConsentRestoringTickTests
     {
         public Exception? LoadFails { get; set; }
         public Task SaveAsync(ConsentSnapshot snapshot, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<string?> LoadSessionIdAsync(Guid userId, string aspspName, CancellationToken ct = default) => Task.FromResult<string?>(null);
         public Task<IReadOnlyList<ConsentSnapshot>> LoadAsync(CancellationToken ct = default)
         {
             order.Add("restore");

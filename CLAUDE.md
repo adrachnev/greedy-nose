@@ -4,6 +4,14 @@
 
 ## Status
 
+**2026-10-12 (autorun, 3 of 4) — Story 4.3 done locally: a reconnect closes the old session (committed, not
+deployed; no migration).** `DELETE /sessions/{old}` after the new consent is stored (best effort, 5 s, no session id in
+logs); a dead and announced session is skipped before any fetch or status call; a bank counts as ended only for the terminal
+statuses CLOSED/EXPIRED/REVOKED; a tick that races a reconnect does not push. 716 backend tests, two review rounds, two
+fix rounds. **Open for the first real reconnect:** does `DELETE` also revoke the consent at a real bank (check that the new
+session still fetches). Beads `gn-0pr`. Next in the autorun: 4.2 (status page) — it must read "dead and announced" from the
+told hash, not from the age of `LastAttemptAt` (a skipped dead bank stops recording attempts).
+
 **2026-10-12 (autorun, 2 of 4) — Story 4.1 done locally: a consent that dies during the first sync still alerts
 (committed, not deployed).** `NotifyConsentDeadAsync` works on the `BankConsents` row (no `AccountSyncState` needed);
 migration `AddConsentExpiryNotified` (applied to the dev DB only, carry-over checked with a fake value; **Neon at

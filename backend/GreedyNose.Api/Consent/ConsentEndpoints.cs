@@ -38,7 +38,7 @@ public static class ConsentEndpoints
     private const int MaxLoggedErrorLength = 50;
 
     // The browser is waiting on the page; a slow queue must not hold it for long.
-    private static readonly TimeSpan FirstSyncRequestTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan FirstSyncRequestTimeout = TimeSpan.FromSeconds(5);
 
     private static readonly string[] PsuTypes = ["personal", "business"];
 
@@ -238,6 +238,8 @@ public static class ConsentEndpoints
         return new BrowserResult(Results.Redirect(url));
     }
 
+    private static readonly TimeSpan CloseSessionTimeout = TimeSpan.FromSeconds(5);
+
     public static async Task<IResult> CallbackAsync(
         string? code,
         string? state,
@@ -325,6 +327,8 @@ public static class ConsentEndpoints
         }
 
         var accounts = ReadAccounts(root);
+        // Story 4.3: the session this bank had before (same user, same bank only), read from the database before it is replaced.
+        var oldSessionId = await consent.GetStoredSessionIdAsync(record.UserId, record.AspspName, ct);
         try
         {
             // Persisted with CancellationToken.None: the code is already traded, so a dropped browser connection must not lose the consent.
@@ -356,7 +360,53 @@ public static class ConsentEndpoints
                 "The first sync could not be requested ({ExceptionType}); the next scheduled tick will run it.", ex.GetType().Name);
         }
 
+        if (oldSessionId is not null && oldSessionId != sessionId)
+        {
+            await CloseOldSessionAsync(eb, oldSessionId, record.AspspName, logger);
+        }
+
         return Page(StatusCodes.Status200OK, $"<h1>Connected</h1><p>Connected to {Encode(record.AspspName)}. You can close this page.</p>");
+    }
+
+    /// <summary>
+    /// Story 4.3: closes the bank's previous session once the new consent is stored. Best effort — nothing here
+    /// can fail the reconnect. "Already closed / expired / unknown" answers are fine. Logs carry the bank name and
+    /// the status only, never the session id (it reads the real account).
+    /// </summary>
+    private static async Task CloseOldSessionAsync(EnableBankingClient eb, string oldSessionId, string aspspName, ILogger logger)
+    {
+        try
+        {
+            // A tick holding a pre-reconnect snapshot may see CLOSED_SESSION: IngestionRunner re-reads the stored session before it pushes, so that race does not alert.
+            using var timeout = new CancellationTokenSource(CloseSessionTimeout);
+            var answer = await eb.DeleteAsync($"/sessions/{Uri.EscapeDataString(oldSessionId)}", timeout.Token);
+            if (answer.IsSuccess || answer.StatusCode is 404 or 410 || (answer.StatusCode == 401 && HasErrorField(answer.Body)))
+            {
+                logger.LogInformation("The old session of {Aspsp} was closed or already gone (HTTP {Status}).", aspspName, answer.StatusCode);
+            }
+            else
+            {
+                logger.LogWarning("The old session of {Aspsp} could not be closed (HTTP {Status}); the new consent stays.", aspspName, answer.StatusCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Type only: a message can carry the URL, which holds the session id.
+            logger.LogWarning("The old session of {Aspsp} could not be closed ({ExceptionType}); the new consent stays.", aspspName, ex.GetType().Name);
+        }
+    }
+
+    private static bool HasErrorField(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("error", out _);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static string Encode(string value) => WebUtility.HtmlEncode(value);

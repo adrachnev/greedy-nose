@@ -48,6 +48,9 @@ public sealed class EnableBankingClient(HttpClient http, EnableBankingSigner sig
         return SendAsync(request, ct);
     }
 
+    public Task<EnableBankingResponse> DeleteAsync(string path, CancellationToken ct) =>
+        SendAsync(new HttpRequestMessage(HttpMethod.Delete, path), ct);
+
     private async Task<EnableBankingResponse> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         using (request)

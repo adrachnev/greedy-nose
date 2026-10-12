@@ -63,7 +63,13 @@ public class MultiBankIngestionTests
 
     private sealed class Status(string? answer) : ISessionStatusChecker
     {
-        public Task<string?> GetStatusAsync(string sessionId, CancellationToken ct) => Task.FromResult(answer);
+        public int Calls;
+
+        public Task<string?> GetStatusAsync(string sessionId, CancellationToken ct)
+        {
+            Calls++;
+            return Task.FromResult(answer);
+        }
     }
 
     private sealed class ListLogger : ILogger<IngestionRunner>
@@ -98,7 +104,7 @@ public class MultiBankIngestionTests
     private static ConnectedAccount Account(string key) => new("uid-" + key, key, "Account", "EUR", null);
 
     private sealed record Setup(
-        string Db, MutableClock Clock, Sender Sender, KeyedFetcher Fetcher, ListLogger Log, ConsentStore Consent, IngestionRunner Runner);
+        string Db, MutableClock Clock, Sender Sender, KeyedFetcher Fetcher, ListLogger Log, ConsentStore Consent, IngestionRunner Runner, Status Status);
 
     /// <summary>Both banks connected (sessions sA / sB) with a stored consent row each; nothing else is seeded.</summary>
     private static async Task<Setup> NewSetupAsync(
@@ -133,15 +139,16 @@ public class MultiBankIngestionTests
         var fetcher = new KeyedFetcher();
         fetcher.Scripts[KeyA] = () => Mapped(KeyA);
         fetcher.Scripts[KeyB] = () => Mapped(KeyB);
+        var status = new Status(sessionStatus);
         var log = new ListLogger();
         var runner = new IngestionRunner(
-            factoryFor?.Invoke(db) ?? new Factory(db), consent, fetcher, new Status(sessionStatus), sender, clock, log,
+            factoryFor?.Invoke(db) ?? new Factory(db), consent, fetcher, status, sender, clock, log,
             options: new IngestionOptions
             {
                 AllowShortInterval = allowShortInterval,
                 BankTimeout = bankTimeout ?? IngestionOptions.DefaultBankTimeout,
             });
-        return new Setup(db, clock, sender, fetcher, log, consent, runner);
+        return new Setup(db, clock, sender, fetcher, log, consent, runner, status);
     }
 
     private static async Task SeedSyncAsync(Setup s, string key, string session = "sB")
@@ -437,6 +444,127 @@ public class MultiBankIngestionTests
         Assert.Equal(SessionFingerprint.Of("sA"), (await RowAsync(s, BankA)).ExpiryNotifiedSessionHash);
         Assert.Null((await RowAsync(s, BankB)).ExpiryNotifiedSessionHash);
         Assert.Equal(KeyB, (await ctx.AccountSyncStates.SingleAsync()).AccountKey); // only B finished its first sync
+    }
+
+    // --- Story 4.3: a dead, announced session costs no calls ---------------------------------------------
+
+    private static async Task MarkToldAsync(Setup s, string bank, string session)
+    {
+        await using var ctx = Ctx(s.Db);
+        (await ctx.BankConsents.SingleAsync(c => c.AspspName == bank)).ExpiryNotifiedSessionHash = SessionFingerprint.Of(session);
+        await ctx.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task Positive_control_a_not_yet_announced_dead_session_is_fetched_and_status_checked()
+    {
+        var s = await NewSetupAsync(sessionStatus: "CLOSED");
+        await SeedSyncAsync(s, KeyA, "sA");
+        await SeedSyncAsync(s, KeyB, "sB");
+        s.Fetcher.Scripts[KeyA] = () => throw new EnableBankingRequestException(401, "CLOSED_SESSION");
+
+        await s.Runner.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(1, s.Fetcher.Calls[KeyA]);
+        Assert.Equal(1, s.Status.Calls);
+        Assert.Contains(s.Sender.Sent, m => m.Title == ConnectionExpiredNotice.Title);
+    }
+
+    [Fact]
+    public async Task A_dead_announced_session_makes_no_fetch_and_no_status_call_while_the_other_bank_is_fetched()
+    {
+        var s = await NewSetupAsync(sessionStatus: "CLOSED");
+        await SeedSyncAsync(s, KeyA, "sA");
+        await SeedSyncAsync(s, KeyB, "sB");
+        await MarkToldAsync(s, BankA, "sA");
+        s.Fetcher.Scripts[KeyA] = () => throw new EnableBankingRequestException(401, "CLOSED_SESSION");
+
+        await s.Runner.RunOnceAsync(CancellationToken.None);
+
+        Assert.False(s.Fetcher.Calls.ContainsKey(KeyA));
+        Assert.Equal(0, s.Status.Calls);
+        Assert.Equal(1, s.Fetcher.Calls[KeyB]); // the positive control: the tick did run for the other bank
+        Assert.Empty(s.Sender.Sent);
+        Assert.Contains(s.Log.Lines, l => l.Contains(BankA) && l.Contains("already announced"));
+        Assert.DoesNotContain(s.Log.Lines, l => l.Contains("sA"));
+    }
+
+    [Fact]
+    public async Task After_a_reconnect_the_announced_bank_is_fetched_again_and_its_first_sync_is_silent()
+    {
+        var s = await NewSetupAsync(sessionStatus: "CLOSED");
+        await SeedSyncAsync(s, KeyB, "sB");
+        await MarkToldAsync(s, BankA, "sA");
+        await s.Runner.RunOnceAsync(CancellationToken.None);
+        Assert.False(s.Fetcher.Calls.ContainsKey(KeyA)); // still skipped
+
+        // The owner reconnects bank A: a new session, hence a new hash.
+        await s.Consent.CompleteAsync(SeedData.UserId, "sA-new", BankA, [Account(KeyA)], Start.AddMinutes(2), null);
+        s.Fetcher.Scripts[KeyA] = () => Mapped(KeyA, Booked("2026-10-10", "OLD SHOP", "5.00", "A1"));
+
+        await s.Runner.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(1, s.Fetcher.Calls[KeyA]);
+        Assert.Empty(s.Sender.Sent); // first sync: silent
+        await using var ctx = Ctx(s.Db);
+        Assert.Single(await ctx.Debits.Where(d => d.AccountKey == KeyA).ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("SUSPENDED")]
+    [InlineData("AUTHORIZED")]
+    [InlineData(null)]
+    public async Task A_401_with_a_non_terminal_or_unknown_status_stays_inconclusive_and_is_fetched_again(string? status)
+    {
+        var s = await NewSetupAsync(sessionStatus: status, allowShortInterval: true);
+        await SeedSyncAsync(s, KeyA, "sA");
+        await SeedSyncAsync(s, KeyB, "sB");
+        s.Fetcher.Scripts[KeyA] = () => throw new EnableBankingRequestException(401, "CLOSED_SESSION");
+
+        await Assert.ThrowsAsync<EnableBankingRequestException>(() => s.Runner.RunOnceAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<EnableBankingRequestException>(() => s.Runner.RunOnceAsync(CancellationToken.None));
+
+        Assert.Empty(s.Sender.Sent);
+        Assert.Null((await RowAsync(s, BankA)).ExpiryNotifiedSessionHash);
+        Assert.Equal(2, s.Fetcher.Calls[KeyA]); // not silenced: tried again at the next tick
+        Assert.Equal(2, s.Status.Calls);
+        if (status is not null)
+        {
+            Assert.Contains(s.Log.Lines, l => l.Contains(status) && l.Contains("not a terminal one"));
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_closed_session_seen_after_a_reconnect_in_the_same_tick_does_not_alert(bool reconnectedMeanwhile)
+    {
+        var s = await NewSetupAsync(sessionStatus: "CLOSED");
+        await SeedSyncAsync(s, KeyA, "sA");
+        await SeedSyncAsync(s, KeyB, "sB");
+        s.Fetcher.Scripts[KeyA] = () =>
+        {
+            if (reconnectedMeanwhile) // the owner reconnects after the tick took its snapshot; the old session is closed
+            {
+                s.Consent.CompleteAsync(SeedData.UserId, "sA-new", BankA, [Account(KeyA)], Start.AddMinutes(2), null).GetAwaiter().GetResult();
+            }
+
+            throw new EnableBankingRequestException(401, "CLOSED_SESSION");
+        };
+
+        if (reconnectedMeanwhile)
+        {
+            await s.Runner.RunOnceAsync(CancellationToken.None);
+            Assert.Empty(s.Sender.Sent);
+            Assert.Null((await RowAsync(s, BankA)).ExpiryNotifiedSessionHash);
+            Assert.Contains(s.Log.Lines, l => l.Contains(BankA) && l.Contains("reconnected during this tick"));
+        }
+        else
+        {
+            await s.Runner.RunOnceAsync(CancellationToken.None); // control: same session in the database, pushed as before
+            Assert.Contains(s.Sender.Sent, m => m.Title == ConnectionExpiredNotice.Title);
+            Assert.Equal(SessionFingerprint.Of("sA"), (await RowAsync(s, BankA)).ExpiryNotifiedSessionHash);
+        }
     }
 
     [Fact]

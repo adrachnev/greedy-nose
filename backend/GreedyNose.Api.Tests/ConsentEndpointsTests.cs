@@ -44,6 +44,13 @@ public sealed class ConsentEndpointsTests : IDisposable
     private Exception? _bankThrows;
     private Action? _beforeBankThrows;
 
+    // Story 4.3: the session id the next POST /sessions hands out, and DELETE /sessions/{id} answered apart from _calls
+    // (each DELETE also records which session the store held at that moment, to prove "stored before closed").
+    private string _sessionId = BankSessionId;
+    private (HttpStatusCode Status, string Body) _deleteAnswer = (HttpStatusCode.NoContent, "");
+    private Exception? _deleteThrows;
+    private readonly List<(string Path, string? StoredSessionAtCall)> _deletes = [];
+
     // GET /aspsps is answered apart from _bank and counted apart from _calls, so the existing
     // "how many bank calls" assertions keep meaning "calls that start or complete a consent".
     private (HttpStatusCode Status, string Body) _aspsps = (HttpStatusCode.OK, AspspList());
@@ -86,8 +93,8 @@ public sealed class ConsentEndpointsTests : IDisposable
         File.Delete(_keyPath);
     }
 
-    private static string SessionBody() => $$"""
-        {"session_id":"{{BankSessionId}}",
+    private string SessionBody() => $$"""
+        {"session_id":"{{_sessionId}}",
          "access":{"valid_until":"2027-01-01T00:00:00Z"},
          "accounts":[{"uid":"uid-1","account_id":{"iban":"{{BankIban}}"},"name":"Main","currency":"EUR"}]}
         """;
@@ -116,6 +123,17 @@ public sealed class ConsentEndpointsTests : IDisposable
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Delete)
+            {
+                owner._deletes.Add((path, owner._consent.SessionId));
+                if (owner._deleteThrows is { } deleteFault)
+                {
+                    throw deleteFault;
+                }
+
+                return new HttpResponseMessage(owner._deleteAnswer.Status) { Content = new StringContent(owner._deleteAnswer.Body) };
+            }
+
             var isList = path == "/aspsps";
             if (isList)
             {
@@ -1067,6 +1085,157 @@ public sealed class ConsentEndpointsTests : IDisposable
         Assert.Null(row.StateHash);
         Assert.Null(row.LinkUsedAt);
         Assert.Equal(0, row.Version);
+    }
+
+    // --- Story 4.3: a reconnect closes the old session ---------------------------------------------
+
+    private async Task<(int Status, string Html)> ConnectBank(string bank, string sessionId)
+    {
+        _sessionId = sessionId;
+        var state = await StartedState(new ConnectLinkRequest(bank, "DE", null));
+        return Page(await Callback("the-code", state));
+    }
+
+    [Fact]
+    public async Task A_reconnect_closes_the_old_session_after_the_new_one_is_stored()
+    {
+        await ConnectBank("N26", "old-session-aaaa1111");
+        Assert.Empty(_deletes); // a first connect has nothing to close
+
+        var (status, _) = await ConnectBank("N26", "new-session-bbbb2222");
+
+        Assert.Equal(200, status);
+        var delete = Assert.Single(_deletes);
+        Assert.Equal("/sessions/old-session-aaaa1111", delete.Path);
+        Assert.Equal("new-session-bbbb2222", delete.StoredSessionAtCall); // stored before closed
+        Assert.Equal("new-session-bbbb2222", _consent.SessionIdFor(_consentUser(), "N26"));
+    }
+
+    [Fact]
+    public async Task The_same_session_id_again_closes_nothing()
+    {
+        await ConnectBank("N26", "same-session-cccc3333");
+        await ConnectBank("N26", "same-session-cccc3333");
+
+        Assert.Empty(_deletes);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NoContent, "")]
+    [InlineData(HttpStatusCode.NotFound, "")]
+    [InlineData(HttpStatusCode.Gone, "")]
+    [InlineData(HttpStatusCode.Unauthorized, "{\"error\":\"CLOSED_SESSION\"}")]
+    public async Task An_already_closed_or_unknown_old_session_counts_as_fine(HttpStatusCode status, string body)
+    {
+        await ConnectBank("N26", "old-session-aaaa1111");
+        _deleteAnswer = (status, body);
+
+        var (page, _) = await ConnectBank("N26", "new-session-bbbb2222");
+
+        Assert.Equal(200, page);
+        Assert.Single(_deletes);
+        Assert.DoesNotContain(_logs.Lines, l => l.Contains("could not be closed"));
+        Assert.Equal("new-session-bbbb2222", _consent.SessionIdFor(_consentUser(), "N26"));
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.InternalServerError, "")]
+    [InlineData(HttpStatusCode.Unauthorized, "Wrong signature")] // no error field: our own fault, not "already closed"
+    public async Task A_failing_close_is_logged_without_the_session_id_and_never_breaks_the_reconnect(HttpStatusCode status, string body)
+    {
+        await ConnectBank("N26", "old-session-aaaa1111");
+        _deleteAnswer = (status, body);
+
+        var (page, html) = await ConnectBank("N26", "new-session-bbbb2222");
+
+        Assert.Equal(200, page);
+        Assert.Contains("Connected to N26", html);
+        Assert.Equal("new-session-bbbb2222", _consent.SessionIdFor(_consentUser(), "N26"));
+        Assert.Contains(_logs.Lines, l => l.Contains("could not be closed") && l.Contains("N26"));
+        AssertNoSessionIdInLog();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_network_error_or_timeout_on_the_close_never_breaks_the_reconnect(bool timeout)
+    {
+        await ConnectBank("N26", "old-session-aaaa1111");
+        _deleteThrows = timeout
+            ? new TaskCanceledException("timed out /sessions/old-session-aaaa1111")
+            : new HttpRequestException("down /sessions/old-session-aaaa1111");
+
+        var (page, _) = await ConnectBank("N26", "new-session-bbbb2222");
+
+        Assert.Equal(200, page);
+        Assert.Single(_deletes);
+        Assert.Equal("new-session-bbbb2222", _consent.SessionIdFor(_consentUser(), "N26"));
+        Assert.Contains(_logs.Lines, l => l.Contains("could not be closed"));
+        AssertNoSessionIdInLog();
+    }
+
+    [Fact]
+    public async Task Reconnecting_one_bank_never_touches_another_banks_session()
+    {
+        await ConnectBank("N26", "n26-session-aaaa1111");
+        await ConnectBank("DKB", "dkb-session-bbbb2222");
+        Assert.Empty(_deletes);
+
+        await ConnectBank("N26", "n26-session-cccc3333");
+
+        var delete = Assert.Single(_deletes);
+        Assert.Equal("/sessions/n26-session-aaaa1111", delete.Path);
+        Assert.Equal("dkb-session-bbbb2222", _consent.SessionIdFor(_consentUser(), "DKB"));
+        Assert.Equal("n26-session-cccc3333", _consent.SessionIdFor(_consentUser(), "N26"));
+    }
+
+    [Fact]
+    public async Task A_failed_store_closes_nothing()
+    {
+        await ConnectBank("N26", "old-session-aaaa1111");
+        var persistence = new FakeConsentPersistence();
+        var failing = new ConsentStore(persistence, TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
+        await failing.CompleteAsync(_consentUser(), "old-session-aaaa1111", "N26", [], T0, null);
+        persistence.SaveFails = new InvalidOperationException("db down");
+
+        _sessionId = "new-session-bbbb2222";
+        var state = await StartedState(new ConnectLinkRequest("N26", "DE", null));
+        await using var db = NewDb();
+        var result = await ConsentEndpoints.CallbackAsync(
+            "the-code", state, null, db, NewClient(), failing, _firstSync, _clock, _logs, CancellationToken.None);
+
+        Assert.Equal(502, Page(result).Status);
+        Assert.Empty(_deletes);
+    }
+
+    [Fact]
+    public async Task A_stale_instance_still_closes_the_session_the_database_holds()
+    {
+        await ConnectBank("N26", "old-session-aaaa1111");
+        var persistence = new FakeConsentPersistence();
+        var other = new ConsentStore(persistence, TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
+        await other.CompleteAsync(_consentUser(), "db-session-dddd4444", "N26", [], T0, null); // another instance stored this
+        var stale = new ConsentStore(persistence, TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
+        Assert.Null(stale.SessionIdFor(_consentUser(), "N26")); // this instance's memory is empty
+
+        _sessionId = "new-session-bbbb2222";
+        var state = await StartedState(new ConnectLinkRequest("N26", "DE", null));
+        await using var db = NewDb();
+        var result = await ConsentEndpoints.CallbackAsync(
+            "the-code", state, null, db, NewClient(), stale, _firstSync, _clock, _logs, CancellationToken.None);
+
+        Assert.Equal(200, Page(result).Status);
+        Assert.Equal("/sessions/db-session-dddd4444", Assert.Single(_deletes).Path);
+    }
+
+    private Guid _consentUser() => _consent.UserId;
+
+    private void AssertNoSessionIdInLog()
+    {
+        foreach (var id in new[] { "old-session-aaaa1111", "new-session-bbbb2222" })
+        {
+            Assert.DoesNotContain(_logs.Lines, l => l.Contains(id));
+        }
     }
 
     // --- logging ----------------------------------------------------------------------------------

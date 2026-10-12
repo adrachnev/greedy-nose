@@ -291,6 +291,21 @@ public sealed class IngestionRunner(
 
         var sessionHash = SessionFingerprint.Of(sessionId);
 
+        // Story 4.3: a session that is dead and already announced costs no calls — no fetch, no status check —
+        // until the bank is reconnected (a new session has a new hash, so this no longer matches).
+        await using (var toldDb = await dbContextFactory.CreateDbContextAsync(ct))
+        {
+            var told = await toldDb.BankConsents.AsNoTracking()
+                .Where(c => c.UserId == userId && c.AspspName == state.AspspName)
+                .Select(c => c.ExpiryNotifiedSessionHash)
+                .SingleOrDefaultAsync(ct);
+            if (told is not null && told == sessionHash)
+            {
+                logger.LogInformation("Bank {AspspName} has a dead consent that was already announced; skipping it until it is reconnected.", state.AspspName);
+                return BankResult.Skip;
+            }
+        }
+
         // The fetch depends on the mode (a first sync pulls the last FirstSyncWindowDays days), so it is decided before
         // fetching, once, and used for the whole tick. Untracked, so a later ChangeTracker.Clear()
         // cannot affect it; the end-of-tick hash update re-loads its own tracked row.
@@ -335,12 +350,23 @@ public sealed class IngestionRunner(
             // also confirm the session is no longer AUTHORIZED, so a misbehaving 401 cannot cost the
             // user a false "Bank connection expired". Anything else rethrows the original exception.
             var status = await GetSessionStatusOrNullAsync(sessionId, ct);
-            if (status is null || string.Equals(status, "AUTHORIZED", StringComparison.OrdinalIgnoreCase))
+            if (status is null || !TerminalSessionStatuses.Contains(status))
             {
                 logger.LogWarning(
-                    "Fetch answered 401 ({ErrorCode}) but the session status is {Status}; not treating the consent as dead.",
+                    "Fetch answered 401 ({ErrorCode}) but the session status is {Status}, not a terminal one; not treating the consent as dead.",
                     exception.ErrorCode, status ?? "unknown");
                 throw;
+            }
+
+            // Guarded race: a reconnect may have replaced the session after this tick took its snapshot and
+            // closed the old one (Story 4.3). Then this CLOSED_SESSION is ours, not the bank's — no push, no mark;
+            // the next tick picks up the new session. If the database cannot be read the store falls back to memory
+            // (and logs), which gives the pre-4.3 behaviour.
+            var currentSession = await consent.GetStoredSessionIdAsync(userId, state.AspspName, ct);
+            if (currentSession is not null && SessionFingerprint.Of(currentSession) != sessionHash)
+            {
+                logger.LogInformation("Bank {AspspName} was reconnected during this tick; skipping it until the next one.", state.AspspName);
+                return BankResult.Skip;
             }
 
             // The status value is logged on purpose: it is how EXPIRED/REVOKED get discovered.
@@ -589,6 +615,9 @@ public sealed class IngestionRunner(
         Steady,
         Reconnect,
     }
+
+    /// <summary>Session statuses that mean the consent is over for good (ARCHITECTURE.md; only CLOSED was observed so far). Anything else after a 401 stays inconclusive and heals by itself, because a told session is skipped until a reconnect.</summary>
+    private static readonly HashSet<string> TerminalSessionStatuses = new(["CLOSED", "EXPIRED", "REVOKED"], StringComparer.OrdinalIgnoreCase);
 
     /// <summary>How far back the first sync reads (R25), and the oldest start any tick may use.</summary>
     public const int FirstSyncWindowDays = 90;

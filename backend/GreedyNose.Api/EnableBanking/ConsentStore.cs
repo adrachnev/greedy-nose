@@ -146,6 +146,35 @@ public sealed class ConsentStore(IConsentPersistence persistence, TimeSpan conse
         }
     }
 
+    /// <summary>
+    /// The session id currently held for ONE bank of one user, null when there is none (Story 4.3: read before a
+    /// reconnect replaces it, so the old session can be closed). Other banks are never looked at.
+    /// </summary>
+    public string? SessionIdFor(Guid userId, string aspspName)
+    {
+        lock (_gate)
+        {
+            return _consents.TryGetValue((userId, aspspName), out var snapshot) ? snapshot.SessionId : null;
+        }
+    }
+
+    /// <summary>
+    /// The session id of ONE bank of one user as the database holds it (Story 4.3) — what a reconnect must close,
+    /// even when this instance's memory is stale or empty. If the database cannot be read, falls back to memory.
+    /// </summary>
+    public async Task<string?> GetStoredSessionIdAsync(Guid userId, string aspspName, CancellationToken ct = default)
+    {
+        try
+        {
+            return await persistence.LoadSessionIdAsync(userId, aspspName, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning("Reading the stored session of {Aspsp} failed ({ExceptionType}); using this instance's memory.", aspspName, ex.GetType().Name);
+            return SessionIdFor(userId, aspspName);
+        }
+    }
+
     /// <summary>The newest consent's state, <see cref="ConsentState.None"/> when there is none.</summary>
     public ConsentState GetState(DateTimeOffset now) =>
         GetStates(now).LastOrDefault() ?? ConsentState.None;

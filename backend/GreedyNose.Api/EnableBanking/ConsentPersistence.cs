@@ -14,6 +14,9 @@ public interface IConsentPersistence
     /// <summary>Stores the consent of one bank, replacing that bank's earlier one; other banks are untouched. Throws if it could not be stored.</summary>
     Task SaveAsync(ConsentSnapshot snapshot, CancellationToken ct = default);
 
+    /// <summary>The session id stored for ONE bank of one user, null when none (Story 4.3: the database is the truth, not one instance's memory).</summary>
+    Task<string?> LoadSessionIdAsync(Guid userId, string aspspName, CancellationToken ct = default);
+
     /// <summary>All stored consents. Throws <see cref="ConsentDecryptionException"/> if one cannot be decrypted.</summary>
     Task<IReadOnlyList<ConsentSnapshot>> LoadAsync(CancellationToken ct = default);
 }
@@ -70,6 +73,16 @@ public sealed class DbConsentPersistence(IDbContextFactory<GreedyNoseDbContext> 
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<string?> LoadSessionIdAsync(Guid userId, string aspspName, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var cipherText = await db.Set<BankConsent>().AsNoTracking()
+            .Where(c => c.UserId == userId && c.AspspName == aspspName)
+            .Select(c => c.SessionIdCipher)
+            .SingleOrDefaultAsync(ct);
+        return cipherText is null ? null : Encoding.UTF8.GetString(cipher.Decrypt(cipherText, Aad(userId, aspspName, SessionColumn)));
     }
 
     public async Task<IReadOnlyList<ConsentSnapshot>> LoadAsync(CancellationToken ct = default)

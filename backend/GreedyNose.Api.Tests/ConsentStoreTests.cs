@@ -304,6 +304,8 @@ public class ConsentStoreTests
 
         public Task SaveAsync(ConsentSnapshot snapshot, CancellationToken ct = default) => inner.SaveAsync(snapshot, ct);
 
+        public Task<string?> LoadSessionIdAsync(Guid userId, string aspspName, CancellationToken ct = default) => inner.LoadSessionIdAsync(userId, aspspName, ct);
+
         public async Task<IReadOnlyList<ConsentSnapshot>> LoadAsync(CancellationToken ct = default)
         {
             var rows = await inner.LoadAsync(ct); // the older set is read first ...

@@ -25,6 +25,9 @@ internal sealed class FakeConsentPersistence : IConsentPersistence
         return Task.CompletedTask;
     }
 
+    public Task<string?> LoadSessionIdAsync(Guid userId, string aspspName, CancellationToken ct = default) =>
+        Task.FromResult(_rows.TryGetValue((userId, aspspName), out var row) ? row.SessionId : null);
+
     public Task<IReadOnlyList<ConsentSnapshot>> LoadAsync(CancellationToken ct = default)
     {
         if (LoadFails is not null)

@@ -1558,11 +1558,12 @@ public class IngestionRunnerTests
         var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
 
         await NewRunner(factory, NewConsentStore(clock), fetcher, sender, clock, checker).RunOnceAsync(CancellationToken.None);
-        // A first sync is never skipped by the interval, so this tick really asks the bank again and stays quiet.
+        // Story 4.3: the session is dead and announced, so this tick makes no call at all and stays quiet.
         await NewRunner(factory, NewConsentStore(clock), fetcher, sender, clock, checker).RunOnceAsync(CancellationToken.None);
 
         AssertExpiryPush(Assert.Single(sender.Sent));
-        Assert.Equal(2, checker.CallCount);
+        Assert.Equal(1, checker.CallCount);
+        Assert.Equal(1, fetcher.CallCount);
         Assert.Equal(Session1Hash, await ExpiryGuardAsync(dbName));
         await AssertNothingIngestedAsync(dbName);
     }
@@ -1678,7 +1679,13 @@ public class IngestionRunnerTests
 
     private sealed class FailingDebitsFetcher(Exception exception) : IDebitsFetcher
     {
-        public Task<MappedDebits> FetchAsync(ConnectedAccount account, DateOnly dateFrom, CancellationToken ct) => throw exception;
+        public int CallCount { get; private set; }
+
+        public Task<MappedDebits> FetchAsync(ConnectedAccount account, DateOnly dateFrom, CancellationToken ct)
+        {
+            CallCount++;
+            throw exception;
+        }
     }
 
     private static async Task<(string DbName, FixedTimeProvider Clock, InMemoryDbContextFactory Factory)> SeedLiveSessionAsync()
@@ -1704,10 +1711,11 @@ public class IngestionRunnerTests
         Assert.Equal(1, checker.CallCount);
         Assert.Equal(Session1Hash, await ExpiryGuardAsync(dbName));
 
-        // The next tick fails the same way and must stay quiet.
+        // The next tick must stay quiet and make no call.
         await NewRunner(factory, NewConsentStore(clock), fetcher, sender, clock, checker, new IngestionOptions { AllowShortInterval = true })
             .RunOnceAsync(CancellationToken.None);
-        Assert.Equal(2, checker.CallCount); // the bank was really tried again, and stayed quiet
+        Assert.Equal(1, checker.CallCount); // Story 4.3: no further status call ...
+        Assert.Equal(1, fetcher.CallCount); // ... and no further fetch for a dead, announced session
         Assert.Single(sender.Sent);
     }
 
