@@ -175,7 +175,9 @@ Order is always *migration on Neon first* (`DB=neon bash tools/ef-container.sh d
 (`bash tools/azure-deploy.sh`). Afterwards: `/debits` answers 200, read the next tick in Application Insights, and
 check that N26 still syncs without a push storm (first-sync and reconnect modes must stay silent).
 
-**Deploy 2 — pending (code only, no migration):** Story 3.7's log changes. The build deployed in Deploy 1 still logs the
+**Deploy 2 — done 2026-10-12 (about 14:10 UTC; code only, no migration; checked: `/status` 401 without key and 200 with key,
+`/health` ok, `/debits` 200). The tick log of the new build still has to be read once for payee, amount and IBAN (18:00 UTC
+tick). Story 3.7's log changes:** The build deployed in Deploy 1 still logs the
 payee name, the booking date and the amount of a skipped (non-EUR or unreadable) charge and a 6-character IBAN fragment in
 some log lines (Application Insights). The fix is committed; deploy it with `bash tools/azure-deploy.sh` before real DKB/ING data
 flows (before Story 3.5), and check once that the tick logs no payee, amount or IBAN.

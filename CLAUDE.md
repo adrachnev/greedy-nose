@@ -4,6 +4,13 @@
 
 ## Status
 
+**2026-10-12 (end of day) — Deploy 2 done: the log privacy fix of Story 3.7 runs in Azure.** Code only, no migration; `/status`,
+`/health`, `/debits` fine. **Open for the next session:** (1) read the first tick of the new build (18:00 UTC, or the
+next ones) in Application Insights: N26 has `LastAttemptAt` set, no error, no push, and no payee, amount or IBAN in the log;
+(2) Story 2.11 with the owner and the phone (a real charge gives a push; `gn-xeq` and `gn-6k5` are measured on the
+first real ticks); (3) 3.5 DKB, 3.6 ING-DiBa, 3.8; (4) before go-live `gn-7n2` (Entra security defaults) and `gn-djm`.
+Nothing is pushed to a remote.
+
 **2026-10-12 (evening) — Story 3.7 local part done and committed (bead stays open; not deployed).** Two-bank tests
 cover reconnect, expiry and the foreign-currency skip; the tick logs the per-bank count of skipped charges. The review found
 a privacy leak that is **already in the deployed build**: log lines carried payee, date and amount of skipped charges and a
