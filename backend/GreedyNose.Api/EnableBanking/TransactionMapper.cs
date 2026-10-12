@@ -67,7 +67,7 @@ public static class TransactionMapper
             var currency = transaction.TransactionAmount?.Currency;
             if (!string.Equals(currency, "EUR", StringComparison.Ordinal))
             {
-                skipped.Add($"{date} {name}: {currency ?? "no currency"} {transaction.TransactionAmount?.Amount}");
+                skipped.Add($"non-EUR charge, currency {currency ?? "none"}");
                 continue;
             }
 
@@ -78,7 +78,7 @@ public static class TransactionMapper
             var booked = ToTimestamp(date);
             if (amount is null || booked is null)
             {
-                skipped.Add($"{date} {name}: unreadable amount '{transaction.TransactionAmount?.Amount}' or date");
+                skipped.Add("unreadable amount or date");
                 continue;
             }
 

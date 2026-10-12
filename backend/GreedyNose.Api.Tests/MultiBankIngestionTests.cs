@@ -749,4 +749,166 @@ public class MultiBankIngestionTests
         Assert.Contains(await after.AccountSyncStates.ToListAsync(), r => r.AccountKey == KeyA);
         Assert.Empty(s.Sender.Sent); // still the silent first sync
     }
+
+    // --- Story 3.7: reconnect, expiry and foreign currency, each bank on its own -----------------------
+
+    private static EbTransaction Foreign(string date, string name, string amount, string entryReference) =>
+        new(entryReference, new EbAmount("CHF", amount), new EbParty(name), null, null,
+            new EbBankTransactionCode("PMNT", "CCRD", "POSD"), "DBIT", "BOOK", date, null, null, []);
+
+    private static async Task MakeGoodAsync(Setup s, MappedDebits mapped, decimal limit)
+    {
+        var payee = Assert.Single(mapped.Payload.Payees);
+        await using var ctx = Ctx(s.Db);
+        ctx.Payees.Add(new Payee { UserId = SeedData.UserId, Id = payee.Id, Name = "Known", Initials = "KN", FirstSeenAt = Start });
+        ctx.Rules.Add(new Rule
+        {
+            UserId = SeedData.UserId, PayeeId = payee.Id, Classification = Classification.Good, AmountEUR = limit, UpdatedAt = Start,
+        });
+        await ctx.SaveChangesAsync();
+    }
+
+    private static async Task<AccountSyncState> SyncRowAsync(Setup s, string key)
+    {
+        await using var ctx = Ctx(s.Db);
+        return await ctx.AccountSyncStates.AsNoTracking().SingleAsync(r => r.AccountKey == key);
+    }
+
+    [Fact]
+    public async Task A_reconnect_with_a_bad_new_debit_at_one_bank_sends_one_summary_while_the_steady_bank_is_untouched()
+    {
+        var s = await NewSetupAsync();
+        await SeedSyncAsync(s, KeyA, "older-session"); // A reconnects
+        await SeedSyncAsync(s, KeyB, "sB");
+        var before = await SyncRowAsync(s, KeyB);
+        s.Fetcher.Scripts[KeyA] = () => Mapped(KeyA, Booked("2026-10-12", "NEW SHOP A", "7.00", "A1"));
+        s.Fetcher.Scripts[KeyB] = () => Mapped(KeyB, Booked("2026-10-12", "NEW SHOP B", "9.00", "B1"));
+
+        await s.Runner.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(2, s.Sender.Sent.Count);
+        Assert.Single(s.Sender.Sent, m => m.Title == ReconnectSummary.Build(1, 1).Title);
+        Assert.Single(s.Sender.Sent, m => m.Title == "NEW SHOP B · 9,00 €"); // B's own per-debit push
+        await using var verify = Ctx(s.Db);
+        var logged = await verify.NotificationLog.ToListAsync();
+        Assert.Single(logged); // only B's debit has a per-debit record
+        Assert.Equal(KeyB, (await verify.Debits.SingleAsync(d => d.Id == logged[0].DebitId)).AccountKey);
+        var after = await SyncRowAsync(s, KeyB);
+        Assert.Equal(before.LastSessionIdHash, after.LastSessionIdHash);
+        Assert.Equal(before.FirstSyncCompletedAt, after.FirstSyncCompletedAt);
+        Assert.Equal(SessionFingerprint.Of("sA"), (await SyncRowAsync(s, KeyA)).LastSessionIdHash); // A adopted its new session
+    }
+
+    [Fact]
+    public async Task A_reconnect_with_only_good_new_debits_at_one_bank_sends_no_summary_and_the_other_bank_still_alerts()
+    {
+        var s = await NewSetupAsync();
+        await SeedSyncAsync(s, KeyA, "older-session");
+        await SeedSyncAsync(s, KeyB, "sB");
+        var a = Mapped(KeyA, Booked("2026-10-12", "KNOWN SHOP", "7.00", "A1"));
+        await MakeGoodAsync(s, a, 50m);
+        s.Fetcher.Scripts[KeyA] = () => a;
+        s.Fetcher.Scripts[KeyB] = () => Mapped(KeyB, Booked("2026-10-12", "NEW SHOP B", "9.00", "B1"));
+
+        await s.Runner.RunOnceAsync(CancellationToken.None);
+
+        var push = Assert.Single(s.Sender.Sent); // B's per-debit push only
+        Assert.NotEqual(ReconnectSummary.Build(1, 1).Title, push.Title);
+        Assert.Contains("9", push.Title);
+        await using var verify = Ctx(s.Db);
+        Assert.Single(await verify.Debits.Where(d => d.AccountKey == KeyA).ToListAsync()); // A's debit is stored
+        Assert.Equal(SessionFingerprint.Of("sA"), (await SyncRowAsync(s, KeyA)).LastSessionIdHash);
+    }
+
+    [Fact]
+    public async Task A_bank_dead_by_time_alerts_once_per_session_while_the_other_bank_reconnects_with_its_own_summary()
+    {
+        var s = await NewSetupAsync(expiresAtA: Start.AddDays(-1));
+        await SeedSyncAsync(s, KeyA, "sA");
+        await SeedSyncAsync(s, KeyB, "older-session"); // B reconnects
+        s.Fetcher.Scripts[KeyB] = () => Mapped(KeyB, Booked("2026-10-12", "NEW SHOP B", "9.00", "B1"));
+
+        await s.Runner.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(2, s.Sender.Sent.Count);
+        Assert.Single(s.Sender.Sent, m => m.Title == ConnectionExpiredNotice.Title);
+        Assert.Single(s.Sender.Sent, m => m.Title == ReconnectSummary.Build(1, 1).Title);
+        Assert.False(s.Fetcher.Calls.ContainsKey(KeyA));
+
+        s.Clock.Now = Start.AddHours(7); // next tick: A is still dead, B is steady and has nothing new
+        await s.Runner.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(2, s.Sender.Sent.Count); // no second expiry push for the same session
+        Assert.Equal(2, s.Fetcher.Calls[KeyB]);
+    }
+
+    [Fact]
+    public async Task A_bank_closed_by_the_bank_alerts_once_while_the_other_bank_runs_its_silent_first_sync()
+    {
+        var s = await NewSetupAsync(sessionStatus: "CLOSED");
+        await SeedSyncAsync(s, KeyA, "sA");
+        s.Fetcher.Scripts[KeyA] = () => throw new EnableBankingRequestException(401, "CLOSED_SESSION");
+        s.Fetcher.Scripts[KeyB] = () => Mapped(KeyB, Booked("2026-10-10", "SHOP B", "5.00", "B1"), Booked("2026-10-11", "SHOP B", "6.00", "B2"));
+
+        await s.Runner.RunOnceAsync(CancellationToken.None);
+
+        var push = Assert.Single(s.Sender.Sent); // the expiry push; B's first sync is silent
+        Assert.Equal(ConnectionExpiredNotice.Title, push.Title);
+        await using var verify = Ctx(s.Db);
+        Assert.Equal(2, await verify.Debits.CountAsync(d => d.AccountKey == KeyB));
+        Assert.Empty(await verify.NotificationLog.ToListAsync());
+        Assert.Equal(KeyB, (await verify.AccountSyncStates.SingleAsync(r => r.AccountKey == KeyB)).AccountKey);
+
+        s.Clock.Now = Start.AddHours(7);
+        await s.Runner.RunOnceAsync(CancellationToken.None);
+
+        Assert.Single(s.Sender.Sent); // still one: A's session was announced
+        Assert.Equal(1, s.Fetcher.Calls[KeyA]);
+    }
+
+    [Fact]
+    public async Task A_foreign_currency_charge_at_one_bank_is_skipped_counted_and_never_compared_with_a_euro_limit()
+    {
+        var s = await NewSetupAsync();
+        await SeedSyncAsync(s, KeyA, "sA");
+        await SeedSyncAsync(s, KeyB, "sB");
+        var b = Mapped(
+            KeyB,
+            Foreign("2026-10-12", "KNOWN SHOP", "500.00", "B1"), // would be over a 10 EUR limit if read as euros
+            Booked("2026-10-12", "KNOWN SHOP", "5.00", "B2"));
+        await MakeGoodAsync(s, b, 10m);
+        s.Fetcher.Scripts[KeyB] = () => b;
+        s.Fetcher.Scripts[KeyA] = () => Mapped(KeyA, Booked("2026-10-12", "NEW SHOP A", "7.00", "A1"));
+
+        await s.Runner.RunOnceAsync(CancellationToken.None);
+
+        var push = Assert.Single(s.Sender.Sent); // A's bad debit only; B's CHF charge never alerts
+        Assert.Contains("7", push.Title);
+        await using var verify = Ctx(s.Db);
+        Assert.Equal(1, await verify.Debits.CountAsync(d => d.AccountKey == KeyB)); // mixed fetch keeps the EUR debit
+        Assert.Equal(1, await verify.Debits.CountAsync(d => d.AccountKey == KeyA));
+        var line = Assert.Single(s.Log.Lines, l => l.Contains("skipped 1 charge"));
+        Assert.Contains(BankB, line);
+        Assert.DoesNotContain(BankA, line);
+        Assert.DoesNotContain("KNOWN", line);
+        Assert.DoesNotContain("500", line);
+        Assert.Null((await RowAsync(s, BankB)).LastError); // a skipped charge is not a failure
+    }
+
+    [Fact]
+    public async Task The_skipped_count_is_logged_per_bank_and_a_bank_without_skips_logs_no_such_line()
+    {
+        var s = await NewSetupAsync();
+        await SeedSyncAsync(s, KeyA, "sA");
+        await SeedSyncAsync(s, KeyB, "sB");
+        s.Fetcher.Scripts[KeyA] = () => Mapped(
+            KeyA, Foreign("2026-10-12", "SHOP", "1.00", "A1"), Foreign("2026-10-12", "SHOP", "2.00", "A2"), Booked("2026-10-12", "SHOP", "3.00", "A3"));
+        s.Fetcher.Scripts[KeyB] = () => Mapped(KeyB, Booked("2026-10-12", "SHOP B", "3.00", "B1"));
+
+        await s.Runner.RunOnceAsync(CancellationToken.None);
+
+        var line = Assert.Single(s.Log.Lines, l => l.Contains("skipped 2 charge"));
+        Assert.Contains(BankA, line);
+        Assert.DoesNotContain(s.Log.Lines, l => l.Contains($"Bank {BankB} skipped"));
+    }
 }

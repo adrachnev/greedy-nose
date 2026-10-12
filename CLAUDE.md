@@ -4,6 +4,13 @@
 
 ## Status
 
+**2026-10-12 (evening) — Story 3.7 local part done and committed (bead stays open; not deployed).** Two-bank tests
+cover reconnect, expiry and the foreign-currency skip; the tick logs the per-bank count of skipped charges. The review found
+a privacy leak that is **already in the deployed build**: log lines carried payee, date and amount of skipped charges and a
+6-character IBAN fragment — fixed in this commit, **needs Deploy 2** (`bash tools/azure-deploy.sh`, no migration) before DKB/ING
+data flows. 752 backend tests. Still open for 3.7: the real per-bank skipped-charge count from 3.5/3.6. Next: read the 18:00 UTC
+tick, Deploy 2, then 2.11 with the owner.
+
 **2026-10-12 (evening) — Deploy 1 done: the new build (Stories 3.1–4.3) runs in Azure.** Neon got `AddConsentPollState`
 and `AddConsentExpiryNotified` first (no data changed), then `bash tools/azure-deploy.sh`. Cloud checks passed: `/status` 401
 without key and 200 with key (N26 `connected`), `/health` ok, `/debits` 200. **Next:** read the first tick of the new build

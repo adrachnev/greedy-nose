@@ -377,9 +377,11 @@ public sealed class IngestionRunner(
             return new BankResult(false, "ConsentClosedByBank");
         }
 
-        foreach (var skipped in mapped.Skipped)
+        if (mapped.Skipped.Count > 0)
         {
-            logger.LogWarning("Skipped a debit the mapper could not represent — {Detail}", skipped);
+            // Story 3.7: the per-bank count (foreign-currency or unreadable charges), so the real first syncs can be
+            // recorded per bank. Bank name and number only: no payee, amount or IBAN.
+            logger.LogInformation("Bank {AspspName} skipped {SkippedCount} charge(s) it could not use (non-EUR or unreadable).", state.AspspName, mapped.Skipped.Count);
         }
 
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
@@ -481,8 +483,8 @@ public sealed class IngestionRunner(
             await db.SaveChangesAsync(ct);
 
             logger.LogInformation(
-                "Bootstrap tick for account {AccountKey}: inserted {Count} debits as seen, no notifications.",
-                AccountKeyPreview(account.Key), insertedCount);
+                "Bootstrap tick for bank {AspspName}: inserted {Count} debits as seen, no notifications.",
+                state.AspspName, insertedCount);
         }
         else if (isReconnect)
         {
@@ -519,8 +521,8 @@ public sealed class IngestionRunner(
             }
 
             logger.LogInformation(
-                "Reconnect detected for account {AccountKey}: {NewDebits} new debits, {BadDebits} bad.",
-                AccountKeyPreview(account.Key), insertedCount, badCount);
+                "Reconnect detected for bank {AspspName}: {NewDebits} new debits, {BadDebits} bad.",
+                state.AspspName, insertedCount, badCount);
 
             // Freshly loaded, as in the steady branch below; one save for debits, token prunes and hash.
             var syncRow = await db.AccountSyncStates.SingleAsync(
@@ -578,14 +580,14 @@ public sealed class IngestionRunner(
 
         if (row?.ExpiryNotifiedSessionHash == sessionHash)
         {
-            logger.LogDebug("The consent for account {AccountKey} is dead ({Reason}); the expiry push was already sent.", AccountKeyPreview(account.Key), reason);
+            logger.LogDebug("The consent for bank {AspspName} is dead ({Reason}); the expiry push was already sent.", aspspName, reason);
             return;
         }
 
         var tokens = await db.DeviceTokens.Where(t => t.UserId == userId).ToListAsync(ct);
         if (tokens.Count == 0)
         {
-            logger.LogWarning("The consent for account {AccountKey} is dead ({Reason}) but no device token is registered; will retry next tick.", AccountKeyPreview(account.Key), reason);
+            logger.LogWarning("The consent for bank {AspspName} is dead ({Reason}) but no device token is registered; will retry next tick.", aspspName, reason);
             return;
         }
 
@@ -597,11 +599,11 @@ public sealed class IngestionRunner(
                 row.ExpiryNotifiedSessionHash = sessionHash;
             }
 
-            logger.LogInformation("The consent for account {AccountKey} is dead ({Reason}); sent the expiry push.", AccountKeyPreview(account.Key), reason);
+            logger.LogInformation("The consent for bank {AspspName} is dead ({Reason}); sent the expiry push.", aspspName, reason);
         }
         else
         {
-            logger.LogWarning("The consent for account {AccountKey} is dead ({Reason}) but the expiry push reached no device; will retry next tick.", AccountKeyPreview(account.Key), reason);
+            logger.LogWarning("The consent for bank {AspspName} is dead ({Reason}) but the expiry push reached no device; will retry next tick.", aspspName, reason);
         }
 
         // One save for the guard and any token prunes. Nothing on this path clears the ChangeTracker.
@@ -1106,5 +1108,4 @@ public sealed class IngestionRunner(
 
     private static string DebitIdPreview(string debitId) => debitId.Length > 10 ? $"{debitId[..10]}…" : debitId;
 
-    private static string AccountKeyPreview(string accountKey) => accountKey.Length > 6 ? $"{accountKey[..6]}…" : accountKey;
 }

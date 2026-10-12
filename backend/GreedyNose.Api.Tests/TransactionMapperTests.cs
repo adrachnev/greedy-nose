@@ -676,7 +676,26 @@ public class TransactionMapperTests
         Assert.Empty(mapped.Payload.Debits);
         Assert.Empty(mapped.Payload.Payees);
         Assert.Equal(1, mapped.Payload.Skipped);
-        Assert.Contains(mapped.Skipped, entry => entry.Contains("no currency", StringComparison.Ordinal));
+        Assert.Contains(mapped.Skipped, entry => entry.Contains("currency none", StringComparison.Ordinal));
+    }
+
+    /// <summary>The skipped detail goes to a cloud log: it may name the currency code, never payee, amount or date.</summary>
+    [Fact]
+    public void SkippedDetailsCarryNoPayeeAmountOrDate()
+    {
+        var mapped = MapOf(
+            Booked("2026-08-18", "SECRET PAYEE AG", amount: "777.77", currency: "CHF"),
+            Booked("2026-08-19", "SECRET PAYEE AG", amount: "not-a-number"));
+
+        Assert.Equal(2, mapped.Skipped.Count);
+        Assert.All(mapped.Skipped, entry =>
+        {
+            Assert.DoesNotContain("SECRET", entry, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("777", entry, StringComparison.Ordinal);
+            Assert.DoesNotContain("not-a-number", entry, StringComparison.Ordinal);
+            Assert.DoesNotContain("2026", entry, StringComparison.Ordinal);
+        });
+        Assert.Contains(mapped.Skipped, entry => entry.Contains("CHF", StringComparison.Ordinal));
     }
 
     // --- Helpers ------------------------------------------------------------------------------------
