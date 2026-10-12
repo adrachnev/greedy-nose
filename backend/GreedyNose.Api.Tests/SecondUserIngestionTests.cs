@@ -90,6 +90,15 @@ public class SecondUserIngestionTests
             ctx.Users.Add(new User { Id = Other, CreatedAt = Start });
             ctx.DeviceTokens.Add(new DeviceToken { Id = Guid.NewGuid(), UserId = Other, Token = OtherToken, UpdatedAt = Start });
             ctx.DeviceTokens.Add(new DeviceToken { Id = Guid.NewGuid(), UserId = SeedData.UserId, Token = SeedToken, UpdatedAt = Start });
+            if (expiresAt is not null)
+            {
+                // Story 4.1: the "already told" memory lives on the consent row.
+                ctx.BankConsents.Add(new BankConsent
+                {
+                    UserId = Other, AspspName = "Test Bank", SessionIdCipher = [1], PayloadCipher = [1], UpdatedAt = Start,
+                });
+            }
+
             if (steady)
             {
                 ctx.AccountSyncStates.Add(new AccountSyncState
@@ -208,7 +217,7 @@ public class SecondUserIngestionTests
         var sent = Assert.Single(s.Sender.Sent);
         Assert.Equal(OtherToken, sent.Token);
         await using var verify = Ctx(s.Db);
-        Assert.Equal(SessionFingerprint.Of("session-1"), (await verify.AccountSyncStates.SingleAsync()).ExpiryNotifiedSessionHash);
+        Assert.Equal(SessionFingerprint.Of("session-1"), (await verify.BankConsents.SingleAsync()).ExpiryNotifiedSessionHash);
     }
 
     [Fact]

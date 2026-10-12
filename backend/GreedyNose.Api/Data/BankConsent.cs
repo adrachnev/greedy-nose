@@ -38,4 +38,12 @@ public sealed class BankConsent
 
     /// <summary>Minutes between polls of this bank; null = the default (6 h).</summary>
     public int? PollIntervalMinutes { get; set; }
+
+    /// <summary>
+    /// Hash of the dead session R19's "Bank connection expired" push was last accepted for (Story 4.1;
+    /// moved here from <c>AccountSyncState</c> so it exists before any first sync finished). The push goes
+    /// out only while this differs from the dead session's hash; a reconnect has a new hash, so no reset
+    /// is needed (SaveAsync leaves this column alone). Set only once a device took the push. Null = never told.
+    /// </summary>
+    public string? ExpiryNotifiedSessionHash { get; set; }
 }

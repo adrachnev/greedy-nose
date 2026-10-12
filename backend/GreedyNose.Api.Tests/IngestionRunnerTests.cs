@@ -106,8 +106,9 @@ public class IngestionRunnerTests
 
     private static IngestionRunner NewRunner(
         IDbContextFactory<GreedyNoseDbContext> dbFactory, ConsentStore consent, IDebitsFetcher fetcher,
-        INotificationSender sender, TimeProvider clock, ISessionStatusChecker? checker = null) =>
-        new(dbFactory, consent, fetcher, checker ?? new FakeSessionStatusChecker(() => null), sender, clock, NullLogger<IngestionRunner>.Instance);
+        INotificationSender sender, TimeProvider clock, ISessionStatusChecker? checker = null, IngestionOptions? options = null) =>
+        new(dbFactory, consent, fetcher, checker ?? new FakeSessionStatusChecker(() => null), sender, clock, NullLogger<IngestionRunner>.Instance,
+            options: options);
 
     private sealed class FakeSessionStatusChecker(Func<string?> respond) : ISessionStatusChecker
     {
@@ -132,8 +133,25 @@ public class IngestionRunnerTests
     /// <summary>How many days before the clock the seed helper dates its debit and sync row.</summary>
     private const int SeedAgeDays = 30;
 
-    private static async Task SeedBootstrappedAsync(string dbName, TimeProvider clock, string? sessionHash = null)
+    private static async Task SeedConsentRowAsync(string dbName, TimeProvider clock)
     {
+        // The "already told" memory of R19 lives on the consent row (Story 4.1). Only the dead-consent tests
+        // seed it: with a row, the poll bookkeeping also records attempts, which other tests do not want.
+        await using var db = NewInMemoryContext(dbName);
+        db.BankConsents.Add(new BankConsent
+        {
+            UserId = SeedData.UserId, AspspName = "Test Bank", SessionIdCipher = [1], PayloadCipher = [1], UpdatedAt = clock.GetUtcNow(),
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedBootstrappedAsync(string dbName, TimeProvider clock, string? sessionHash = null, bool consentRow = false)
+    {
+        if (consentRow)
+        {
+            await SeedConsentRowAsync(dbName, clock);
+        }
+
         // The AccountSyncState row is what flips the first-sync check (R25); the single Debit row
         // is only there so the account looks lived-in — its own payee/content is irrelevant.
         await using var db = NewInMemoryContext(dbName);
@@ -1338,7 +1356,7 @@ public class IngestionRunnerTests
     private static async Task<string?> ExpiryGuardAsync(string dbName)
     {
         await using var verify = NewInMemoryContext(dbName);
-        return (await verify.AccountSyncStates.SingleAsync()).ExpiryNotifiedSessionHash;
+        return (await verify.BankConsents.SingleAsync()).ExpiryNotifiedSessionHash;
     }
 
     private static void AssertExpiryPush(PushMessage push)
@@ -1352,7 +1370,7 @@ public class IngestionRunnerTests
     {
         var dbName = Guid.NewGuid().ToString();
         var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
-        await SeedBootstrappedAsync(dbName, clock, Session1Hash);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash, consentRow: true);
         await SeedTokenAsync(dbName, clock);
         var fetcher = new FakeDebitsFetcher(Mapped(Booked("2026-09-22", "NEW SHOP")));
         var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
@@ -1373,7 +1391,7 @@ public class IngestionRunnerTests
     {
         var dbName = Guid.NewGuid().ToString();
         var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
-        await SeedBootstrappedAsync(dbName, clock, Session1Hash);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash, consentRow: true);
         await SeedTokenAsync(dbName, clock);
         var consent = NewExpiredConsentStore(clock);
         var factory = new InMemoryDbContextFactory(dbName);
@@ -1392,7 +1410,7 @@ public class IngestionRunnerTests
     {
         var dbName = Guid.NewGuid().ToString();
         var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
-        await SeedBootstrappedAsync(dbName, clock, Session1Hash);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash, consentRow: true);
         await SeedTokenAsync(dbName, clock);
         var consent = NewExpiredConsentStore(clock);
         var factory = new InMemoryDbContextFactory(dbName);
@@ -1419,7 +1437,7 @@ public class IngestionRunnerTests
     {
         var dbName = Guid.NewGuid().ToString();
         var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
-        await SeedBootstrappedAsync(dbName, clock, Session1Hash);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash, consentRow: true);
         await using (var db = NewInMemoryContext(dbName))
         {
             db.DeviceTokens.Add(new DeviceToken { Id = Guid.NewGuid(), UserId = SeedData.UserId, Token = "dead-token", UpdatedAt = clock.GetUtcNow() });
@@ -1444,7 +1462,7 @@ public class IngestionRunnerTests
     {
         var dbName = Guid.NewGuid().ToString();
         var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
-        await SeedBootstrappedAsync(dbName, clock, Session1Hash);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash, consentRow: true);
         await SeedTokenAsync(dbName, clock);
 
         var sender = new FakeSender(_ => SendResult.Failed(SendOutcome.TokenNoLongerValid, "gone"));
@@ -1462,7 +1480,7 @@ public class IngestionRunnerTests
     {
         var dbName = Guid.NewGuid().ToString();
         var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
-        await SeedBootstrappedAsync(dbName, clock, Session1Hash); // no token on purpose
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash, consentRow: true); // no token on purpose
         var consent = NewExpiredConsentStore(clock);
         var factory = new InMemoryDbContextFactory(dbName);
 
@@ -1481,19 +1499,142 @@ public class IngestionRunnerTests
     }
 
     [Fact]
-    public async Task An_expired_consent_with_no_sync_state_row_sends_nothing_and_does_not_crash()
+    public async Task An_expired_consent_with_no_consent_row_does_not_crash()
     {
+        // A fake persistence stores no BankConsents row: nothing can be remembered, but the push still goes out.
         var dbName = Guid.NewGuid().ToString();
         var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
-        await SeedTokenAsync(dbName, clock); // a token, so a wrongly sent push would show
+        await SeedTokenAsync(dbName, clock);
         var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
 
         await NewRunner(new InMemoryDbContextFactory(dbName), NewExpiredConsentStore(clock), new FakeDebitsFetcher(Mapped()), sender, clock)
             .RunOnceAsync(CancellationToken.None);
 
-        Assert.Empty(sender.Sent);
+        AssertExpiryPush(Assert.Single(sender.Sent));
+    }
+
+    // --- Story 4.1: the consent dies before its first sync finished --------------------------------
+
+    private static async Task<(string DbName, FixedTimeProvider Clock, InMemoryDbContextFactory Factory)> SeedUnsyncedConsentAsync()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedConsentRowAsync(dbName, clock); // a consent row, but no AccountSyncState row
+        await SeedTokenAsync(dbName, clock);
+        return (dbName, clock, new InMemoryDbContextFactory(dbName));
+    }
+
+    private static async Task AssertNothingIngestedAsync(string dbName)
+    {
         await using var verify = NewInMemoryContext(dbName);
         Assert.Empty(await verify.AccountSyncStates.ToListAsync());
+        Assert.Empty(await verify.Debits.ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_consent_that_expires_before_its_first_sync_pushes_once()
+    {
+        var (dbName, clock, factory) = await SeedUnsyncedConsentAsync();
+        var consent = NewExpiredConsentStore(clock);
+        var fetcher = new FakeDebitsFetcher(Mapped(Booked("2026-09-22", "NEW SHOP")));
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+
+        await NewRunner(factory, consent, fetcher, sender, clock).RunOnceAsync(CancellationToken.None);
+        await NewRunner(factory, consent, fetcher, sender, clock).RunOnceAsync(CancellationToken.None);
+        await NewRunner(factory, consent, fetcher, sender, clock).RunOnceAsync(CancellationToken.None);
+
+        AssertExpiryPush(Assert.Single(sender.Sent));
+        Assert.Equal(0, fetcher.CallCount);
+        Assert.Equal(Session1Hash, await ExpiryGuardAsync(dbName));
+        await AssertNothingIngestedAsync(dbName);
+    }
+
+    [Fact]
+    public async Task A_consent_closed_by_the_bank_before_its_first_sync_pushes_once()
+    {
+        var (dbName, clock, factory) = await SeedUnsyncedConsentAsync();
+        var fetcher = new FailingDebitsFetcher(new EnableBankingRequestException(401, "CLOSED_SESSION"));
+        var checker = new FakeSessionStatusChecker(() => "CLOSED");
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+
+        await NewRunner(factory, NewConsentStore(clock), fetcher, sender, clock, checker).RunOnceAsync(CancellationToken.None);
+        // A first sync is never skipped by the interval, so this tick really asks the bank again and stays quiet.
+        await NewRunner(factory, NewConsentStore(clock), fetcher, sender, clock, checker).RunOnceAsync(CancellationToken.None);
+
+        AssertExpiryPush(Assert.Single(sender.Sent));
+        Assert.Equal(2, checker.CallCount);
+        Assert.Equal(Session1Hash, await ExpiryGuardAsync(dbName));
+        await AssertNothingIngestedAsync(dbName);
+    }
+
+    [Theory]
+    [InlineData(SendOutcome.Rejected)]
+    [InlineData(SendOutcome.Transient)]
+    public async Task A_failed_push_before_the_first_sync_is_not_told_and_the_next_tick_sends(SendOutcome outcome)
+    {
+        var (dbName, clock, factory) = await SeedUnsyncedConsentAsync();
+        var consent = NewExpiredConsentStore(clock);
+
+        var failing = new FakeSender(_ => SendResult.Failed(outcome, "boom"));
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped()), failing, clock).RunOnceAsync(CancellationToken.None);
+        Assert.Single(failing.Sent);
+        Assert.Null(await ExpiryGuardAsync(dbName));
+
+        var working = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped()), working, clock).RunOnceAsync(CancellationToken.None);
+        AssertExpiryPush(Assert.Single(working.Sent));
+        Assert.Equal(Session1Hash, await ExpiryGuardAsync(dbName));
+    }
+
+    [Fact]
+    public async Task Without_a_device_token_before_the_first_sync_the_next_tick_with_a_token_sends_once()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        await SeedConsentRowAsync(dbName, clock); // no token on purpose
+        var consent = NewExpiredConsentStore(clock);
+        var factory = new InMemoryDbContextFactory(dbName);
+
+        var silent = new FakeSender(_ => throw new InvalidOperationException("must not be called"));
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped()), silent, clock).RunOnceAsync(CancellationToken.None);
+        Assert.Null(await ExpiryGuardAsync(dbName));
+
+        await SeedTokenAsync(dbName, clock);
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped()), sender, clock).RunOnceAsync(CancellationToken.None);
+        await NewRunner(factory, consent, new FakeDebitsFetcher(Mapped()), sender, clock).RunOnceAsync(CancellationToken.None);
+
+        AssertExpiryPush(Assert.Single(sender.Sent));
+    }
+
+    [Fact]
+    public async Task A_reconnect_after_a_death_before_the_first_sync_starts_silently_and_a_later_death_tells_again()
+    {
+        var (dbName, clock, factory) = await SeedUnsyncedConsentAsync();
+        var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
+
+        await NewRunner(factory, NewExpiredConsentStore(clock), new FakeDebitsFetcher(Mapped()), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+        Assert.Single(sender.Sent);
+
+        // The user logs in again: a new live session; its first sync is silent even for a bad payee.
+        var fetcher = new FakeDebitsFetcher(Mapped(Booked("2026-09-22", "OLD SHOP")));
+        await NewRunner(factory, NewConsentStore(clock, sessionId: "session-2"), fetcher, sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(1, fetcher.CallCount);
+        Assert.Single(sender.Sent);
+        await using (var verify = NewInMemoryContext(dbName))
+        {
+            Assert.Equal(SessionFingerprint.Of("session-2"), (await verify.AccountSyncStates.SingleAsync()).LastSessionIdHash);
+            Assert.Equal(Session1Hash, (await verify.BankConsents.SingleAsync()).ExpiryNotifiedSessionHash);
+        }
+
+        // The new session dies in its turn: told again.
+        await NewRunner(factory, NewExpiredConsentStore(clock, sessionId: "session-2"), new FakeDebitsFetcher(Mapped()), sender, clock)
+            .RunOnceAsync(CancellationToken.None);
+        Assert.Equal(2, sender.Sent.Count);
+        Assert.Equal(SessionFingerprint.Of("session-2"), await ExpiryGuardAsync(dbName));
     }
 
     [Fact]
@@ -1501,7 +1642,7 @@ public class IngestionRunnerTests
     {
         var dbName = Guid.NewGuid().ToString();
         var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
-        await SeedBootstrappedAsync(dbName, clock, Session1Hash);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash, consentRow: true);
         await SeedTokenAsync(dbName, clock);
         var factory = new InMemoryDbContextFactory(dbName);
         var sender = new FakeSender(_ => SendResult.Accepted("msg-1"));
@@ -1520,9 +1661,8 @@ public class IngestionRunnerTests
         Assert.Single(sender.Sent); // an empty reconnect sends no summary (R20a)
         await using (var verify = NewInMemoryContext(dbName))
         {
-            var row = await verify.AccountSyncStates.SingleAsync();
-            Assert.Equal(session2Hash, row.LastSessionIdHash);
-            Assert.Equal(Session1Hash, row.ExpiryNotifiedSessionHash);
+            Assert.Equal(session2Hash, (await verify.AccountSyncStates.SingleAsync()).LastSessionIdHash);
+            Assert.Equal(Session1Hash, (await verify.BankConsents.SingleAsync()).ExpiryNotifiedSessionHash);
         }
 
         // The new session dies in its turn: its hash differs from the guard, so it announces again.
@@ -1545,7 +1685,7 @@ public class IngestionRunnerTests
     {
         var dbName = Guid.NewGuid().ToString();
         var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
-        await SeedBootstrappedAsync(dbName, clock, Session1Hash);
+        await SeedBootstrappedAsync(dbName, clock, Session1Hash, consentRow: true);
         await SeedTokenAsync(dbName, clock);
         return (dbName, clock, new InMemoryDbContextFactory(dbName));
     }
@@ -1565,7 +1705,9 @@ public class IngestionRunnerTests
         Assert.Equal(Session1Hash, await ExpiryGuardAsync(dbName));
 
         // The next tick fails the same way and must stay quiet.
-        await NewRunner(factory, NewConsentStore(clock), fetcher, sender, clock, checker).RunOnceAsync(CancellationToken.None);
+        await NewRunner(factory, NewConsentStore(clock), fetcher, sender, clock, checker, new IngestionOptions { AllowShortInterval = true })
+            .RunOnceAsync(CancellationToken.None);
+        Assert.Equal(2, checker.CallCount); // the bank was really tried again, and stayed quiet
         Assert.Single(sender.Sent);
     }
 

@@ -117,6 +117,9 @@ namespace GreedyNose.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("ExpiryNotifiedSessionHash")
+                        .HasColumnType("text");
+
                     b.Property<DateTimeOffset?>("LastAttemptAt")
                         .HasColumnType("timestamp with time zone");
 

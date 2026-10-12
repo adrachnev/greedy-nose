@@ -285,7 +285,7 @@ public sealed class IngestionRunner(
         {
             // Time signal (R19): valid_until is reached. No fetch — the bank would only answer 401.
             // Handled before the interval check, so the expiry push is never held back by it.
-            await NotifyConsentDeadAsync(userId, sessionId, account, "expired", ct);
+            await NotifyConsentDeadAsync(userId, state.AspspName, sessionId, account, "expired", ct);
             return new BankResult(false, "ConsentExpired");
         }
 
@@ -347,7 +347,7 @@ public sealed class IngestionRunner(
             logger.LogWarning(
                 "Fetch answered 401 ({ErrorCode}) and the session status is {Status}; the bank ended the consent.",
                 exception.ErrorCode, status);
-            await NotifyConsentDeadAsync(userId, sessionId, account, "closed by the bank", ct);
+            await NotifyConsentDeadAsync(userId, state.AspspName, sessionId, account, "closed by the bank", ct);
             return new BankResult(false, "ConsentClosedByBank");
         }
 
@@ -533,29 +533,24 @@ public sealed class IngestionRunner(
 
     /// <summary>
     /// R19: the consent is dead (<paramref name="reason"/> says how) — push once per session. Guarded by
-    /// <c>AccountSyncState.ExpiryNotifiedSessionHash</c>, which is set only when at least one device took
+    /// <c>BankConsent.ExpiryNotifiedSessionHash</c>, which is set only when at least one device took
     /// the push: unlike the debit path, nothing waits behind a retry here (a dead connection has no
     /// debits), and a lost R19 push is the worst silence, so Rejected/Transient/no token leave the guard
     /// empty and the next tick tries again. Send before the one save, so a crash in between costs at most
-    /// a duplicate push. No row for the account (the consent died before its first sync finished): log and
-    /// return — there is nowhere to keep the guard, and the push would repeat every tick.
+    /// a duplicate push. Needs no AccountSyncState row: a consent that dies before its first sync finished
+    /// alerts too (Story 4.1).
     /// </summary>
-    private async Task NotifyConsentDeadAsync(Guid userId, string sessionId, ConnectedAccount account, string reason, CancellationToken ct)
+    private async Task NotifyConsentDeadAsync(Guid userId, string aspspName, string sessionId, ConnectedAccount account, string reason, CancellationToken ct)
     {
         var sessionHash = SessionFingerprint.Of(sessionId);
 
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-        var row = await db.AccountSyncStates.SingleOrDefaultAsync(
-            s => s.UserId == userId && s.AccountKey == account.Key, ct);
-        if (row is null)
-        {
-            logger.LogWarning(
-                "The consent for account {AccountKey} is dead ({Reason}) before its first sync finished; no expiry push (no state row).",
-                AccountKeyPreview(account.Key), reason);
-            return;
-        }
+        // The memory lives on the consent row (Story 4.1), so it works before any first sync finished.
+        // No row (a test's fake persistence): behave like "nothing remembered"; the guard cannot be kept then.
+        var row = await db.BankConsents.SingleOrDefaultAsync(
+            c => c.UserId == userId && c.AspspName == aspspName, ct);
 
-        if (row.ExpiryNotifiedSessionHash == sessionHash)
+        if (row?.ExpiryNotifiedSessionHash == sessionHash)
         {
             logger.LogDebug("The consent for account {AccountKey} is dead ({Reason}); the expiry push was already sent.", AccountKeyPreview(account.Key), reason);
             return;
@@ -571,7 +566,11 @@ public sealed class IngestionRunner(
         var sendResult = await SendToAllTokensAsync(db, tokens, ConnectionExpiredNotice.Title, ConnectionExpiredNotice.Body, ct);
         if (sendResult.AnySent)
         {
-            row.ExpiryNotifiedSessionHash = sessionHash;
+            if (row is not null)
+            {
+                row.ExpiryNotifiedSessionHash = sessionHash;
+            }
+
             logger.LogInformation("The consent for account {AccountKey} is dead ({Reason}); sent the expiry push.", AccountKeyPreview(account.Key), reason);
         }
         else

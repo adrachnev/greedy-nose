@@ -4,6 +4,12 @@
 
 ## Status
 
+**2026-10-12 (autorun, 2 of 4) — Story 4.1 done locally: a consent that dies during the first sync still alerts
+(committed, not deployed).** `NotifyConsentDeadAsync` works on the `BankConsents` row (no `AccountSyncState` needed);
+migration `AddConsentExpiryNotified` (applied to the dev DB only, carry-over checked with a fake value; **Neon at
+Deploy 1**, old column kept until a bead drops it). 695 backend tests, one review, no MUST/SHOULD FIX left. Next in
+the autorun: 4.3, then 4.2.
+
 **2026-10-12 (autorun, 1 of 4) — Story 3.4 done locally: the app never names a bank (committed, not deployed).**
 `ConnectBankScreen` and eight mocks use "your bank" / "Personal account"; no fixed 90-day claim; a jest test pins the
 copy (257 tests). One review round, no MUST FIX. Autorun order, one at a time, plans self-approved: 3.4 (done),

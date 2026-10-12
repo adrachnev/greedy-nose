@@ -185,6 +185,9 @@ device token must be in the cloud before live data flows.
 **Migrations collected so far (apply to Neon at Deploy 1, in this order):**
 1. `20261012114551_AddConsentPollState` (Story 3.2) — four nullable columns on `BankConsents` (`LastAttemptAt`,
    `LastSuccessAt`, `LastError`, `PollIntervalMinutes`); applied to the dev DB only.
+2. `20261012121857_AddConsentExpiryNotified` (Story 4.1) — nullable `BankConsents.ExpiryNotifiedSessionHash`, carries over
+   the value from `AccountSyncStates` (checked on the dev DB with a fake value); the old column stays (bead to drop it after
+   Deploy 1); applied to the dev DB only.
 
 **Bank names for `/connect` (Story 3.3).** The backend checks the name and country against Enable Banking's own list
 (`GET /aspsps?country=XX`, read fresh at `/connect-links` and again at `/connect`) and stores the list's spelling.
@@ -201,6 +204,7 @@ DKB, flagged beta) and recorded here then. N26 and Mock ASPSP state 15552000 s (
 | Epic 2 — N26 live on Azure, end to end (2.1–2.11) | in progress — 2.1–2.4, 2.9, 2.10 done (2026-10-07/08); **2.5 done 2026-10-08** (Neon project in eu-central-1, all 12 migrations applied, seed user present; see "Cloud database (Neon)" above); **2.6 done 2026-10-08** (Function App on Flex Consumption in Frankfurt, Key Vault references resolved, https only, 401/200 checked, tick without consent harmless; see "Azure deployment" above) |
 | Story 2.6a — the first sync tried against real N26, locally | **done 2026-10-09** — see "Findings: first sync at N26" below |
 | Story 2.7 — N26 through the cloud | **done 2026-10-09** — see "Findings: N26 through the cloud" below; the first Steady tick (12:00 UTC) still to be read |
+| Story 4.1 — a consent that dies during the first sync still alerts me | **done locally 2026-10-12** (not deployed; migration `AddConsentExpiryNotified` pending for Neon) — 695 tests; the "already told" memory lives on the consent row, both death signals work in first-sync mode, told only after a successful send, reconnect resets by the session hash |
 | Story 3.4 — the app never names a bank in its own words | **done locally 2026-10-12** (copy only) — `ConnectBankScreen` and the mocks 01, 01b, 01bb, 01d, 01e, 02b, 06, 06b say "your bank" / "Personal account", no fixed "90 days"; placeholder tile uses the theme tokens; new jest test pins the copy (257 tests) |
 | Story 3.3 — connecting a bank uses that bank's own limits | **done locally 2026-10-12** (not deployed, no migration) — 688 tests; `AspspResolver` (fresh list, exact match, never guessed), `valid_until` = min(90 d, the bank's maximum); live on the Sandbox: an unknown bank is refused with a clear message and nothing created, `mock aspsp` is stored as `Mock ASPSP` |
 | Story 3.2 — the worker walks every bank | **done locally 2026-10-12** (not deployed; migration `AddConsentPollState` pending for Neon) — 648 tests; live on the dev DB two consents at once: the stale N26 sandbox consent failed (404) and the Mock ASPSP still synced in the same tick, per-bank attempt/success/error recorded. New: per-bank budget `Ingestion:BankTimeout` (40 s, bead `gn-ftd` for multi-page banks) |

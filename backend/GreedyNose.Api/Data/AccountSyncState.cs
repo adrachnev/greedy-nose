@@ -30,11 +30,10 @@ public sealed class AccountSyncState
     public string? LastSessionIdHash { get; set; }
 
     /// <summary>
-    /// Hash of the dead session R19's "Bank connection expired" push was last accepted for. The push
-    /// goes out only while this differs from the dead session's hash, so a dead consent is announced
-    /// once; a fresh login has a fresh hash, so a later death announces again — no reset needed, the
-    /// same derived-not-flagged shape as <see cref="LastSessionIdHash"/>. Set only once at least one
-    /// device took the push. Null = never notified (no backfill).
+    /// OBSOLETE, no longer read or written (Story 4.1): the "already told" memory lives on
+    /// <c>BankConsent.ExpiryNotifiedSessionHash</c>. Kept only so the still-running old code works between the
+    /// migration and the new deploy; the column is dropped in a later migration (bead).
     /// </summary>
+    [Obsolete("Moved to BankConsent.ExpiryNotifiedSessionHash (Story 4.1); column is dropped after deploy.")]
     public string? ExpiryNotifiedSessionHash { get; set; }
 }

@@ -423,6 +423,23 @@ public class MultiBankIngestionTests
     }
 
     [Fact]
+    public async Task A_bank_dead_before_its_first_sync_alerts_while_the_other_bank_keeps_syncing()
+    {
+        var s = await NewSetupAsync(expiresAtA: Start.AddDays(-1)); // no AccountSyncState row for either bank
+        s.Fetcher.Scripts[KeyB] = () => Mapped(KeyB, Booked("2026-10-10", "SHOP B", "5.00", "B1"));
+
+        await s.Runner.RunOnceAsync(CancellationToken.None);
+
+        Assert.Single(s.Sender.Sent, m => m.Title == ConnectionExpiredNotice.Title);
+        Assert.False(s.Fetcher.Calls.ContainsKey(KeyA));
+        Assert.Equal(1, s.Fetcher.Calls[KeyB]);
+        await using var ctx = Ctx(s.Db);
+        Assert.Equal(SessionFingerprint.Of("sA"), (await RowAsync(s, BankA)).ExpiryNotifiedSessionHash);
+        Assert.Null((await RowAsync(s, BankB)).ExpiryNotifiedSessionHash);
+        Assert.Equal(KeyB, (await ctx.AccountSyncStates.SingleAsync()).AccountKey); // only B finished its first sync
+    }
+
+    [Fact]
     public async Task A_successful_tick_records_the_attempt_and_clears_an_earlier_error()
     {
         var s = await NewSetupAsync();
