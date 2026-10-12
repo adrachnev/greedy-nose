@@ -417,3 +417,57 @@ describe('the token is a delivery credential and never reaches a log', () => {
     expect(everythingLogged()).not.toContain(TOKEN);
   });
 });
+
+describe('registration state', () => {
+  it('is registered after a 2xx', async () => {
+    const { store, messaging } = load();
+    messaging.getToken.mockResolvedValue('tok-1');
+    expect(store.getRegistrationState()).toBe('pending');
+
+    store.startDeviceRegistration();
+    await flush();
+
+    expect(store.getRegistrationState()).toBe('registered');
+  });
+
+  it.each([
+    ['an HTTP error', () => fetchMock.mockResolvedValue({ ok: false, status: 500 })],
+    ['a network error', () => fetchMock.mockRejectedValue(new TypeError('Network request failed'))],
+  ])('is failed after %s, and a retry registers once the backend answers', async (_label, fail) => {
+    const { store, messaging } = load();
+    messaging.getToken.mockResolvedValue('tok-1');
+    fail();
+
+    store.startDeviceRegistration();
+    await flush();
+    expect(store.getRegistrationState()).toBe('failed');
+
+    fetchMock.mockResolvedValue({ ok: true, status: 204 });
+    store.retryRegistration();
+    await flush();
+    expect(store.getRegistrationState()).toBe('registered');
+    expect(permissions.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('is failed without an API key', async () => {
+    const { store, messaging } = load({ apiKey: '' });
+    messaging.getToken.mockResolvedValue('tok-1');
+
+    store.startDeviceRegistration();
+    await flush();
+
+    expect(store.getRegistrationState()).toBe('failed');
+  });
+
+  it('does not retry once registered', async () => {
+    const { store, messaging } = load();
+    messaging.getToken.mockResolvedValue('tok-1');
+    store.startDeviceRegistration();
+    await flush();
+
+    store.retryRegistration();
+    await flush();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

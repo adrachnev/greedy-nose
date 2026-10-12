@@ -46,6 +46,70 @@ const ANDROID_RUNTIME_NOTIFICATION_API = 33;
  */
 let registrationStarted = false;
 
+/**
+ * Whether the backend has confirmed this phone's token with an HTTP 2xx.
+ * `pending` until the first attempt ends; `failed` after any attempt that did
+ * not end in a 2xx (not configured, unreachable, rejected). The release status
+ * line shows "Alerts are not set up" on `failed` only, because a phone with no
+ * stored token is exactly how pushes ended up as NoToken.
+ */
+export type RegistrationState = 'pending' | 'registered' | 'failed';
+
+let registration: RegistrationState = 'pending';
+const registrationListeners = new Set<() => void>();
+
+function setRegistration(next: RegistrationState): void {
+  if (registration === next) {
+    return;
+  }
+  registration = next;
+  registrationListeners.forEach(listener => listener());
+}
+
+export function getRegistrationState(): RegistrationState {
+  return registration;
+}
+
+export function subscribeToRegistration(listener: () => void): () => void {
+  registrationListeners.add(listener);
+  return () => {
+    registrationListeners.delete(listener);
+  };
+}
+
+let retryInFlight = false;
+
+/**
+ * Tries again when the token has not been confirmed yet (called on every feed
+ * refresh). Skips the permission prompt — the first attempt already asked.
+ * No-op in fixture mode, before the first attempt, while one is running, or once
+ * registered.
+ */
+export function retryRegistration(): void {
+  if (!USE_BACKEND || !registrationStarted || registration === 'registered' || retryInFlight) {
+    return;
+  }
+  retryInFlight = true;
+  getToken(getMessaging())
+    .then(postToken)
+    .catch(error => {
+      console.warn('[deviceStore] could not read the FCM token', error);
+      setRegistration('failed');
+    })
+    .finally(() => {
+      retryInFlight = false;
+    });
+}
+
+/** Test-only: resets the module's state. */
+export function __resetDeviceStoreForTests(): void {
+  registrationStarted = false;
+  refreshSubscription = null;
+  registration = 'pending';
+  retryInFlight = false;
+  registrationListeners.clear();
+}
+
 /** The live token-refresh listener's unsubscribe, or null while none is attached. */
 let refreshSubscription: (() => void) | null = null;
 
@@ -81,7 +145,10 @@ export function startDeviceRegistration(): () => void {
     // Not awaited: register() reports through console.warn, and the catch is
     // for the one thing it cannot do itself — a throw from getMessaging() or
     // getToken().
-    register().catch(error => console.warn('[deviceStore] could not read the FCM token', error));
+    register().catch(error => {
+      console.warn('[deviceStore] could not read the FCM token', error);
+      setRegistration('failed');
+    });
   }
 
   return stopRefreshListener;
@@ -142,8 +209,9 @@ async function askForNotificationPermission(): Promise<void> {
  * otherwise waits out the platform's own minutes-long socket timeout.
  */
 async function postToken(token: string): Promise<void> {
-  if (!hasApiKey()) {
+  if (!hasApiKey() || BACKEND_BASE_URL === '') {
     console.warn('[deviceStore] API key not configured; not registering the device token');
+    setRegistration('failed');
     return;
   }
   const controller = new AbortController();
@@ -155,11 +223,15 @@ async function postToken(token: string): Promise<void> {
       headers: backendHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ token }),
     });
-    if (!response.ok) {
+    if (response.ok) {
+      setRegistration('registered');
+    } else {
       console.warn(`[deviceStore] backend did not store the device token: HTTP ${response.status}`);
+      setRegistration('failed');
     }
   } catch (error) {
     console.warn('[deviceStore] could not reach the backend to register the device token', error);
+    setRegistration('failed');
   } finally {
     clearTimeout(timeout);
   }

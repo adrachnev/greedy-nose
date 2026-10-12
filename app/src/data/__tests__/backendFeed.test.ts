@@ -292,7 +292,7 @@ describe('a body that is not the contract', () => {
     respondWith({ payees: [], debits: [], skipped: 0 });
     await refresh();
 
-    expect(getState()).toEqual({ status: 'ready', dropped: 0, skipped: 0 });
+    expect(getState()).toEqual({ status: 'ready', problem: 'empty', dropped: 0, skipped: 0 });
   });
 });
 

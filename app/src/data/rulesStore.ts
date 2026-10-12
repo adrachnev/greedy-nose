@@ -265,7 +265,7 @@ async function syncRuleToBackend(payee: Payee, rule: Rule): Promise<void> {
   if (!USE_BACKEND) {
     return;
   }
-  if (!hasApiKey()) {
+  if (!hasApiKey() || BACKEND_BASE_URL === '') {
     console.warn('[rulesStore] API key not configured; the rule was saved locally only');
     return;
   }
@@ -359,7 +359,7 @@ function feedSettled(): Promise<void> {
  * for anything else the waiting could throw. Local rules are never touched.
  */
 export function startRulesResync(): void {
-  if (!USE_BACKEND || !hasApiKey() || resyncStarted) {
+  if (!USE_BACKEND || !hasApiKey() || BACKEND_BASE_URL === '' || resyncStarted) {
     return;
   }
   resyncStarted = true;

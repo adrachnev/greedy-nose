@@ -20,7 +20,13 @@ import {
   subscribe as subscribeToFeed,
 } from './backendFeed';
 import { USE_BACKEND } from './config';
-import { startDeviceRegistration } from './deviceStore';
+import {
+  getRegistrationState,
+  RegistrationState,
+  retryRegistration,
+  startDeviceRegistration,
+  subscribeToRegistration,
+} from './deviceStore';
 import { getRules, saveRule, startRulesResync, subscribe as subscribeToRules } from './rulesStore';
 
 // Every collection is read through useSyncExternalStore, so screens re-render
@@ -106,6 +112,8 @@ const noopRefresh = () => {};
 // Not awaited: refresh() reports failure through the feed's own state, which is
 // what `feed` above carries to the badge.
 const feedRefresh = () => {
+  // A refresh is also the retry for a device token the backend never confirmed.
+  retryRegistration();
   refresh();
 };
 
@@ -125,6 +133,11 @@ export function useDataSource(): DataSource {
     feed,
     refresh: USE_BACKEND ? feedRefresh : noopRefresh,
   };
+}
+
+/** Whether the backend has this phone's push token; `failed` means alerts cannot arrive. */
+export function useRegistrationState(): RegistrationState {
+  return useSyncExternalStore(subscribeToRegistration, getRegistrationState);
 }
 
 // --- Push registration --------------------------------------------------------

@@ -15,8 +15,26 @@ import { BACKEND_BASE_URL, BACKEND_TIMEOUT_MS } from './config';
 
 export type FeedStatus = 'idle' | 'loading' | 'ready' | 'error';
 
+/**
+ * Why the feed is not simply "healthy with rows", as three separate classes
+ * (UX-DR2) so the release status line can tell them apart:
+ * - `unreachable`: network error, timeout, any other HTTP error or unreadable body
+ * - `unauthorized`: HTTP 401/403 or no API key
+ * - `notConfigured`: no (valid https) backend address in this build
+ * - `unreadable`: a 200 whose rows could not be read (dropped > 0, none usable)
+ * - `empty`: a good 200 with zero debits (status stays `ready`)
+ */
+export type FeedProblem =
+  | 'unreachable'
+  | 'unauthorized'
+  | 'empty'
+  | 'unreadable'
+  | 'notConfigured';
+
 export type FeedState = {
   status: FeedStatus;
+  /** Set with `error` (unreachable/unauthorized) or with an empty `ready`. */
+  problem?: FeedProblem;
   /** Human-readable and meant for the on-device badge, not for parsing. */
   error?: string;
   /** How many rows the backend sent that *we* could not render — see `toDebit`. */
@@ -125,11 +143,12 @@ export function refresh(): Promise<void> {
 }
 
 async function load(): Promise<void> {
-  if (!hasApiKey()) {
+  if (!hasApiKey() || BACKEND_BASE_URL === '') {
     // Loud, not an empty list (UX-DR2): no request is sent, and the badge shows this.
     setState({
       status: 'error',
-      error: 'API key not configured',
+      problem: BACKEND_BASE_URL === '' ? 'notConfigured' : 'unauthorized',
+      error: BACKEND_BASE_URL === '' ? 'Backend address not configured' : 'API key not configured',
       dropped: state.dropped,
       skipped: state.skipped,
     });
@@ -145,19 +164,27 @@ async function load(): Promise<void> {
       headers: backendHeaders({ Accept: 'application/json' }),
     });
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
+      throw new HttpError(response.status, `HTTP ${response.status} ${response.statusText}`.trim());
     }
     const body: unknown = await response.json();
     const { nextPayees, nextDebits, dropped, skipped } = parseFeed(body);
 
     payees = nextPayees.length > 0 ? nextPayees : NO_PAYEES;
     debits = nextDebits.length > 0 ? nextDebits : NO_DEBITS;
-    setState({ status: 'ready', dropped, skipped });
+    setState({
+      status: 'ready',
+      // Zero usable rows is "empty" only when the backend sent none; rows that
+      // all failed parsing are a contract mismatch, not a calm account.
+      problem: debits.length > 0 ? undefined : dropped > 0 ? 'unreadable' : 'empty',
+      dropped,
+      skipped,
+    });
   } catch (error) {
     // The store keeps whatever it last held: a transient failure should not
     // blank a list the user is reading. The badge is what says it is stale.
     setState({
       status: 'error',
+      problem: classifyFailure(error),
       error: describeError(error),
       dropped: state.dropped,
       skipped: state.skipped,
@@ -170,6 +197,23 @@ async function load(): Promise<void> {
 function setState(next: FeedState): void {
   state = next;
   notify();
+}
+
+/** An HTTP answer that was not 2xx; carries the status so it can be classified. */
+class HttpError extends Error {
+  constructor(
+    readonly httpStatus: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'HttpError';
+  }
+}
+
+function classifyFailure(error: unknown): FeedProblem {
+  return error instanceof HttpError && (error.httpStatus === 401 || error.httpStatus === 403)
+    ? 'unauthorized'
+    : 'unreachable';
 }
 
 function describeError(error: unknown): string {

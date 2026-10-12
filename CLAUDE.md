@@ -4,6 +4,15 @@
 
 ## Status
 
+**2026-10-12 — Story 2.8 done: the release app is on the phone and talks to the cloud (not committed when
+written; nothing pushed).** Signed release APK (`cd app/android; .\gradlew.bat app:assembleRelease
+-PreactNativeArchitectures=arm64-v8a`); the key is outside the repo (`C:\Users\Nutzer\.greedy-nose\release.jks`, the
+owner backs it up); `app/android/keystore.properties` and `app/src/data/backend.local.ts` are untracked. Neon now has
+1 device token and the first rule. Why it was needed: the failure mail of 2026-10-10 (`NoToken`) — 5 pushes were lost
+because 2.7 ran before 2.8 (the retry window ended; bead for a catch-up). Review found two silent paths, both fixed
+(a failed token registration and an unreadable answer now show on the status line). Next: 2.11 (a real charge gives a
+push), read the 12:00 UTC tick logs, `gn-7n2` (Entra security defaults), or the code stories 3.1, 3.4, 4.1.
+
 **2026-10-09 (afternoon) — Story 2.7 done: real N26 is connected through the cloud (not yet committed when written;
 nothing pushed).** Azure runs the 90-day code on the Production application (key in Key Vault, redirect
 `https://func-greedy-nose-611f0.azurewebsites.net/callback`). Consent approved in the browser; the first sync ran a

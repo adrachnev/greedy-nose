@@ -32,6 +32,15 @@ app/android/app/google-services.json
 # committed apiKey.local.example.ts is the template.
 app/src/data/apiKey.local.ts
 
+# The cloud address for the release build (Story 2.8) — not a secret, but build configuration
+# kept out of tracked source. The committed backend.local.example.ts is the template.
+app/src/data/backend.local.ts
+
+# Release signing (Story 2.8): the keystore and the file with its passwords. Losing the .jks means
+# no updates over the installed app, so back it up outside the repo.
+*.jks
+keystore.properties
+
 # Firebase Admin SDK service account key (TRACER-02-NOTIFICATIONS.md, step 0) — grants
 # server-side send access to the whole Firebase project. Same class as the Enable Banking .pem:
 # the entire credential, no token endpoint, stays server-side forever.

@@ -72,6 +72,14 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+// Release signing (Story 2.8): read from the untracked android/keystore.properties
+// (storeFile, storePassword, keyAlias, keyPassword). Never falls back to the debug keystore.
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -92,17 +100,41 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            // Only wired up when all four keys exist; the whenReady check below names a missing one.
+            if (["storeFile", "storePassword", "keyAlias", "keyPassword"].every { keystoreProperties[it]?.trim() }) {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+        }
+    }
+}
+
+// A release build without keystore.properties must fail loudly, not ship a debug-signed APK.
+gradle.taskGraph.whenReady { graph ->
+    def releaseBuild = graph.allTasks.any { it.project == project && it.name.toLowerCase().contains("release") }
+    if (releaseBuild) {
+        if (!keystorePropertiesFile.exists()) {
+            throw new GradleException("Release signing is not configured: create app/android/keystore.properties " +
+                "(storeFile, storePassword, keyAlias, keyPassword). The debug keystore is never used for release.")
+        }
+        ["storeFile", "storePassword", "keyAlias", "keyPassword"].each { key ->
+            if (!keystoreProperties[key]?.trim()) {
+                throw new GradleException("keystore.properties is missing a value for '" + key + "'. " +
+                    "Required: storeFile, storePassword, keyAlias, keyPassword.")
+            }
         }
     }
 }

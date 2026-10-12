@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DataSourceBadge from '../components/DataSourceBadge';
+import ReleaseStatusLine from '../components/ReleaseStatusLine';
 import SearchField from '../components/SearchField';
 import { useDebits, usePayees, useRuleByPayeeId } from '../data/hooks';
 import { classifyDebit, classifyPayee } from '../domain/classification';
@@ -238,6 +239,7 @@ export default function DebitListScreen({ navigation }: Props) {
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
       <DataSourceBadge />
+      <ReleaseStatusLine theme={theme} />
       <View style={styles.navBar}>
         <Text style={[styles.navTitle, { color: theme.text }]}>Debits</Text>
       </View>

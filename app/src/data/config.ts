@@ -19,17 +19,42 @@
 export const USE_BACKEND = true;
 
 /**
- * The tracer-bullet backend, run locally with
- * `dotnet run --project backend/GreedyNose.Api/GreedyNose.Api.csproj --launch-profile http`.
+ * Picks the backend address. Pure, so the rule is testable without a build:
  *
- * `localhost` is correct on a physical Android device **because of**
- * `adb reverse tcp:5199 tcp:5199`, which forwards the device's port 5199 to
- * the laptop's. Without that command the device has no route to the backend at
- * all — and on a network with AP client isolation (public/airport WiFi) the
- * laptop's LAN address would not work either, which is exactly why the tunnel
- * is the way in rather than a hardcoded IP that has to be re-edited per WiFi.
+ * - dev: the local backend. `localhost` is correct on a physical Android device
+ *   **because of** `adb reverse tcp:5199 tcp:5199`, which forwards the device's
+ *   port 5199 to the laptop's (a hardcoded LAN IP breaks on networks with AP
+ *   client isolation).
+ * - release: the https address from the untracked `backend.local.ts`. Anything
+ *   else (no file, empty, `http://`, not a URL) yields `''`, which every caller
+ *   reads as "not configured" and sends no request. https-only is deliberate:
+ *   the release manifest forbids cleartext anyway, and a silent downgrade to
+ *   http would carry the API key in the open.
  */
-export const BACKEND_BASE_URL = 'http://localhost:5199';
+export function resolveBackendBaseUrl(isDev: boolean, localUrl: unknown): string {
+  if (isDev) {
+    return 'http://localhost:5199';
+  }
+  if (typeof localUrl !== 'string') {
+    return '';
+  }
+  const url = localUrl.trim().replace(/\/+$/, '');
+  return /^https:\/\/[^/\s]+/i.test(url) ? url : '';
+}
+
+// A guarded require, same pattern and reason as backendAuth.ts: a fresh
+// checkout has no backend.local.ts, and that must mean "not configured", not a
+// bundling failure (metro.config.js allows optional dependencies).
+function readLocalUrl(): unknown {
+  try {
+    return (require('./backend.local') as { BACKEND_URL?: unknown }).BACKEND_URL;
+  } catch {
+    return undefined;
+  }
+}
+
+/** `''` means "not configured": callers must not send a request. */
+export const BACKEND_BASE_URL = resolveBackendBaseUrl(__DEV__, readLocalUrl());
 
 /**
  * Cap on a single feed request. `fetch` on Android otherwise waits out the
