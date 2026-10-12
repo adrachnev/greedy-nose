@@ -182,7 +182,14 @@ A redeploy happens only when a live story needs a code fix.
 **Also before go-live:** `gn-7n2` (switch Entra security defaults back on) and the lesson of Story 2.8 — the phone's
 device token must be in the cloud before live data flows.
 
-**Migrations collected so far (apply to Neon at Deploy 1, in this order):**
+**Deploy 1 — done 2026-10-12 (about 13:45 UTC).** Both migrations below were applied to Neon first (counts unchanged: 108
+debits, 57 payees, 1 sync state, 1 consent), the old build kept answering (200 / 401) in between, then
+`bash tools/azure-deploy.sh` put the new build in. Checked afterwards on the cloud: `/status` without key 401, with key 200
+(N26 `connected`, valid until 2027-01-07, no attempt recorded yet), `/health` `ok` / `connected`, `/debits` 200. **Still to
+read:** the first tick of the new build (next schedule 18:00 UTC) in Application Insights — the first attempt must record
+`LastAttemptAt` for N26, `lastError` must stay null, and no push may go out (Steady mode, no new debit means no push).
+
+**Migrations (applied to Neon at Deploy 1, in this order):**
 1. `20261012114551_AddConsentPollState` (Story 3.2) — four nullable columns on `BankConsents` (`LastAttemptAt`,
    `LastSuccessAt`, `LastError`, `PollIntervalMinutes`); applied to the dev DB only.
 2. `20261012121857_AddConsentExpiryNotified` (Story 4.1) — nullable `BankConsents.ExpiryNotifiedSessionHash`, carries over

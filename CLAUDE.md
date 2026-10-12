@@ -4,6 +4,13 @@
 
 ## Status
 
+**2026-10-12 (evening) — Deploy 1 done: the new build (Stories 3.1–4.3) runs in Azure.** Neon got `AddConsentPollState`
+and `AddConsentExpiryNotified` first (no data changed), then `bash tools/azure-deploy.sh`. Cloud checks passed: `/status` 401
+without key and 200 with key (N26 `connected`), `/health` ok, `/debits` 200. **Next:** read the first tick of the new build
+(18:00 UTC) — expect `LastAttemptAt` set for N26, no error, no push — with `bash tools/status.sh https://func-greedy-nose-611f0.azurewebsites.net`
+and Application Insights. Then the live stories 2.11, 3.5, 3.6, 3.7, 3.8 (with the owner), the bead `gn-djm` (drop the
+old column) and `gn-7n2` (Entra security defaults) before go-live.
+
 **2026-10-12 (autorun finished, 4 of 4) — Story 4.2 done locally; the local batch is complete (3.1, 3.2, 3.3, 3.4, 4.1, 4.3,
 4.2 are committed, nothing deployed, nothing pushed).** `GET /status` (`bash tools/status.sh`) shows per bank the
 state (connected, expired, dead, first sync pending), valid-until, last success/attempt, a sanitised last error and
