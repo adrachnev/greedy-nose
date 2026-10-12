@@ -4,6 +4,15 @@
 
 ## Status
 
+**2026-10-12 (autorun finished, 4 of 4) — Story 4.2 done locally; the local batch is complete (3.1, 3.2, 3.3, 3.4, 4.1, 4.3,
+4.2 are committed, nothing deployed, nothing pushed).** `GET /status` (`bash tools/status.sh`) shows per bank the
+state (connected, expired, dead, first sync pending), valid-until, last success/attempt, a sanitised last error and
+the number of debits waiting for a push; `GET /health` is liveness plus the worst real state. 745 backend tests, 257
+jest tests. **Next: Deploy 1** (see `TRACER-03-GO-LIVE.md` "Delivery plan"): migrations on Neon first
+(`AddConsentPollState`, `AddConsentExpiryNotified`), then `bash tools/azure-deploy.sh`; afterwards check `/status`,
+`/debits`, the next tick and that N26 stays silent. Then the live stories 2.11, 3.5, 3.6, 3.7, 3.8. Open beads from this
+batch: `gn-bku`, `gn-7ja`, `gn-ftd`, `gn-6bv`, `gn-djm`, `gn-deg`, `gn-0pr`, `gn-922`.
+
 **2026-10-12 (autorun, 3 of 4) — Story 4.3 done locally: a reconnect closes the old session (committed, not
 deployed; no migration).** `DELETE /sessions/{old}` after the new consent is stored (best effort, 5 s, no session id in
 logs); a dead and announced session is skipped before any fetch or status call; a bank counts as ended only for the terminal

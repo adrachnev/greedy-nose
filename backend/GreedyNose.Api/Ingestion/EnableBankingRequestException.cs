@@ -21,6 +21,12 @@ public sealed class EnableBankingRequestException(int statusCode, string? errorC
 
     public string? ErrorCode { get; } = errorCode;
 
+    /// <summary>
+    /// <see cref="ErrorCode"/> as it may be stored and published (lastError, /status): only a short code of
+    /// letters, digits, underscore and hyphen; anything else becomes "Unknown". Null stays null.
+    /// </summary>
+    public string? SafeErrorCode => errorCode is null ? null : System.Text.RegularExpressions.Regex.IsMatch(errorCode, @"^[A-Za-z0-9_-]{1,64}\z") ? errorCode : "Unknown";
+
     public static EnableBankingRequestException FromResponse(EnableBankingResponse response) =>
         new(
             response.StatusCode,

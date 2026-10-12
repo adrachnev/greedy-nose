@@ -187,38 +187,6 @@ public class FunctionsHttpTests
     }
 
     [Fact]
-    public async Task Health_answers_ok_with_the_consent_state()
-    {
-        var consent = new ConsentStore(new FakeConsentPersistence(), TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
-        var function = new HealthFunction(consent, new EnableBankingOptions(), Clock);
-        var context = NewContext();
-
-        var (status, body, _) = await RunAsync(function.Run(context.Request), context);
-
-        Assert.Equal(200, status);
-        Assert.Contains("\"status\":\"ok\"", body);
-        Assert.Contains("\"state\":\"none\"", body);
-    }
-
-    [Fact]
-    public async Task Health_lists_every_bank_without_a_session_id()
-    {
-        var consent = new ConsentStore(new FakeConsentPersistence(), TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
-        var now = Clock.GetUtcNow();
-        await consent.CompleteAsync(SeedData.UserId, "secret-session-1", "N26", [new ConnectedAccount("u1", "DE11", null, "EUR", null)], now, now.AddDays(30));
-        await consent.CompleteAsync(SeedData.UserId, "secret-session-2", "DKB", [new ConnectedAccount("u2", "DE22", null, "EUR", null)], now, now.AddDays(30));
-        var function = new HealthFunction(consent, new EnableBankingOptions(), Clock);
-        var context = NewContext();
-
-        var (status, body, _) = await RunAsync(function.Run(context.Request), context);
-
-        Assert.Equal(200, status);
-        Assert.Contains("\"aspsp\":\"N26\"", body);
-        Assert.Contains("\"aspsp\":\"DKB\"", body);
-        Assert.DoesNotContain("secret-session", body);
-    }
-
-    [Fact]
     public async Task An_unknown_route_answers_404()
     {
         var context = NewContext();

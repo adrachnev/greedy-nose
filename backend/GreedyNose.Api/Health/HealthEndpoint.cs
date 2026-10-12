@@ -1,34 +1,41 @@
+using GreedyNose.Api.Auth;
+using GreedyNose.Api.Data;
 using GreedyNose.Api.EnableBanking;
+using GreedyNose.Api.Status;
 
 namespace GreedyNose.Api.Health;
 
 /// <summary>
-/// <c>GET /health</c>: what the app and the owner look at to see whether the backend is up and which
-/// consent it holds. Behind the API key like everything else. Reads memory only (no database), so a
-/// database that is down does not stop it from answering.
+/// <c>GET /health</c>: is the backend up, and what is the worst real state of the user's banks. Behind the API
+/// key like everything else. Details per bank live in <c>GET /status</c>; this answer carries no account,
+/// application or URL data. Like <c>/status</c> it restores the consents from the database first (a cold host
+/// would otherwise say "none"). The database read has a short budget: if it fails or is too slow the backend is
+/// still up, so the answer is <c>status: ok</c> with <c>state: unknown</c> (exception type logged, no message).
 /// </summary>
 public static class HealthEndpoint
 {
-    public static IResult Handle(ConsentStore consent, EnableBankingOptions options, TimeProvider clock) =>
-        Results.Ok(new
+    internal static readonly TimeSpan DatabaseBudget = TimeSpan.FromSeconds(3);
+
+    public static async Task<IResult> HandleAsync(
+        ICurrentUser user, ConsentStore consent, GreedyNoseDbContext db, TimeProvider clock,
+        ILogger<ConsentStore> logger, CancellationToken ct)
+    {
+        string state;
+        try
         {
-            status = "ok",
-            applicationId = options.ApplicationId,
-            baseUrl = options.BaseUrl,
-            connected = consent.SessionId is not null,
-            // active / expired / none, judged now (R19) — `connected` only says a session id is remembered.
-            state = consent.GetState(clock.GetUtcNow()).Status.ToString().ToLowerInvariant(),
-            aspsp = consent.AspspName,
-            account = consent.PrimaryAccount,
-            connectedAt = consent.ConnectedAt,
-            expiresAt = consent.ExpiresAt,
-            // Every bank's consent (Story 3.2). The fields above describe the newest one. No session id, no account.
-            banks = consent.GetStates(clock.GetUtcNow()).Select(s => new
-            {
-                aspsp = s.AspspName,
-                state = s.Status.ToString().ToLowerInvariant(),
-                connectedAt = s.ConnectedAt,
-                validUntil = s.ValidUntil,
-            }).ToList(),
-        });
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            budget.CancelAfter(DatabaseBudget);
+            var now = clock.GetUtcNow();
+            await consent.RestoreAsync(now, budget.Token);
+            var banks = await ConnectionStatusReader.ReadAsync(consent, db, user.UserId, now, budget.Token);
+            state = ConnectionStates.Worst(banks.Select(b => b.State));
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning("The health check could not read the connection state ({ExceptionType}).", ex.GetType().Name);
+            state = "unknown";
+        }
+
+        return Results.Ok(new { status = "ok", state });
+    }
 }

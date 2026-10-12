@@ -206,7 +206,7 @@ public sealed class IngestionRunner(
     private static string DescribeError(Exception exception)
     {
         var text = exception is EnableBankingRequestException request
-            ? $"{request.GetType().Name} {request.StatusCode}{(request.ErrorCode is null ? "" : $" {request.ErrorCode}")}"
+            ? $"{request.GetType().Name} {request.StatusCode}{(request.SafeErrorCode is null ? "" : $" {request.SafeErrorCode}")}"
             : exception is OperationCanceledException ? "Timeout" : exception.GetType().Name;
         return text.Length > BankConsent.LastErrorMaxLength ? text[..BankConsent.LastErrorMaxLength] : text;
     }

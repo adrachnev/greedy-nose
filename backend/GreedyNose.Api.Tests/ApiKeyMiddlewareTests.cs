@@ -95,6 +95,7 @@ public class ApiKeyMiddlewareTests
     [InlineData("/connect/health")]
     [InlineData("/callback/../debits")]
     [InlineData("/health")]
+    [InlineData("/status")]
     [InlineData("/raw")]
     [InlineData("/aspsps")]
     [InlineData("/does-not-exist")]
@@ -106,6 +107,29 @@ public class ApiKeyMiddlewareTests
 
         Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
         Assert.False(h.NextCalled);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Bearer wrong-key-wrong-key-wrong-key-wrong-key")]
+    public async Task Status_without_or_with_a_wrong_key_gets_401(string? header)
+    {
+        var h = new Harness();
+
+        var context = await h.SendAsync("/status", header);
+
+        Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
+        Assert.False(h.NextCalled);
+    }
+
+    [Fact]
+    public async Task Status_with_the_right_key_calls_next()
+    {
+        var h = new Harness();
+
+        await h.SendAsync("/status", "Bearer " + Key);
+
+        Assert.True(h.NextCalled);
     }
 
     [Fact]

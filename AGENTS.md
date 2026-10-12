@@ -103,6 +103,13 @@ the single source of truth for product behavior; where anything else disagrees, 
   [country] [base-url]` — it asks `POST /connect-links` (API key) for a one-time link and opens it in
   the browser. The link works once and expires after 30 minutes; the callback state is single use too;
   a failed or interrupted attempt needs a new link. The callback page shows no session id or IBAN.
+  Since Story 3.3 the bank name and country are checked against Enable Banking's own list (an unknown or
+  ambiguous bank is refused with a clear message and nothing is created) and `valid_until` follows the bank's
+  own maximum.
+- Connection status (Story 4.2): `bash tools/status.sh [base-url]` prints `GET /status` (API key, read with
+  `curl`): per bank the state (connected, expired, dead, first sync pending), valid-until, last success, last
+  attempt, a short last error, and the number of debits waiting for a push — no session id, IBAN or amount.
+  `GET /health` is only liveness plus the worst real state.
 - App backend key (Story 1.2): in backend mode the app sends `Authorization: Bearer <key>`. Copy
   `app/src/data/apiKey.local.example.ts` to `apiKey.local.ts` (gitignored) and put the key in it;
   without it the app sends no backend request and the dev badge says "API key not configured".
