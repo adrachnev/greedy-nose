@@ -77,11 +77,11 @@ export default function ConnectBankScreen({
 
         <BankRow
           theme={theme}
-          logoText="N26"
-          logoBg="#00e5b0"
-          logoColor="#06251f"
-          name="N26"
-          subtitle="Germany · Personal account"
+          logoText="Bank"
+          logoBg={theme.neutralBg}
+          logoColor={theme.textMuted}
+          name="Your bank"
+          subtitle="Personal account"
           onPress={onContinue}
         />
 
@@ -101,12 +101,12 @@ export default function ConnectBankScreen({
           style={[styles.btnPrimary, { backgroundColor: theme.accent }]}
           onPress={onContinue}
         >
-          <Text style={styles.btnPrimaryText}>Continue with N26</Text>
+          <Text style={styles.btnPrimaryText}>Continue with your bank</Text>
         </Pressable>
         <Text
           style={[styles.hint, { color: theme.textMuted, textAlign: 'center' }]}
         >
-          You'll be redirected to N26 to log in and grant consent. We never
+          You'll be redirected to your bank to log in and grant consent. We never
           see your bank credentials.
         </Text>
       </View>

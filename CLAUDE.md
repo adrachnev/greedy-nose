@@ -4,6 +4,11 @@
 
 ## Status
 
+**2026-10-12 (autorun, 1 of 4) — Story 3.4 done locally: the app never names a bank (committed, not deployed).**
+`ConnectBankScreen` and eight mocks use "your bank" / "Personal account"; no fixed 90-day claim; a jest test pins the
+copy (257 tests). One review round, no MUST FIX. Autorun order, one at a time, plans self-approved: 3.4 (done),
+4.1, 4.3, 4.2.
+
 **2026-10-12 (late night) — Story 3.3 done locally: connecting a bank uses that bank's own limits (committed, not
 deployed, nothing pushed; no migration).** `AspspResolver` reads `GET /aspsps?country=XX` fresh at `/connect-links`
 (refuses an unknown or ambiguous bank with a clear message, creates nothing) and again at `/connect`;
