@@ -52,13 +52,15 @@ public sealed record ConsentState(
     ConsentStatus Status,
     string? SessionId,
     ConnectedAccount? Account,
-    DateTimeOffset? ValidUntil)
+    DateTimeOffset? ValidUntil,
+    Guid UserId = default)
 {
     public static readonly ConsentState None = new(ConsentStatus.None, null, null, null);
 }
 
 /// <summary>What survives a restart. The session id is the whole point; the rest is context.</summary>
 public sealed record ConsentSnapshot(
+    Guid UserId,
     string SessionId,
     string? AspspName,
     IReadOnlyList<ConnectedAccount> Accounts,
@@ -84,6 +86,8 @@ public sealed class ConsentStore(IConsentPersistence persistence, TimeSpan conse
     // Serializes completes, so the order in the database and the order in memory cannot diverge.
     private readonly SemaphoreSlim _completeGate = new(1, 1);
 
+    /// <summary>The user the consent belongs to (Story 3.1); the worker takes it from here. Empty until a consent exists.</summary>
+    public Guid UserId { get; private set; }
     public string? SessionId { get; private set; }
     public string? AspspName { get; private set; }
     public IReadOnlyList<ConnectedAccount> Accounts { get; private set; } = [];
@@ -126,7 +130,8 @@ public sealed class ConsentStore(IConsentPersistence persistence, TimeSpan conse
                 validUntil is { } end && now >= end ? ConsentStatus.Expired : ConsentStatus.Active,
                 sessionId,
                 account,
-                validUntil);
+                validUntil,
+                UserId);
         }
     }
 
@@ -141,6 +146,7 @@ public sealed class ConsentStore(IConsentPersistence persistence, TimeSpan conse
     /// previous state untouched.
     /// </summary>
     public async Task CompleteAsync(
+        Guid userId,
         string sessionId,
         string aspspName,
         IReadOnlyList<ConnectedAccount> accounts,
@@ -151,10 +157,11 @@ public sealed class ConsentStore(IConsentPersistence persistence, TimeSpan conse
         await _completeGate.WaitAsync(ct);
         try
         {
-            await persistence.SaveAsync(new ConsentSnapshot(sessionId, aspspName, accounts, now, expiresAt), ct);
+            await persistence.SaveAsync(new ConsentSnapshot(userId, sessionId, aspspName, accounts, now, expiresAt), ct);
 
             lock (_gate)
             {
+                UserId = userId;
                 SessionId = sessionId;
                 AspspName = aspspName;
                 Accounts = accounts;
@@ -194,6 +201,7 @@ public sealed class ConsentStore(IConsentPersistence persistence, TimeSpan conse
 
         lock (_gate)
         {
+            UserId = snapshot.UserId;
             SessionId = snapshot.SessionId;
             AspspName = snapshot.AspspName;
             Accounts = snapshot.Accounts;

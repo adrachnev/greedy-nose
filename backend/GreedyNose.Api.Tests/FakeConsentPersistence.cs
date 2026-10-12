@@ -2,10 +2,10 @@ using GreedyNose.Api.EnableBanking;
 
 namespace GreedyNose.Api.Tests;
 
-/// <summary>An in-memory <see cref="IConsentPersistence"/>: one snapshot per bank, like the real table. Can be told to fail.</summary>
+/// <summary>An in-memory <see cref="IConsentPersistence"/>: one snapshot per (user, bank), like the real table. Can be told to fail.</summary>
 internal sealed class FakeConsentPersistence : IConsentPersistence
 {
-    private readonly Dictionary<string, ConsentSnapshot> _rows = [];
+    private readonly Dictionary<(Guid, string), ConsentSnapshot> _rows = [];
 
     public Exception? SaveFails { get; set; }
 
@@ -21,7 +21,7 @@ internal sealed class FakeConsentPersistence : IConsentPersistence
             throw SaveFails;
         }
 
-        _rows[snapshot.AspspName ?? ""] = snapshot;
+        _rows[(snapshot.UserId, snapshot.AspspName ?? "")] = snapshot;
         return Task.CompletedTask;
     }
 

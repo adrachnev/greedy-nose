@@ -4,6 +4,20 @@
 
 ## Status
 
+**2026-10-12 (evening) — Story 3.1 done locally: the worker takes the user from the consent (committed, not
+deployed, nothing pushed).** `ConsentSnapshot`/`ConsentStore.CompleteAsync` carry the user; `ConsentPersistence` loads
+all users' rows; `IngestionRunner` and `PushFailureWatch` have no `SeedData.UserId` left. 617 backend tests (9 new, a
+second non-seeded user end to end), one review pass, no MUST/SHOULD FIX; no migration. Live on the dev DB with a fresh
+Sandbox consent: restore with the user, 1 page / 4 transactions, no owed pushes. Two deliberate deviations: owed pushes
+and the failure-mail check read all users. New beads `gn-bku`, `gn-7ja` (test gap, per-user try/catch). Next in the
+local batch: 3.2 (the worker walks every bank).
+
+**2026-10-12 (later) — delivery plan decided: the code-only stories are built locally, then one deploy.** Local
+batch in order: 3.1, 3.2, 3.3, 3.4, 4.1, 4.3, 4.2 (one commit each, no deploy in between; the cloud keeps the old
+working N26 build). Then deploy 1 (migrations on Neon first, then code), then the live stories one by one: 2.11, 3.5,
+3.6, 3.7, 3.8. Details and the migration list: `TRACER-03-GO-LIVE.md`, "Delivery plan". Story 3.1 is planned (plan
+approved, not started).
+
 **2026-10-12 — Story 2.8 done: the release app is on the phone and talks to the cloud (not committed when
 written; nothing pushed).** Signed release APK (`cd app/android; .\gradlew.bat app:assembleRelease
 -PreactNativeArchitectures=arm64-v8a`); the key is outside the repo (`C:\Users\Nutzer\.greedy-nose\release.jks`, the

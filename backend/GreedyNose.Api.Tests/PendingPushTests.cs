@@ -81,7 +81,7 @@ public class PendingPushTests
         var store = new ConsentStore(new FakeConsentPersistence(), TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
         if (connected)
         {
-            store.CompleteAsync("session-1", "Test Bank", [Account], clock.GetUtcNow(), expiresAt).GetAwaiter().GetResult();
+            store.CompleteAsync(SeedData.UserId, "session-1", "Test Bank", [Account], clock.GetUtcNow(), expiresAt).GetAwaiter().GetResult();
         }
 
         return store;

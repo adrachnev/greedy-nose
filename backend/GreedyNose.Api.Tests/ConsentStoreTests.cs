@@ -1,3 +1,4 @@
+using GreedyNose.Api.Data;
 using GreedyNose.Api.EnableBanking;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -29,13 +30,13 @@ public class ConsentStoreTests
         var store = NewStore();
         var second = new ConnectedAccount("uid-2", "DE22", null, "EUR", null);
 
-        await store.CompleteAsync("session-1", "Test Bank", [Account], T0, null);
+        await store.CompleteAsync(SeedData.UserId, "session-1", "Test Bank", [Account], T0, null);
         var first = store.GetState(T0);
         Assert.Equal(ConsentStatus.Active, first.Status);
         Assert.Equal("session-1", first.SessionId);
         Assert.Equal(Account, first.Account);
 
-        await store.CompleteAsync("session-2", "Test Bank", [second], T0, null);
+        await store.CompleteAsync(SeedData.UserId, "session-2", "Test Bank", [second], T0, null);
         var next = store.GetState(T0);
         Assert.Equal("session-2", next.SessionId);
         Assert.Equal(second, next.Account);
@@ -45,7 +46,7 @@ public class ConsentStoreTests
     public async Task GetState_is_None_when_the_consent_has_no_accounts()
     {
         var store = NewStore();
-        await store.CompleteAsync("session-1", "Test Bank", [], T0, null);
+        await store.CompleteAsync(SeedData.UserId, "session-1", "Test Bank", [], T0, null);
 
         Assert.Equal(ConsentStatus.None, store.GetState(T0).Status);
     }
@@ -55,7 +56,7 @@ public class ConsentStoreTests
     {
         var store = NewStore();
         var expiresAt = T0.AddDays(30);
-        await store.CompleteAsync("session-1", "Test Bank", [Account], T0, expiresAt);
+        await store.CompleteAsync(SeedData.UserId, "session-1", "Test Bank", [Account], T0, expiresAt);
 
         Assert.Equal(ConsentStatus.Active, store.GetState(expiresAt.AddTicks(-1)).Status);
 
@@ -70,7 +71,7 @@ public class ConsentStoreTests
     public async Task ExpiresAt_wins_over_the_requested_validity_when_the_bank_granted_less()
     {
         var store = NewStore();
-        await store.CompleteAsync("session-1", "Test Bank", [Account], T0, T0.AddDays(10));
+        await store.CompleteAsync(SeedData.UserId, "session-1", "Test Bank", [Account], T0, T0.AddDays(10));
 
         Assert.Equal(ConsentStatus.Expired, store.GetState(T0.AddDays(11)).Status); // well inside the requested 90 days
     }
@@ -79,7 +80,7 @@ public class ConsentStoreTests
     public async Task Without_ExpiresAt_the_requested_validity_from_ConnectedAt_is_the_fallback()
     {
         var store = NewStore();
-        await store.CompleteAsync("session-1", "Test Bank", [Account], T0, null);
+        await store.CompleteAsync(SeedData.UserId, "session-1", "Test Bank", [Account], T0, null);
 
         Assert.Equal(ConsentStatus.Active, store.GetState(T0 + Validity - TimeSpan.FromTicks(1)).Status);
         Assert.Equal(ConsentStatus.Expired, store.GetState(T0 + Validity).Status);
@@ -89,7 +90,7 @@ public class ConsentStoreTests
     public async Task Expiry_is_judged_at_call_time_so_a_long_running_process_notices()
     {
         var store = NewStore();
-        await store.CompleteAsync("session-1", "Test Bank", [Account], T0, T0.AddDays(1));
+        await store.CompleteAsync(SeedData.UserId, "session-1", "Test Bank", [Account], T0, T0.AddDays(1));
 
         Assert.Equal(ConsentStatus.Active, store.GetState(T0.AddHours(1)).Status);
         Assert.Equal(ConsentStatus.Expired, store.GetState(T0.AddDays(2)).Status); // same store, clock moved on
@@ -99,7 +100,7 @@ public class ConsentStoreTests
     public async Task Restore_keeps_an_expired_consent_and_loads_it_as_Expired()
     {
         var persistence = new FakeConsentPersistence();
-        await NewStore(persistence).CompleteAsync("session-1", "Test Bank", [Account], T0, T0.AddDays(1));
+        await NewStore(persistence).CompleteAsync(SeedData.UserId, "session-1", "Test Bank", [Account], T0, T0.AddDays(1));
 
         var restored = NewStore(persistence);
         await restored.RestoreAsync(T0.AddDays(5));
@@ -114,7 +115,7 @@ public class ConsentStoreTests
     public async Task Restore_of_a_live_consent_loads_it_as_Active()
     {
         var persistence = new FakeConsentPersistence();
-        await NewStore(persistence).CompleteAsync("session-1", "Test Bank", [Account], T0, T0.AddDays(30));
+        await NewStore(persistence).CompleteAsync(SeedData.UserId, "session-1", "Test Bank", [Account], T0, T0.AddDays(30));
 
         var restored = NewStore(persistence);
         await restored.RestoreAsync(T0.AddDays(5));
@@ -137,9 +138,9 @@ public class ConsentStoreTests
     {
         var persistence = new FakeConsentPersistence();
         var store = NewStore(persistence);
-        await store.CompleteAsync("session-n26", "N26", [Account], T0, null);
-        await store.CompleteAsync("session-dkb", "DKB", [new ConnectedAccount("uid-2", "DE22", null, "EUR", null)], T0.AddDays(1), null);
-        await store.CompleteAsync("session-ing", "ING", [new ConnectedAccount("uid-3", "DE33", null, "EUR", null)], T0.AddHours(1), null);
+        await store.CompleteAsync(SeedData.UserId, "session-n26", "N26", [Account], T0, null);
+        await store.CompleteAsync(SeedData.UserId, "session-dkb", "DKB", [new ConnectedAccount("uid-2", "DE22", null, "EUR", null)], T0.AddDays(1), null);
+        await store.CompleteAsync(SeedData.UserId, "session-ing", "ING", [new ConnectedAccount("uid-3", "DE33", null, "EUR", null)], T0.AddHours(1), null);
 
         var restored = NewStore(persistence);
         await restored.RestoreAsync(T0.AddDays(2));
@@ -164,12 +165,12 @@ public class ConsentStoreTests
     public async Task Complete_replaces_an_expired_consent_with_an_Active_one()
     {
         var persistence = new FakeConsentPersistence();
-        await NewStore(persistence).CompleteAsync("session-1", "Test Bank", [Account], T0, T0.AddDays(1));
+        await NewStore(persistence).CompleteAsync(SeedData.UserId, "session-1", "Test Bank", [Account], T0, T0.AddDays(1));
         var store = NewStore(persistence);
         await store.RestoreAsync(T0.AddDays(5));
         Assert.Equal(ConsentStatus.Expired, store.GetState(T0.AddDays(5)).Status);
 
-        await store.CompleteAsync("session-2", "Test Bank", [Account], T0.AddDays(5), T0.AddDays(95));
+        await store.CompleteAsync(SeedData.UserId, "session-2", "Test Bank", [Account], T0.AddDays(5), T0.AddDays(95));
 
         var state = store.GetState(T0.AddDays(5));
         Assert.Equal(ConsentStatus.Active, state.Status);
@@ -183,7 +184,7 @@ public class ConsentStoreTests
         var store = NewStore(persistence);
         Assert.Null(store.AspspName);
 
-        await store.CompleteAsync("session-1", "N26", [Account], T0, null);
+        await store.CompleteAsync(SeedData.UserId, "session-1", "N26", [Account], T0, null);
         Assert.Equal("N26", store.AspspName);
 
         var restored = NewStore(persistence);
@@ -196,11 +197,11 @@ public class ConsentStoreTests
     {
         var persistence = new FakeConsentPersistence();
         var store = NewStore(persistence);
-        await store.CompleteAsync("session-1", "N26", [Account], T0, T0.AddDays(30));
+        await store.CompleteAsync(SeedData.UserId, "session-1", "N26", [Account], T0, T0.AddDays(30));
 
         persistence.SaveFails = new InvalidOperationException("db down");
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            store.CompleteAsync("session-2", "N26", [Account], T0.AddDays(1), null));
+            store.CompleteAsync(SeedData.UserId, "session-2", "N26", [Account], T0.AddDays(1), null));
 
         Assert.Equal("session-1", store.SessionId);
         Assert.Equal(T0, store.ConnectedAt);
@@ -213,7 +214,7 @@ public class ConsentStoreTests
         var store = NewStore(new FakeConsentPersistence { SaveFails = new InvalidOperationException("db down") });
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            store.CompleteAsync("session-1", "N26", [Account], T0, null));
+            store.CompleteAsync(SeedData.UserId, "session-1", "N26", [Account], T0, null));
 
         Assert.Null(store.SessionId);
         Assert.Equal(ConsentStatus.None, store.GetState(T0).Status);

@@ -116,7 +116,7 @@ public class PushFailureWatchTests
         }
 
         var consent = new ConsentStore(new FakeConsentPersistence(), TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
-        await consent.CompleteAsync("session-1", "Test Bank", [Account], Start, consentExpiresAt);
+        await consent.CompleteAsync(SeedData.UserId, "session-1", "Test Bank", [Account], Start, consentExpiresAt);
 
         var fetcher = new Fetcher(() => TransactionMapper.Map(new EbTransactionsResponse(transactions, null), AccountKey));
         var sender = new ScriptedSender(respond);

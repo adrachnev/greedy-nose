@@ -30,17 +30,17 @@ public sealed class PushFailureWatch(
 
     /// <param name="success">At least one device took the push.</param>
     /// <param name="outcome">Failing outcome names (comma list); ignored on success.</param>
-    public async Task RecordAttemptAsync(bool success, string outcome)
+    public async Task RecordAttemptAsync(Guid userId, bool success, string outcome)
     {
         try
         {
             using var budget = new CancellationTokenSource(Budget);
             await using var db = await dbContextFactory.CreateDbContextAsync(budget.Token);
             var now = clock.GetUtcNow();
-            var row = await db.PushHealth.SingleOrDefaultAsync(h => h.UserId == SeedData.UserId, budget.Token);
+            var row = await db.PushHealth.SingleOrDefaultAsync(h => h.UserId == userId, budget.Token);
             if (row is null)
             {
-                row = new PushHealth { UserId = SeedData.UserId };
+                row = new PushHealth { UserId = userId };
                 db.PushHealth.Add(row);
             }
 
@@ -93,7 +93,7 @@ public sealed class PushFailureWatch(
         {
             using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
             budget.CancelAfter(Budget);
-            await EvaluateCoreAsync(budget.Token);
+            await EvaluateAllAsync(budget.Token);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -105,10 +105,25 @@ public sealed class PushFailureWatch(
         }
     }
 
-    private async Task EvaluateCoreAsync(CancellationToken ct)
+    /// <summary>Every user that has a counter row (Story 3.1: the user comes from the data, not a constant).</summary>
+    private async Task EvaluateAllAsync(CancellationToken ct)
+    {
+        List<Guid> userIds;
+        await using (var listDb = await dbContextFactory.CreateDbContextAsync(ct))
+        {
+            userIds = await listDb.PushHealth.Select(h => h.UserId).ToListAsync(ct);
+        }
+
+        foreach (var userId in userIds)
+        {
+            await EvaluateCoreAsync(userId, ct);
+        }
+    }
+
+    private async Task EvaluateCoreAsync(Guid userId, CancellationToken ct)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-        var row = await db.PushHealth.SingleOrDefaultAsync(h => h.UserId == SeedData.UserId, ct);
+        var row = await db.PushHealth.SingleOrDefaultAsync(h => h.UserId == userId, ct);
         if (row is null)
         {
             return;
@@ -119,7 +134,7 @@ public sealed class PushFailureWatch(
         if (row.ConsecutiveFailures >= FailureThreshold && row.FailureMailSentAt is null)
         {
             var open = await db.PendingPushes
-                .Where(p => p.UserId == SeedData.UserId && p.EndedAt == null)
+                .Where(p => p.UserId == userId && p.EndedAt == null)
                 .Select(p => new { p.Kind, p.SummaryBadCount, p.CreatedAt })
                 .ToListAsync(ct);
 
@@ -151,7 +166,7 @@ public sealed class PushFailureWatch(
         {
             var since = row.FirstFailureAt ?? now;
             var sent = await db.PendingPushes
-                .Where(p => p.UserId == SeedData.UserId && p.EndReason == PendingPush.EndedSent && p.EndedAt >= since)
+                .Where(p => p.UserId == userId && p.EndReason == PendingPush.EndedSent && p.EndedAt >= since)
                 .Select(p => new { p.Kind, p.SummaryBadCount })
                 .ToListAsync(ct);
             var sentDebits = sent.Sum(p => p.Kind == PendingPushKind.Debit ? 1 : p.SummaryBadCount ?? 0);

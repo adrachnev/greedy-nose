@@ -28,11 +28,6 @@ public sealed class DbConsentPersistence(IDbContextFactory<GreedyNoseDbContext> 
 {
     private static readonly JsonSerializerOptions Json = new();
 
-    // PRAGMATIC: the one more place that reads SeedData.UserId directly instead of ICurrentUser (Story
-    // 1.5's seam) — the singleton ConsentStore has no request scope. Allowed until Epic 3 makes the
-    // consent store per-user/multi-consent; then this takes the user as a parameter.
-    private static Guid UserId => SeedData.UserId;
-
     private const string SessionColumn = "SessionIdCipher";
     private const string PayloadColumn = "PayloadCipher";
 
@@ -49,18 +44,18 @@ public sealed class DbConsentPersistence(IDbContextFactory<GreedyNoseDbContext> 
         }
 
         var aspsp = snapshot.AspspName;
-        var sessionCipher = cipher.Encrypt(Encoding.UTF8.GetBytes(snapshot.SessionId), Aad(UserId, aspsp, SessionColumn));
+        var sessionCipher = cipher.Encrypt(Encoding.UTF8.GetBytes(snapshot.SessionId), Aad(snapshot.UserId, aspsp, SessionColumn));
         var payload = JsonSerializer.SerializeToUtf8Bytes(
             new Payload(snapshot.Accounts, snapshot.ConnectedAt, snapshot.ExpiresAt), Json);
-        var payloadCipher = cipher.Encrypt(payload, Aad(UserId, aspsp, PayloadColumn));
+        var payloadCipher = cipher.Encrypt(payload, Aad(snapshot.UserId, aspsp, PayloadColumn));
 
         await using var db = await factory.CreateDbContextAsync(ct);
-        var row = await db.Set<BankConsent>().FindAsync([UserId, aspsp], ct);
+        var row = await db.Set<BankConsent>().FindAsync([snapshot.UserId, aspsp], ct);
         if (row is null)
         {
             db.Set<BankConsent>().Add(new BankConsent
             {
-                UserId = UserId,
+                UserId = snapshot.UserId,
                 AspspName = aspsp,
                 SessionIdCipher = sessionCipher,
                 PayloadCipher = payloadCipher,
@@ -80,7 +75,7 @@ public sealed class DbConsentPersistence(IDbContextFactory<GreedyNoseDbContext> 
     public async Task<IReadOnlyList<ConsentSnapshot>> LoadAsync(CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        var rows = await db.Set<BankConsent>().AsNoTracking().Where(c => c.UserId == UserId).ToListAsync(ct);
+        var rows = await db.Set<BankConsent>().AsNoTracking().ToListAsync(ct);
 
         var result = new List<ConsentSnapshot>(rows.Count);
         foreach (var row in rows)
@@ -103,7 +98,7 @@ public sealed class DbConsentPersistence(IDbContextFactory<GreedyNoseDbContext> 
                 throw new ConsentDecryptionException("A stored consent payload is not readable.");
             }
 
-            result.Add(new ConsentSnapshot(sessionId, row.AspspName, payload.Accounts, payload.ConnectedAt, payload.ExpiresAt));
+            result.Add(new ConsentSnapshot(row.UserId, sessionId, row.AspspName, payload.Accounts, payload.ConnectedAt, payload.ExpiresAt));
         }
 
         return result;

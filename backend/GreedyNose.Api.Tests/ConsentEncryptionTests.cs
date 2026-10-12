@@ -168,8 +168,8 @@ public class ConsentEncryptionTests
         return (new DbConsentPersistence(factory, new ConsentCipher(key)), factory, key);
     }
 
-    private static ConsentSnapshot Snapshot(string aspsp, string session = SessionId, DateTimeOffset? at = null) =>
-        new(session, aspsp, [new ConnectedAccount("uid-1", Iban, "Main", "EUR", "hash-1")], at ?? T0, (at ?? T0).AddDays(90));
+    private static ConsentSnapshot Snapshot(string aspsp, string session = SessionId, DateTimeOffset? at = null, Guid? userId = null) =>
+        new(userId ?? SeedData.UserId, session, aspsp, [new ConnectedAccount("uid-1", Iban, "Main", "EUR", "hash-1")], at ?? T0, (at ?? T0).AddDays(90));
 
     [Fact]
     public async Task Persistence_roundtrips_a_consent()
@@ -340,7 +340,7 @@ public class ConsentEncryptionTests
     {
         var (persistence, _, _) = NewPersistence();
         var first = new ConsentStore(persistence, TimeSpan.FromDays(90), Microsoft.Extensions.Logging.Abstractions.NullLogger<ConsentStore>.Instance);
-        await first.CompleteAsync(SessionId, "N26", [new ConnectedAccount("uid-1", Iban, null, "EUR", null)], T0, T0.AddDays(10));
+        await first.CompleteAsync(SeedData.UserId, SessionId, "N26", [new ConnectedAccount("uid-1", Iban, null, "EUR", null)], T0, T0.AddDays(10));
 
         var restored = new ConsentStore(persistence, TimeSpan.FromDays(90), Microsoft.Extensions.Logging.Abstractions.NullLogger<ConsentStore>.Instance);
         await restored.RestoreAsync(T0.AddDays(20));
@@ -348,5 +348,65 @@ public class ConsentEncryptionTests
         Assert.Equal(ConsentStatus.Expired, restored.GetState(T0.AddDays(20)).Status);
         Assert.Equal(ConsentStatus.Active, restored.GetState(T0.AddDays(5)).Status);
         Assert.Equal(SessionId, restored.SessionId);
+    }
+
+    // --- Story 3.1: the consent carries its user -------------------------------------------------
+
+    private static readonly Guid OtherUser = Guid.Parse("0b6c1a52-7d3e-4f0a-9c1e-5a2d8e4f6b71");
+
+    [Fact]
+    public async Task Persistence_roundtrips_a_consent_of_a_non_seed_user_and_keeps_users_apart()
+    {
+        var (persistence, factory, _) = NewPersistence();
+        await using (var db = factory.CreateDbContext())
+        {
+            db.Users.Add(new User { Id = OtherUser, CreatedAt = T0 });
+            await db.SaveChangesAsync();
+        }
+
+        await persistence.SaveAsync(Snapshot("N26", "session-seed"));
+        await persistence.SaveAsync(Snapshot("N26", "session-other", userId: OtherUser));
+        var loaded = await persistence.LoadAsync();
+
+        Assert.Equal(2, loaded.Count);
+        Assert.Equal("session-other", Assert.Single(loaded, s => s.UserId == OtherUser).SessionId);
+        Assert.Equal("session-seed", Assert.Single(loaded, s => s.UserId == SeedData.UserId).SessionId);
+    }
+
+    [Fact]
+    public async Task A_row_moved_to_another_user_fails_to_decrypt()
+    {
+        var (persistence, factory, _) = NewPersistence();
+        await persistence.SaveAsync(Snapshot("N26", userId: OtherUser));
+        await using (var db = factory.CreateDbContext())
+        {
+            var row = await db.Set<BankConsent>().SingleAsync();
+            db.Set<BankConsent>().Remove(row);
+            db.Set<BankConsent>().Add(new BankConsent
+            {
+                UserId = SeedData.UserId,
+                AspspName = row.AspspName,
+                SessionIdCipher = row.SessionIdCipher,
+                PayloadCipher = row.PayloadCipher,
+                UpdatedAt = row.UpdatedAt,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await Assert.ThrowsAsync<ConsentDecryptionException>(() => persistence.LoadAsync());
+    }
+
+    [Fact]
+    public async Task The_store_restores_the_user_of_the_consent()
+    {
+        var (persistence, _, _) = NewPersistence();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ConsentStore>.Instance;
+        var first = new ConsentStore(persistence, TimeSpan.FromDays(90), logger);
+        await first.CompleteAsync(OtherUser, SessionId, "N26", [new ConnectedAccount("uid-1", Iban, null, "EUR", null)], T0, null);
+
+        var restored = new ConsentStore(persistence, TimeSpan.FromDays(90), logger);
+        await restored.RestoreAsync(T0);
+
+        Assert.Equal(OtherUser, restored.GetState(T0).UserId);
     }
 }

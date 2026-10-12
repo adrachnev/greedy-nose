@@ -289,7 +289,7 @@ public static class ConsentEndpoints
         try
         {
             // Persisted with CancellationToken.None: the code is already traded, so a dropped browser connection must not lose the consent.
-            await consent.CompleteAsync(sessionId, record.AspspName, accounts, now, ReadValidUntil(root), CancellationToken.None);
+            await consent.CompleteAsync(record.UserId, sessionId, record.AspspName, accounts, now, ReadValidUntil(root), CancellationToken.None);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

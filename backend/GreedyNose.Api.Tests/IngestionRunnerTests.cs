@@ -38,7 +38,7 @@ public class IngestionRunnerTests
 
         if (connected)
         {
-            store.CompleteAsync(sessionId, "Test Bank", [account ?? Account], clock.GetUtcNow(), expiresAt).GetAwaiter().GetResult();
+            store.CompleteAsync(SeedData.UserId, sessionId, "Test Bank", [account ?? Account], clock.GetUtcNow(), expiresAt).GetAwaiter().GetResult();
         }
 
         return store;

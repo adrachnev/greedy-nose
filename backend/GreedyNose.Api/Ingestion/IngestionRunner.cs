@@ -67,7 +67,8 @@ public sealed class IngestionRunner(
     public static readonly TimeSpan RetryBudget = TimeSpan.FromSeconds(60);
 
     /// <summary>
-    /// Ids of the marks open when the tick begins (so one created by this tick waits for the next).
+    /// Ids of the marks open when the tick begins, of every user, oldest first (so one created by this tick waits for the next).
+    /// Not tied to the consent: a mark carries its own user, so retries also run when no consent is loaded.
     /// Can never stop ingestion: a failing read is logged and treated as "nothing owed" for this tick;
     /// it has its own budget too, so an already-cancelled tick token does not matter.
     /// </summary>
@@ -78,7 +79,7 @@ public sealed class IngestionRunner(
             using var budget = new CancellationTokenSource(RetryBudget);
             await using var owedDb = await dbContextFactory.CreateDbContextAsync(budget.Token);
             return await owedDb.PendingPushes
-                .Where(p => p.UserId == SeedData.UserId && p.EndedAt == null)
+                .Where(p => p.EndedAt == null)
                 .OrderBy(p => p.CreatedAt)
                 .Select(p => p.Id)
                 .ToListAsync(budget.Token);
@@ -101,13 +102,14 @@ public sealed class IngestionRunner(
             return;
         }
 
+        var userId = state.UserId;
         var sessionId = state.SessionId!;
         var account = state.Account!;
 
         if (state.Status == ConsentStatus.Expired)
         {
             // Time signal (R19): valid_until is reached. No fetch — the bank would only answer 401.
-            await NotifyConsentDeadAsync(sessionId, account, "expired", ct);
+            await NotifyConsentDeadAsync(userId, sessionId, account, "expired", ct);
             return;
         }
 
@@ -120,7 +122,7 @@ public sealed class IngestionRunner(
         await using (var modeDb = await dbContextFactory.CreateDbContextAsync(ct))
         {
             syncState = await modeDb.AccountSyncStates.AsNoTracking().SingleOrDefaultAsync(
-                s => s.UserId == SeedData.UserId && s.AccountKey == account.Key, ct);
+                s => s.UserId == userId && s.AccountKey == account.Key, ct);
         }
 
         var mode = DetermineMode(syncState, sessionHash);
@@ -130,7 +132,7 @@ public sealed class IngestionRunner(
         {
             await using var dateDb = await dbContextFactory.CreateDbContextAsync(ct);
             newestDebit = await dateDb.Debits
-                .Where(d => d.UserId == SeedData.UserId && d.AccountKey == account.Key)
+                .Where(d => d.UserId == userId && d.AccountKey == account.Key)
                 .MaxAsync(d => (DateTimeOffset?)d.Timestamp, ct);
         }
 
@@ -161,7 +163,7 @@ public sealed class IngestionRunner(
             logger.LogWarning(
                 "Fetch answered 401 ({ErrorCode}) and the session status is {Status}; the bank ended the consent.",
                 exception.ErrorCode, status);
-            await NotifyConsentDeadAsync(sessionId, account, "closed by the bank", ct);
+            await NotifyConsentDeadAsync(userId, sessionId, account, "closed by the bank", ct);
             return;
         }
 
@@ -173,7 +175,7 @@ public sealed class IngestionRunner(
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
         var now = clock.GetUtcNow();
 
-        await UpsertPayeesAsync(db, mapped.Payload.Payees, mapped.Payload.Debits, now, ct);
+        await UpsertPayeesAsync(db, userId, mapped.Payload.Payees, mapped.Payload.Debits, now, ct);
 
         // First sync (R25): this connected account has no AccountSyncState row, i.e. no earlier tick
         // ever finished its first sync. Insert everything as seen, no classification, no
@@ -189,7 +191,7 @@ public sealed class IngestionRunner(
         var isReconnect = mode == IngestionMode.Reconnect;
 
         var existingIds = await db.Debits
-            .Where(d => d.UserId == SeedData.UserId && d.AccountKey == account.Key)
+            .Where(d => d.UserId == userId && d.AccountKey == account.Key)
             .Select(d => d.Id)
             .ToListAsync(ct);
         var stored = new HashSet<string>(existingIds, StringComparer.Ordinal);
@@ -213,7 +215,7 @@ public sealed class IngestionRunner(
                 continue;
             }
 
-            var debit = BuildDebit(dto, account.Key, now);
+            var debit = BuildDebit(userId, dto, account.Key, now);
 
             if (isBootstrap)
             {
@@ -225,7 +227,7 @@ public sealed class IngestionRunner(
                 // Classify and count, never send per debit (R20); tracked only, committed below in
                 // one save together with the hash. Nothing in this loop clears the ChangeTracker.
                 var rule = await db.Rules.SingleOrDefaultAsync(
-                    r => r.UserId == SeedData.UserId && r.PayeeId == debit.PayeeId, ct);
+                    r => r.UserId == userId && r.PayeeId == debit.PayeeId, ct);
                 var classification = RuleEngine.Classify(debit.AmountEUR, rule?.Classification, rule?.AmountEUR);
                 if (classification.Classification != Classification.Good)
                 {
@@ -241,7 +243,7 @@ public sealed class IngestionRunner(
                 // that has to be one atomic unit, not two separate awaited steps (2026-09-22 second
                 // review finding: a cutoff between "committed" and "classified" as two steps could
                 // still permanently strand exactly the debit being processed when it struck).
-                await ClassifyInsertAndNotifyAsync(db, debit, ct);
+                await ClassifyInsertAndNotifyAsync(db, userId, debit, ct);
             }
 
             insertedCount++;
@@ -261,7 +263,7 @@ public sealed class IngestionRunner(
             // marker, so the first real charge on an empty account is not swallowed as "history".
             db.AccountSyncStates.Add(new AccountSyncState
             {
-                UserId = SeedData.UserId,
+                UserId = userId,
                 AccountKey = account.Key,
                 FirstSyncCompletedAt = now,
                 LastSessionIdHash = sessionHash,
@@ -280,10 +282,10 @@ public sealed class IngestionRunner(
             // a lost one. No NotificationLog row: that log is per debit.
             if (badCount > 0)
             {
-                var tokens = await db.DeviceTokens.Where(t => t.UserId == SeedData.UserId).ToListAsync(ct);
+                var tokens = await db.DeviceTokens.Where(t => t.UserId == userId).ToListAsync(ct);
                 var (title, body) = ReconnectSummary.Build(insertedCount, badCount);
                 var sendResult = await SendToAllTokensAsync(db, tokens, title, body, ct);
-                await RecordAttemptAsync(sendResult.AnySent, sendResult.Failure);
+                await RecordAttemptAsync(userId, sendResult.AnySent, sendResult.Failure);
                 if (!sendResult.AnySent)
                 {
                     // R11a: the summary is remembered with N and M frozen and retried by the next ticks;
@@ -294,7 +296,7 @@ public sealed class IngestionRunner(
                     db.PendingPushes.Add(new PendingPush
                     {
                         Id = Guid.NewGuid(),
-                        UserId = SeedData.UserId,
+                        UserId = userId,
                         Kind = PendingPushKind.ReconnectSummary,
                         SummaryNewCount = insertedCount,
                         SummaryBadCount = badCount,
@@ -312,7 +314,7 @@ public sealed class IngestionRunner(
 
             // Freshly loaded, as in the steady branch below; one save for debits, token prunes and hash.
             var syncRow = await db.AccountSyncStates.SingleAsync(
-                s => s.UserId == SeedData.UserId && s.AccountKey == account.Key, ct);
+                s => s.UserId == userId && s.AccountKey == account.Key, ct);
             syncRow.LastSessionIdHash = sessionHash;
             await db.SaveChangesAsync(ct);
         }
@@ -323,7 +325,7 @@ public sealed class IngestionRunner(
             // loaded row, not `syncState` — that one is untracked, and the tracker may have been
             // cleared since. No ExecuteUpdateAsync: the tests' in-memory provider does not support it.
             var row = await db.AccountSyncStates.SingleAsync(
-                s => s.UserId == SeedData.UserId && s.AccountKey == account.Key, ct);
+                s => s.UserId == userId && s.AccountKey == account.Key, ct);
             row.LastSessionIdHash = sessionHash;
             await db.SaveChangesAsync(ct);
         }
@@ -352,13 +354,13 @@ public sealed class IngestionRunner(
     /// a duplicate push. No row for the account (the consent died before its first sync finished): log and
     /// return — there is nowhere to keep the guard, and the push would repeat every tick.
     /// </summary>
-    private async Task NotifyConsentDeadAsync(string sessionId, ConnectedAccount account, string reason, CancellationToken ct)
+    private async Task NotifyConsentDeadAsync(Guid userId, string sessionId, ConnectedAccount account, string reason, CancellationToken ct)
     {
         var sessionHash = SessionFingerprint.Of(sessionId);
 
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
         var row = await db.AccountSyncStates.SingleOrDefaultAsync(
-            s => s.UserId == SeedData.UserId && s.AccountKey == account.Key, ct);
+            s => s.UserId == userId && s.AccountKey == account.Key, ct);
         if (row is null)
         {
             logger.LogWarning(
@@ -373,7 +375,7 @@ public sealed class IngestionRunner(
             return;
         }
 
-        var tokens = await db.DeviceTokens.Where(t => t.UserId == SeedData.UserId).ToListAsync(ct);
+        var tokens = await db.DeviceTokens.Where(t => t.UserId == userId).ToListAsync(ct);
         if (tokens.Count == 0)
         {
             logger.LogWarning("The consent for account {AccountKey} is dead ({Reason}) but no device token is registered; will retry next tick.", AccountKeyPreview(account.Key), reason);
@@ -469,7 +471,7 @@ public sealed class IngestionRunner(
     /// <c>DbUpdateConcurrencyException</c> catch below (2026-09-28 review, Finding 2).
     /// </summary>
     private async Task UpsertPayeesAsync(
-        GreedyNoseDbContext db, IReadOnlyList<PayeeDto> payees, IReadOnlyList<DebitDto> debits, DateTimeOffset now, CancellationToken ct)
+        GreedyNoseDbContext db, Guid userId, IReadOnlyList<PayeeDto> payees, IReadOnlyList<DebitDto> debits, DateTimeOffset now, CancellationToken ct)
     {
         var earliestByPayee = debits
             .GroupBy(d => d.PayeeId, StringComparer.Ordinal)
@@ -490,7 +492,7 @@ public sealed class IngestionRunner(
                 var earliest = earliestByPayee.TryGetValue(payeeDto.Id, out var value) ? value : now;
 
                 var existing = await db.Payees.SingleOrDefaultAsync(
-                    p => p.UserId == SeedData.UserId && p.Id == payeeDto.Id, ct);
+                    p => p.UserId == userId && p.Id == payeeDto.Id, ct);
 
                 // Same value both payee-upsert paths merge into (RulesEndpoint's own upsert
                 // mirrors this) — R3a's normalization of the bank's *raw* creditor name, never
@@ -503,7 +505,7 @@ public sealed class IngestionRunner(
                 {
                     var created = new Payee
                     {
-                        UserId = SeedData.UserId,
+                        UserId = userId,
                         Id = payeeDto.Id,
                         Name = payeeDto.Name,
                         Initials = payeeDto.Initials,
@@ -573,9 +575,9 @@ public sealed class IngestionRunner(
         }
     }
 
-    private static Debit BuildDebit(DebitDto dto, string accountKey, DateTimeOffset now) => new()
+    private static Debit BuildDebit(Guid userId, DebitDto dto, string accountKey, DateTimeOffset now) => new()
     {
-        UserId = SeedData.UserId,
+        UserId = userId,
         Id = dto.Id,
         PayeeId = dto.PayeeId,
         AmountEUR = dto.AmountEUR,
@@ -603,10 +605,10 @@ public sealed class IngestionRunner(
     /// cancellation struck afterward: a possible duplicate push next tick — the already-accepted
     /// direction (send first, log after: a duplicate is tolerable, a missed alert is not).
     /// </summary>
-    private async Task ClassifyInsertAndNotifyAsync(GreedyNoseDbContext db, Debit debit, CancellationToken ct)
+    private async Task ClassifyInsertAndNotifyAsync(GreedyNoseDbContext db, Guid userId, Debit debit, CancellationToken ct)
     {
         var rule = await db.Rules.SingleOrDefaultAsync(
-            r => r.UserId == SeedData.UserId && r.PayeeId == debit.PayeeId, ct);
+            r => r.UserId == userId && r.PayeeId == debit.PayeeId, ct);
 
         var classification = RuleEngine.Classify(debit.AmountEUR, rule?.Classification, rule?.AmountEUR);
         db.Debits.Add(debit);
@@ -623,7 +625,7 @@ public sealed class IngestionRunner(
         // deploys; the timer trigger runs ticks strictly sequentially in one process). Cheap, and it
         // reads the same table the unique-index catch below guards on the write side.
         var alreadyLogged = await db.NotificationLog.AnyAsync(
-            n => n.UserId == SeedData.UserId && n.DebitId == debit.Id, ct);
+            n => n.UserId == userId && n.DebitId == debit.Id, ct);
         if (alreadyLogged)
         {
             await db.SaveChangesAsync(ct); // still commit the debit itself as seen
@@ -631,29 +633,29 @@ public sealed class IngestionRunner(
         }
 
         var reason = RuleEngine.DescribeBadReason(classification)!;
-        var payee = await db.Payees.SingleAsync(p => p.UserId == SeedData.UserId && p.Id == debit.PayeeId, ct);
+        var payee = await db.Payees.SingleAsync(p => p.UserId == userId && p.Id == debit.PayeeId, ct);
         var title = $"{payee.Name} · {RuleEngine.FormatAmountEUR(debit.AmountEUR)}";
 
-        var tokens = await db.DeviceTokens.Where(t => t.UserId == SeedData.UserId).ToListAsync(ct);
+        var tokens = await db.DeviceTokens.Where(t => t.UserId == userId).ToListAsync(ct);
         if (tokens.Count == 0)
         {
             // R11a: remembered, not lost — the mark commits with the debit and the retry stage picks it up.
             logger.LogWarning("No device token registered; debit {DebitId} is marked as owed.", DebitIdPreview(debit.Id));
-            await RecordAttemptAsync(false, NoTokenOutcome);
-            db.PendingPushes.Add(NewDebitMark(debit.Id, reason, NoTokenOutcome));
+            await RecordAttemptAsync(userId, false, NoTokenOutcome);
+            db.PendingPushes.Add(NewDebitMark(userId, debit.Id, reason, NoTokenOutcome));
             await db.SaveChangesAsync(ct);
             return;
         }
 
         var sendResult = await SendToAllTokensAsync(db, tokens, title, reason, ct);
-        await RecordAttemptAsync(sendResult.AnySent, sendResult.Failure);
+        await RecordAttemptAsync(userId, sendResult.AnySent, sendResult.Failure);
 
         if (!sendResult.AnySent)
         {
             logger.LogWarning(
                 "The push for debit {DebitId} reached no device ({Outcome}); marked as owed.",
                 DebitIdPreview(debit.Id), sendResult.Failure);
-            db.PendingPushes.Add(NewDebitMark(debit.Id, reason, sendResult.Failure));
+            db.PendingPushes.Add(NewDebitMark(userId, debit.Id, reason, sendResult.Failure));
         }
         else
         {
@@ -661,7 +663,7 @@ public sealed class IngestionRunner(
             db.NotificationLog.Add(new NotificationLogEntry
             {
                 Id = Guid.NewGuid(),
-                UserId = SeedData.UserId,
+                UserId = userId,
                 DebitId = debit.Id,
                 SentAt = clock.GetUtcNow(),
                 Reason = reason,
@@ -693,8 +695,8 @@ public sealed class IngestionRunner(
     }
 
     /// <summary>Story 2.10: one debit or summary push attempt for the failed-in-a-row count. Not used for the expiry push.</summary>
-    private Task RecordAttemptAsync(bool success, string outcome) =>
-        failureWatch is null ? Task.CompletedTask : failureWatch.RecordAttemptAsync(success, outcome);
+    private Task RecordAttemptAsync(Guid userId, bool success, string outcome) =>
+        failureWatch is null ? Task.CompletedTask : failureWatch.RecordAttemptAsync(userId, success, outcome);
 
     /// <summary>What a send to all tokens came to: whether any took it, and — when none did — which outcomes said no.</summary>
     /// <param name="AnySent">At least one token got <see cref="SendOutcome.Sent"/>.</param>
@@ -749,10 +751,10 @@ public sealed class IngestionRunner(
         return new SendAllResult(anySent, anySent ? "" : string.Join(',', failures));
     }
 
-    private PendingPush NewDebitMark(string debitId, string reason, string outcome) => new()
+    private PendingPush NewDebitMark(Guid userId, string debitId, string reason, string outcome) => new()
     {
         Id = Guid.NewGuid(),
-        UserId = SeedData.UserId,
+        UserId = userId,
         Kind = PendingPushKind.Debit,
         DebitId = debitId,
         Reason = reason,
@@ -803,6 +805,7 @@ public sealed class IngestionRunner(
         }
 
         var now = clock.GetUtcNow();
+        var userId = mark.UserId; // the mark knows its user, so the retry needs no consent (Story 3.1)
         var what = mark.Kind == PendingPushKind.Debit ? $"debit {DebitIdPreview(mark.DebitId!)}" : "reconnect summary";
 
         if (now - mark.CreatedAt > GiveUpAfter)
@@ -819,7 +822,7 @@ public sealed class IngestionRunner(
         string title, body;
         if (mark.Kind == PendingPushKind.Debit)
         {
-            if (await db.NotificationLog.AnyAsync(n => n.UserId == SeedData.UserId && n.DebitId == mark.DebitId, ct))
+            if (await db.NotificationLog.AnyAsync(n => n.UserId == userId && n.DebitId == mark.DebitId, ct))
             {
                 // R11: already sent once; never twice. Just close the mark.
                 mark.EndedAt = now;
@@ -828,8 +831,8 @@ public sealed class IngestionRunner(
                 return;
             }
 
-            var debit = await db.Debits.SingleAsync(d => d.UserId == SeedData.UserId && d.Id == mark.DebitId, ct);
-            var payee = await db.Payees.SingleAsync(p => p.UserId == SeedData.UserId && p.Id == debit.PayeeId, ct);
+            var debit = await db.Debits.SingleAsync(d => d.UserId == userId && d.Id == mark.DebitId, ct);
+            var payee = await db.Payees.SingleAsync(p => p.UserId == userId && p.Id == debit.PayeeId, ct);
             title = $"{payee.Name} · {RuleEngine.FormatAmountEUR(debit.AmountEUR)}";
             body = mark.Reason!;
         }
@@ -838,9 +841,9 @@ public sealed class IngestionRunner(
             (title, body) = ReconnectSummary.Build(mark.SummaryNewCount!.Value, mark.SummaryBadCount!.Value);
         }
 
-        var tokens = await db.DeviceTokens.Where(t => t.UserId == SeedData.UserId).ToListAsync(ct);
+        var tokens = await db.DeviceTokens.Where(t => t.UserId == userId).ToListAsync(ct);
         var result = await SendToAllTokensAsync(db, tokens, title, body, ct);
-        await RecordAttemptAsync(result.AnySent, result.Failure);
+        await RecordAttemptAsync(userId, result.AnySent, result.Failure);
 
         mark.Attempts++;
         mark.LastAttemptAt = now;
@@ -855,7 +858,7 @@ public sealed class IngestionRunner(
                 db.NotificationLog.Add(new NotificationLogEntry
                 {
                     Id = Guid.NewGuid(),
-                    UserId = SeedData.UserId,
+                    UserId = userId,
                     DebitId = mark.DebitId!,
                     SentAt = now,
                     Reason = mark.Reason!,

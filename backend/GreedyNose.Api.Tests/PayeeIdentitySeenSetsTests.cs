@@ -121,7 +121,7 @@ public class PayeeIdentitySeenSetsTests
     {
         var store = new ConsentStore(new FakeConsentPersistence(), TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
 
-        store.CompleteAsync("session-1", "Test Bank", [new ConnectedAccount("uid-1", AccountKey, "Test Account", "EUR", null)], clock.GetUtcNow(), null).GetAwaiter().GetResult();
+        store.CompleteAsync(SeedData.UserId, "session-1", "Test Bank", [new ConnectedAccount("uid-1", AccountKey, "Test Account", "EUR", null)], clock.GetUtcNow(), null).GetAwaiter().GetResult();
 
         return store;
     }
