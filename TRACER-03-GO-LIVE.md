@@ -182,7 +182,9 @@ A redeploy happens only when a live story needs a code fix.
 **Also before go-live:** `gn-7n2` (switch Entra security defaults back on) and the lesson of Story 2.8 — the phone's
 device token must be in the cloud before live data flows.
 
-**Migrations collected so far:** none.
+**Migrations collected so far (apply to Neon at Deploy 1, in this order):**
+1. `20261012114551_AddConsentPollState` (Story 3.2) — four nullable columns on `BankConsents` (`LastAttemptAt`,
+   `LastSuccessAt`, `LastError`, `PollIntervalMinutes`); applied to the dev DB only.
 
 ## Progress
 
@@ -193,6 +195,7 @@ device token must be in the cloud before live data flows.
 | Epic 2 — N26 live on Azure, end to end (2.1–2.11) | in progress — 2.1–2.4, 2.9, 2.10 done (2026-10-07/08); **2.5 done 2026-10-08** (Neon project in eu-central-1, all 12 migrations applied, seed user present; see "Cloud database (Neon)" above); **2.6 done 2026-10-08** (Function App on Flex Consumption in Frankfurt, Key Vault references resolved, https only, 401/200 checked, tick without consent harmless; see "Azure deployment" above) |
 | Story 2.6a — the first sync tried against real N26, locally | **done 2026-10-09** — see "Findings: first sync at N26" below |
 | Story 2.7 — N26 through the cloud | **done 2026-10-09** — see "Findings: N26 through the cloud" below; the first Steady tick (12:00 UTC) still to be read |
+| Story 3.2 — the worker walks every bank | **done locally 2026-10-12** (not deployed; migration `AddConsentPollState` pending for Neon) — 648 tests; live on the dev DB two consents at once: the stale N26 sandbox consent failed (404) and the Mock ASPSP still synced in the same tick, per-bank attempt/success/error recorded. New: per-bank budget `Ingestion:BankTimeout` (40 s, bead `gn-ftd` for multi-page banks) |
 | Story 3.1 — the worker takes the user from the consent | **done locally 2026-10-12** (not deployed, no migration) — 617 tests, live check on the dev DB with a fresh Sandbox consent |
 | Story 2.8 — release app on the phone | **done 2026-10-12** — signed release APK (arm64; key `C:\Users\Nutzer\.greedy-nose\release.jks` plus untracked `app/android/keystore.properties`), cloud URL from untracked `app/src/data/backend.local.ts`, https only; release status line (unreachable / not authorized / not configured / unreadable / empty / alerts not set up). Verified: `DeviceTokens` = 1 and one rule in Neon. **Lesson:** 2.7 ran before 2.8, so 5 pushes (2026-10-09 18:00 to 10-11 00:00 UTC) ended `NoToken`/`GaveUp` and the failure mail came — the 2.10 mail worked as designed. Those pushes are lost (the 24 h retry is over). |
 | Epic 3 — DKB and ING-DiBa watched too (3.1–3.8) | not started |

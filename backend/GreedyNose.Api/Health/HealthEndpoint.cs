@@ -22,5 +22,13 @@ public static class HealthEndpoint
             account = consent.PrimaryAccount,
             connectedAt = consent.ConnectedAt,
             expiresAt = consent.ExpiresAt,
+            // Every bank's consent (Story 3.2). The fields above describe the newest one. No session id, no account.
+            banks = consent.GetStates(clock.GetUtcNow()).Select(s => new
+            {
+                aspsp = s.AspspName,
+                state = s.Status.ToString().ToLowerInvariant(),
+                connectedAt = s.ConnectedAt,
+                validUntil = s.ValidUntil,
+            }).ToList(),
         });
 }

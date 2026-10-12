@@ -4,6 +4,17 @@
 
 ## Status
 
+**2026-10-12 (night) — Story 3.2 done locally: the worker walks every bank (committed, not deployed, nothing
+pushed).** `ConsentStore` holds one consent per `(user, bank)`; `IngestionRunner` walks the banks in turn, least
+recently tried first, each in its own try/catch and under its own 40 s budget (`Ingestion:BankTimeout`); a failure is
+logged with the bank name and exception type only, the rest of the banks continue, and the failure is rethrown after
+the walk (one exception as is, several as `AggregateException`). Per-bank `LastAttemptAt/LastSuccessAt/LastError/
+PollIntervalMinutes` on `BankConsents` (**migration `AddConsentPollState`, applied to the dev DB only — Neon at Deploy
+1**); a bank polled within its interval (default 6 h, 5 min tolerance) is skipped, never a first sync or reconnect.
+`/health` has a `banks` list. 648 backend tests, one review round (3 SHOULD FIX fixed: starvation, restore race,
+mid-commit test). Live: the stale N26 sandbox consent failed while the Mock ASPSP synced in the same tick. Next in the
+local batch: 3.3 (connect a bank by name with its own consent limit). Beads: `gn-ftd` (BankTimeout vs multi-page banks).
+
 **2026-10-12 (evening) — Story 3.1 done locally: the worker takes the user from the consent (committed, not
 deployed, nothing pushed).** `ConsentSnapshot`/`ConsentStore.CompleteAsync` carry the user; `ConsentPersistence` loads
 all users' rows; `IngestionRunner` and `PushFailureWatch` have no `SeedData.UserId` left. 617 backend tests (9 new, a

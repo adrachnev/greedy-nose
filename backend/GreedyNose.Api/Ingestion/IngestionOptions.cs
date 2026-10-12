@@ -15,4 +15,10 @@ public sealed class IngestionOptions
     /// Read by the Functions host's startup check.
     /// </summary>
     public bool AllowShortInterval { get; set; }
+
+    /// <summary>Default for <see cref="BankTimeout"/>: well below the timer's 120 s tick limit, so a hanging bank cannot eat the whole tick.</summary>
+    public static readonly TimeSpan DefaultBankTimeout = TimeSpan.FromSeconds(40);
+
+    /// <summary>Time one bank's turn may take within a tick (<c>Ingestion:BankTimeout</c>, e.g. <c>00:00:40</c>). A timeout is recorded as that bank's error and the walk goes on.</summary>
+    public TimeSpan BankTimeout { get; set; } = DefaultBankTimeout;
 }

@@ -145,7 +145,10 @@ public sealed class PushFailureWatch(
                 LastFailureAt: row.LastFailureAt ?? now,
                 WaitingBadDebits: open.Sum(p => p.Kind == PendingPushKind.Debit ? 1 : p.SummaryBadCount ?? 0),
                 OldestWaitingAge: open.Count == 0 ? null : now - open.Min(p => p.CreatedAt),
-                Banks: consent.AspspName is { Length: > 0 } bank ? [bank] : []);
+                Banks: consent.GetStates(now)
+                    .Where(s => s.UserId == userId && s.AspspName is { Length: > 0 })
+                    .Select(s => s.AspspName!)
+                    .ToList());
 
             var result = await mail.SendAsync(PushFailureMail.BuildFailure(facts), ct);
             if (result.Accepted)

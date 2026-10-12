@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using GreedyNose.Api.Alerts;
 using GreedyNose.Api.Data;
 using GreedyNose.Api.Domain;
@@ -30,7 +31,8 @@ public sealed class IngestionRunner(
     INotificationSender sender,
     TimeProvider clock,
     ILogger<IngestionRunner> logger,
-    PushFailureWatch? failureWatch = null) : IIngestionTick
+    PushFailureWatch? failureWatch = null,
+    IngestionOptions? options = null) : IIngestionTick
 {
     /// <summary>
     /// One tick: the ingestion part, then the retry stage for owed pushes (R11a). The owed marks are
@@ -44,7 +46,7 @@ public sealed class IngestionRunner(
 
         try
         {
-            await IngestAsync(ct);
+            await IngestAllBanksAsync(ct);
         }
         finally
         {
@@ -91,17 +93,190 @@ public sealed class IngestionRunner(
         }
     }
 
-    private async Task IngestAsync(CancellationToken ct)
+    /// <summary>Default time between two polls of one bank (an ASPSP allows ~4 background fetches a day).</summary>
+    public static readonly TimeSpan DefaultPollInterval = TimeSpan.FromHours(6);
+
+    /// <summary>A 6 h timer reaches a bank a few seconds early; without this slack every second tick would be skipped.</summary>
+    public static readonly TimeSpan SkipTolerance = TimeSpan.FromMinutes(5);
+
+    /// <summary>Own time budget for the per-bank poll record, like the retry stage: a slow bank must not starve it.</summary>
+    private static readonly TimeSpan PollRecordBudget = TimeSpan.FromSeconds(30);
+
+    /// <summary>What one bank's turn came to: skipped (nothing recorded), or an attempt with an optional error code (not an exception).</summary>
+    private sealed record BankResult(bool Skipped, string? Error)
     {
-        // One consistent read for the whole tick: account and session from the same instant, so a
-        // /callback landing mid-tick cannot pair one login's account with another's session.
-        var state = consent.GetState(clock.GetUtcNow());
-        if (state.Status == ConsentStatus.None)
+        public static readonly BankResult Skip = new(true, null);
+        public static readonly BankResult Ok = new(false, null);
+    }
+
+    /// <summary>
+    /// Walks every bank in turn (Story 3.2, NFR6). One consistent read of all consents for the whole
+    /// tick; each bank runs in its own try/catch, so a failure at one bank never stops another. A failure
+    /// is logged with the bank's name and the exception type only (a message can carry account data),
+    /// recorded on the consent row, and rethrown AFTER all banks were walked — the original exception when
+    /// one bank failed (so callers see what they always saw), an <see cref="AggregateException"/> when
+    /// several did. Only the caller's own cancellation stops the walk.
+    /// </summary>
+    private async Task IngestAllBanksAsync(CancellationToken ct)
+    {
+        var tickStart = clock.GetUtcNow(); // stamped as every bank's attempt time, so a long tick cannot make the next one skip a bank
+        var states = consent.GetStates(tickStart);
+        if (states.Count == 0)
         {
             logger.LogInformation("No active consent; skipping this tick.");
             return;
         }
 
+        // Least recently tried first (never tried first of all), so one slow bank cannot always go first
+        // and starve the others when the tick's time runs out.
+        states = await OrderByLeastRecentlyAttemptedAsync(states, ct);
+
+        var bankTimeout = options?.BankTimeout ?? IngestionOptions.DefaultBankTimeout;
+        List<Exception>? failures = null;
+        foreach (var state in states)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                // Each bank gets its own time budget (inside the tick's): a hanging bank is cut off, recorded
+                // as that bank's error, and the next bank still gets its turn.
+                using var bankCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                bankCts.CancelAfter(bankTimeout);
+                var result = await IngestBankAsync(state, bankCts.Token);
+                if (!result.Skipped)
+                {
+                    await RecordPollAsync(state, tickStart, result.Error);
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(
+                    "Bank {AspspName} failed ({ExceptionType}); the other banks continue.",
+                    state.AspspName, exception.GetType().Name);
+                await RecordPollAsync(state, tickStart, DescribeError(exception));
+                (failures ??= []).Add(exception);
+            }
+        }
+
+        if (failures is { Count: 1 })
+        {
+            ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        }
+
+        if (failures is not null)
+        {
+            throw new AggregateException(failures);
+        }
+    }
+    /// <summary>
+    /// Orders the banks by their last attempt, oldest first, never-attempted before all. Stable: ties keep the
+    /// connection order. A failing read keeps the given order — the walk matters more than its order.
+    /// </summary>
+    private async Task<IReadOnlyList<ConsentState>> OrderByLeastRecentlyAttemptedAsync(IReadOnlyList<ConsentState> states, CancellationToken ct)
+    {
+        if (states.Count < 2)
+        {
+            return states;
+        }
+
+        try
+        {
+            await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+            var attempts = await db.BankConsents.AsNoTracking()
+                .Select(c => new { c.UserId, c.AspspName, c.LastAttemptAt })
+                .ToListAsync(ct);
+            var byBank = attempts.ToDictionary(a => (a.UserId, a.AspspName), a => a.LastAttemptAt);
+            return states
+                .OrderBy(s => byBank.GetValueOrDefault((s.UserId, s.AspspName ?? ""))) // null sorts first
+                .ToList();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogWarning("Reading the last attempts failed ({ExceptionType}); walking the banks in connection order.", exception.GetType().Name);
+            return states;
+        }
+    }
+
+
+    /// <summary>Exception type plus, for a bank answer, the status and the bank's error code — never a message text.</summary>
+    private static string DescribeError(Exception exception)
+    {
+        var text = exception is EnableBankingRequestException request
+            ? $"{request.GetType().Name} {request.StatusCode}{(request.ErrorCode is null ? "" : $" {request.ErrorCode}")}"
+            : exception is OperationCanceledException ? "Timeout" : exception.GetType().Name;
+        return text.Length > BankConsent.LastErrorMaxLength ? text[..BankConsent.LastErrorMaxLength] : text;
+    }
+
+    /// <summary>
+    /// Writes the attempt onto the consent row (<paramref name="error"/> null = success). Never throws and
+    /// has its own budget: bookkeeping must not stop the walk. A consent without a row (nothing stored for
+    /// it) is simply not recorded.
+    /// </summary>
+    private async Task RecordPollAsync(ConsentState state, DateTimeOffset attemptAt, string? error)
+    {
+        try
+        {
+            using var budget = new CancellationTokenSource(PollRecordBudget);
+            await using var db = await dbContextFactory.CreateDbContextAsync(budget.Token);
+            var row = await db.BankConsents.SingleOrDefaultAsync(
+                c => c.UserId == state.UserId && c.AspspName == state.AspspName, budget.Token);
+            if (row is null)
+            {
+                return;
+            }
+
+            var now = attemptAt;
+            row.LastAttemptAt = now;
+            if (error is null)
+            {
+                row.LastSuccessAt = now;
+                row.LastError = null;
+            }
+            else
+            {
+                row.LastError = error.Length > BankConsent.LastErrorMaxLength ? error[..BankConsent.LastErrorMaxLength] : error;
+            }
+
+            await db.SaveChangesAsync(budget.Token);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                "Recording the poll of bank {AspspName} failed ({ExceptionType}).", state.AspspName, exception.GetType().Name);
+        }
+    }
+
+    /// <summary>
+    /// True when this bank was tried more recently than its interval. Never true with the short-interval
+    /// switch (local tests), nor when nothing was recorded; the caller never asks for a first sync or a reconnect.
+    /// </summary>
+    private async Task<bool> WasPolledRecentlyAsync(ConsentState state, CancellationToken ct)
+    {
+        if (options?.AllowShortInterval == true)
+        {
+            return false;
+        }
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        var row = await db.BankConsents.AsNoTracking()
+            .Where(c => c.UserId == state.UserId && c.AspspName == state.AspspName)
+            .Select(c => new { c.LastAttemptAt, c.PollIntervalMinutes })
+            .SingleOrDefaultAsync(ct);
+        if (row?.LastAttemptAt is not { } lastAttempt)
+        {
+            return false;
+        }
+
+        var interval = row.PollIntervalMinutes is { } minutes ? TimeSpan.FromMinutes(minutes) : DefaultPollInterval;
+        return clock.GetUtcNow() - lastAttempt < interval - SkipTolerance;
+    }
+
+    private async Task<BankResult> IngestBankAsync(ConsentState state, CancellationToken ct)
+    {
         var userId = state.UserId;
         var sessionId = state.SessionId!;
         var account = state.Account!;
@@ -109,8 +284,9 @@ public sealed class IngestionRunner(
         if (state.Status == ConsentStatus.Expired)
         {
             // Time signal (R19): valid_until is reached. No fetch — the bank would only answer 401.
+            // Handled before the interval check, so the expiry push is never held back by it.
             await NotifyConsentDeadAsync(userId, sessionId, account, "expired", ct);
-            return;
+            return new BankResult(false, "ConsentExpired");
         }
 
         var sessionHash = SessionFingerprint.Of(sessionId);
@@ -126,6 +302,14 @@ public sealed class IngestionRunner(
         }
 
         var mode = DetermineMode(syncState, sessionHash);
+
+        // Interval skip (Story 3.2). Only a steady bank can be skipped: a first sync that is not done and a
+        // reconnect (a new session) always run, so a fresh connection is never held back for hours.
+        if (mode == IngestionMode.Steady && await WasPolledRecentlyAsync(state, ct))
+        {
+            logger.LogInformation("Bank {AspspName} was polled recently; skipping it this tick.", state.AspspName);
+            return BankResult.Skip;
+        }
 
         DateTimeOffset? newestDebit = null;
         if (mode != IngestionMode.FirstSync)
@@ -164,7 +348,7 @@ public sealed class IngestionRunner(
                 "Fetch answered 401 ({ErrorCode}) and the session status is {Status}; the bank ended the consent.",
                 exception.ErrorCode, status);
             await NotifyConsentDeadAsync(userId, sessionId, account, "closed by the bank", ct);
-            return;
+            return new BankResult(false, "ConsentClosedByBank");
         }
 
         foreach (var skipped in mapped.Skipped)
@@ -329,6 +513,8 @@ public sealed class IngestionRunner(
             row.LastSessionIdHash = sessionHash;
             await db.SaveChangesAsync(ct);
         }
+
+        return BankResult.Ok;
     }
 
     /// <summary>An unreadable or failing check is "unknown" (null), never "dead"; a caller cancellation still propagates.</summary>

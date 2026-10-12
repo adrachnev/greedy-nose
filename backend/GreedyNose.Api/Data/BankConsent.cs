@@ -22,4 +22,20 @@ public sealed class BankConsent
     public required byte[] PayloadCipher { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
+
+    // Poll bookkeeping (Story 3.2), plaintext on purpose: times, a short error code and a number — no
+    // account data. Written by the worker after each bank, never by a reconnect (SaveAsync leaves them).
+
+    /// <summary>When the worker last tried this bank (success or failure); a skipped tick does not count.</summary>
+    public DateTimeOffset? LastAttemptAt { get; set; }
+
+    public DateTimeOffset? LastSuccessAt { get; set; }
+
+    /// <summary>Exception type and a short code of the last failed attempt (at most <see cref="LastErrorMaxLength"/> chars), null after a success. Never a message text.</summary>
+    public string? LastError { get; set; }
+
+    public const int LastErrorMaxLength = 200;
+
+    /// <summary>Minutes between polls of this bank; null = the default (6 h).</summary>
+    public int? PollIntervalMinutes { get; set; }
 }

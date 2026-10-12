@@ -230,4 +230,102 @@ public class ConsentStoreTests
         Assert.DoesNotContain(parameters, p => p.ParameterType == typeof(string));
         Assert.Null(typeof(EnableBankingOptions).GetProperty("ConsentFilePath"));
     }
+
+    // --- Several banks at once (Story 3.2) ----------------------------------------------------------
+
+    private static readonly ConnectedAccount AccountB = new("uid-2", "DE22", null, "EUR", null);
+
+    [Fact]
+    public async Task Restore_keeps_every_bank_and_GetStates_lists_them_oldest_first()
+    {
+        var persistence = new FakeConsentPersistence();
+        var store = NewStore(persistence);
+        await store.CompleteAsync(SeedData.UserId, "session-dkb", "DKB", [AccountB], T0.AddDays(1), null);
+        await store.CompleteAsync(SeedData.UserId, "session-n26", "N26", [Account], T0, null);
+
+        var restored = NewStore(persistence);
+        await restored.RestoreAsync(T0.AddDays(2));
+
+        var states = restored.GetStates(T0.AddDays(2));
+        Assert.Equal(["N26", "DKB"], states.Select(s => s.AspspName!).ToArray());
+        Assert.Equal(["session-n26", "session-dkb"], states.Select(s => s.SessionId!).ToArray());
+        Assert.Equal(T0, states[0].ConnectedAt);
+        Assert.Equal("DKB", restored.AspspName); // the single-consent members read the newest
+    }
+
+    [Fact]
+    public async Task Complete_for_one_bank_replaces_only_that_bank()
+    {
+        var store = NewStore();
+        await store.CompleteAsync(SeedData.UserId, "n26-1", "N26", [Account], T0, null);
+        await store.CompleteAsync(SeedData.UserId, "dkb-1", "DKB", [AccountB], T0.AddHours(1), null);
+
+        await store.CompleteAsync(SeedData.UserId, "n26-2", "N26", [Account], T0.AddHours(2), null);
+
+        var states = store.GetStates(T0.AddHours(3));
+        Assert.Equal(2, states.Count);
+        Assert.Equal("dkb-1", states.Single(s => s.AspspName == "DKB").SessionId);
+        Assert.Equal("n26-2", states.Single(s => s.AspspName == "N26").SessionId);
+    }
+
+
+    [Fact]
+    public async Task Restore_picks_up_a_bank_another_instance_connected()
+    {
+        var persistence = new FakeConsentPersistence();
+        var first = NewStore(persistence);
+        await first.CompleteAsync(SeedData.UserId, "n26-1", "N26", [Account], T0, null);
+        var second = NewStore(persistence);
+        await second.CompleteAsync(SeedData.UserId, "dkb-1", "DKB", [AccountB], T0.AddHours(1), null);
+        Assert.Single(first.GetStates(T0));
+
+        await first.RestoreAsync(T0.AddHours(2));
+
+        Assert.Equal(2, first.GetStates(T0.AddHours(2)).Count);
+    }
+    [Fact]
+    public async Task Each_bank_is_judged_expired_on_its_own()
+    {
+        var store = NewStore();
+        await store.CompleteAsync(SeedData.UserId, "n26", "N26", [Account], T0, T0.AddDays(1));
+        await store.CompleteAsync(SeedData.UserId, "dkb", "DKB", [AccountB], T0, T0.AddDays(30));
+
+        var states = store.GetStates(T0.AddDays(5));
+
+        Assert.Equal(ConsentStatus.Expired, states.Single(s => s.AspspName == "N26").Status);
+        Assert.Equal(ConsentStatus.Active, states.Single(s => s.AspspName == "DKB").Status);
+    }
+
+    private sealed class SlowLoadPersistence(FakeConsentPersistence inner) : IConsentPersistence
+    {
+        public TaskCompletionSource LoadStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task SaveAsync(ConsentSnapshot snapshot, CancellationToken ct = default) => inner.SaveAsync(snapshot, ct);
+
+        public async Task<IReadOnlyList<ConsentSnapshot>> LoadAsync(CancellationToken ct = default)
+        {
+            var rows = await inner.LoadAsync(ct); // the older set is read first ...
+            LoadStarted.SetResult();
+            await Release.Task; // ... and handed over late
+            return rows;
+        }
+    }
+
+    [Fact]
+    public async Task A_consent_completed_while_a_restore_is_loading_is_not_overwritten_by_the_older_set()
+    {
+        var persistence = new SlowLoadPersistence(new FakeConsentPersistence());
+        var store = NewStore(persistence);
+        await store.CompleteAsync(SeedData.UserId, "n26-1", "N26", [Account], T0, null);
+
+        var restore = store.RestoreAsync(T0);
+        await persistence.LoadStarted.Task;
+        var complete = store.CompleteAsync(SeedData.UserId, "dkb-1", "DKB", [AccountB], T0.AddHours(1), null);
+        persistence.Release.SetResult();
+        await Task.WhenAll(restore, complete);
+
+        Assert.Equal(["N26", "DKB"], store.GetStates(T0.AddHours(2)).Select(s => s.AspspName!).ToArray());
+    }
 }

@@ -85,6 +85,8 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
             consent.Property(c => c.SessionIdCipher).HasColumnType("bytea");
             consent.Property(c => c.PayloadCipher).HasColumnType("bytea");
 
+            consent.Property(c => c.LastError).HasMaxLength(BankConsent.LastErrorMaxLength);
+
             consent.HasOne<User>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 

@@ -117,9 +117,22 @@ namespace GreedyNose.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<DateTimeOffset?>("LastAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset?>("LastSuccessAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<byte[]>("PayloadCipher")
                         .IsRequired()
                         .HasColumnType("bytea");
+
+                    b.Property<int?>("PollIntervalMinutes")
+                        .HasColumnType("integer");
 
                     b.Property<byte[]>("SessionIdCipher")
                         .IsRequired()
