@@ -6,7 +6,11 @@ public sealed record ConnectedAccount(
     string? Iban,
     string? Name,
     string? Currency,
-    string? IdentificationHash)
+    string? IdentificationHash,
+    // Optional and trailing: consents stored before these existed still load (they read as null).
+    string? CashAccountType = null,
+    string? Product = null,
+    string? Usage = null)
 {
     /// <summary>
     /// What "connected account" means in R10b's identifier — and it is deliberately **not**

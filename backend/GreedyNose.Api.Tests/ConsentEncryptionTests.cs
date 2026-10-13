@@ -188,6 +188,40 @@ public class ConsentEncryptionTests
     }
 
     [Fact]
+    public async Task Persistence_roundtrips_the_account_type_product_and_usage()
+    {
+        var (persistence, _, _) = NewPersistence();
+        var typed = new ConnectedAccount("uid-1", Iban, "Main", "EUR", "hash-1", "CACC", "Girokonto", "PRIV");
+
+        await persistence.SaveAsync(Snapshot("DKB") with { Accounts = [typed] });
+
+        var loaded = Assert.Single(Assert.Single(await persistence.LoadAsync()).Accounts);
+        Assert.Equal(typed, loaded);
+    }
+
+    [Fact]
+    public async Task A_payload_stored_before_the_new_account_fields_still_loads_with_nulls()
+    {
+        var (persistence, factory, key) = NewPersistence();
+        await persistence.SaveAsync(Snapshot("N26"));
+
+        // The payload as the build before this change wrote it: no CashAccountType, Product or Usage.
+        var old = $$"""{"Accounts":[{"Uid":"uid-1","Iban":"{{Iban}}","Name":"Main","Currency":"EUR","IdentificationHash":"hash-1"}],"ConnectedAt":"2026-09-01T12:00:00+00:00","ExpiresAt":null}""";
+        await using (var db = factory.CreateDbContext())
+        {
+            var row = await db.BankConsents.SingleAsync();
+            row.PayloadCipher = new ConsentCipher(key).Encrypt(Encoding.UTF8.GetBytes(old), $"{row.UserId:D}|{row.AspspName}|PayloadCipher");
+            await db.SaveChangesAsync();
+        }
+
+        var account = Assert.Single(Assert.Single(await persistence.LoadAsync()).Accounts);
+        Assert.Equal(Iban, account.Iban);
+        Assert.Null(account.CashAccountType);
+        Assert.Null(account.Product);
+        Assert.Null(account.Usage);
+    }
+
+    [Fact]
     public async Task Persistence_roundtrips_a_consent_without_expiry()
     {
         var (persistence, _, _) = NewPersistence();

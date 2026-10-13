@@ -1228,6 +1228,117 @@ public sealed class ConsentEndpointsTests : IDisposable
         Assert.Equal("/sessions/db-session-dddd4444", Assert.Single(_deletes).Path);
     }
 
+    // --- several accounts: the current account is chosen by type -------------------------------------
+
+    private static string AccountJson(string uid, string iban, string? type, string product = "Product", string usage = "PRIV") =>
+        $$"""{"uid":"{{uid}}","account_id":{"iban":"{{iban}}"},"name":"Name {{uid}}","currency":"EUR","cash_account_type":{{(type is null ? "null" : $"\"{type}\"")}},"product":"{{product}}","usage":"{{usage}}"}""";
+
+    private void OfferAccounts(params string[] accountJson) => _bank = path => path == "/auth"
+        ? (HttpStatusCode.OK, $$"""{"url":"{{BankUrl}}"}""")
+        : (HttpStatusCode.OK, $$"""{"session_id":"{{_sessionId}}","access":{"valid_until":"2027-01-01T00:00:00Z"},"accounts":[{{string.Join(',', accountJson)}}]}""");
+
+    [Fact]
+    public async Task Several_accounts_store_exactly_the_current_account()
+    {
+        OfferAccounts(
+            AccountJson("u1", "DE00000000000000000001", "SVGS"),
+            AccountJson("u2", "DE00000000000000000002", "CACC"),
+            AccountJson("u3", "DE00000000000000000003", "CARD"));
+
+        var (status, _) = await ConnectBank("DKB", "dkb-session-eeee5555");
+
+        Assert.Equal(200, status);
+        var stored = Assert.Single(_consent.Accounts);
+        Assert.Equal("u2", stored.Uid);
+        Assert.Equal("CACC", stored.CashAccountType);
+        Assert.Equal("Product", stored.Product);
+        Assert.Equal("PRIV", stored.Usage);
+        Assert.Equal(1, _firstSync.Requests);
+        Assert.Empty(_deletes);
+    }
+
+    [Theory]
+    [InlineData("SVGS", "CARD")]   // no CACC at all
+    [InlineData("CACC", "cacc")]   // two current accounts
+    [InlineData(null, null)]       // types missing
+    public async Task Several_accounts_without_exactly_one_current_account_store_nothing_and_close_the_new_session(string? first, string? second)
+    {
+        OfferAccounts(
+            AccountJson("u1", "DE00000000000000000001", first),
+            AccountJson("u2", "DE00000000000000000002", second));
+
+        var (status, html) = await ConnectBank("DKB", "dkb-session-eeee5555");
+
+        Assert.Equal(400, status);
+        Assert.Contains("none could be chosen safely", html);
+        Assert.Null(_consent.SessionIdFor(_consentUser(), "DKB"));
+        Assert.Empty(_consent.Accounts);
+        Assert.Equal(0, _firstSync.Requests);
+        Assert.Equal("/sessions/dkb-session-eeee5555", Assert.Single(_deletes).Path);
+        // The log shows what the bank sent per account, never who owns it.
+        Assert.Contains(_logs.Lines, l => l.Contains("offered 2 account(s)") && l.Contains("/PRIV/EUR"));
+        Assert.Contains(_logs.Lines, l => l.Contains("refused accounts") && l.Contains("/Product/PRIV/EUR"));
+        Assert.DoesNotContain(_logs.Lines, l => l.Contains("DE0000000000000000000") || l.Contains("Name u1") || l.Contains("dkb-session-eeee5555"));
+    }
+
+    [Fact]
+    public async Task A_successful_connect_never_logs_the_product_text()
+    {
+        OfferAccounts(
+            AccountJson("u1", "DE00000000000000000001", "SVGS", product: "Max Mustermann DE99FAKEIBAN"),
+            AccountJson("u2", "DE00000000000000000002", "CACC", product: "Max Mustermann DE99FAKEIBAN"));
+
+        var (status, _) = await ConnectBank("DKB", "dkb-session-eeee5555");
+
+        Assert.Equal(200, status);
+        Assert.Contains(_logs.Lines, l => l.Contains("offered 2 account(s)") && l.Contains("CACC/PRIV/EUR"));
+        Assert.DoesNotContain(_logs.Lines, l => l.Contains("Mustermann") || l.Contains("FAKEIBAN"));
+    }
+
+    [Fact]
+    public async Task A_refused_reconnect_leaves_the_old_consent_and_session_untouched_and_closes_only_the_new_session()
+    {
+        await ConnectBank("DKB", "old-session-aaaa1111");
+        var before = Assert.Single(_consent.Accounts);
+
+        OfferAccounts(
+            AccountJson("u1", "DE00000000000000000001", "SVGS"),
+            AccountJson("u2", "DE00000000000000000002", "CARD"));
+        var (status, _) = await ConnectBank("DKB", "new-session-bbbb2222");
+
+        Assert.Equal(400, status);
+        Assert.Equal("old-session-aaaa1111", _consent.SessionIdFor(_consentUser(), "DKB"));
+        Assert.Equal(before, Assert.Single(_consent.Accounts));
+        Assert.Equal("/sessions/new-session-bbbb2222", Assert.Single(_deletes).Path);
+    }
+
+    [Fact]
+    public async Task An_empty_account_list_is_stored_as_before()
+    {
+        OfferAccounts();
+
+        var (status, _) = await ConnectBank("DKB", "dkb-session-eeee5555");
+
+        Assert.Equal(200, status);
+        Assert.Equal("dkb-session-eeee5555", _consent.SessionIdFor(_consentUser(), "DKB"));
+        Assert.Empty(_consent.Accounts);
+        Assert.Empty(_deletes);
+    }
+
+    [Theory]
+    [InlineData("SVGS")]
+    [InlineData(null)]
+    public async Task Exactly_one_account_is_stored_whatever_its_type(string? type)
+    {
+        OfferAccounts(AccountJson("u1", "DE00000000000000000001", type));
+
+        var (status, _) = await ConnectBank("DKB", "dkb-session-eeee5555");
+
+        Assert.Equal(200, status);
+        Assert.Equal("u1", Assert.Single(_consent.Accounts).Uid);
+        Assert.Empty(_deletes);
+    }
+
     private Guid _consentUser() => _consent.UserId;
 
     private void AssertNoSessionIdInLog()

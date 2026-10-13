@@ -326,7 +326,34 @@ public static class ConsentEndpoints
                 StatusCodes.Status502BadGateway);
         }
 
-        var accounts = ReadAccounts(root);
+        var offered = ReadAccounts(root);
+        var accounts = offered;
+        if (offered.Count > 0)
+        {
+            // Several accounts: the current account is chosen by type. Only the chosen one is stored.
+            var chosen = AccountSelector.Pick(offered);
+            // The product is free text from the bank (it may hold a name), so it is logged only when we refuse
+            // and need it to decide what to do next — never on a successful connect.
+            logger.LogInformation(
+                "{Aspsp} offered {AccountCount} account(s) [type/usage/currency]: {Shapes}; chosen: {Chosen}.",
+                record.AspspName, offered.Count, DescribeShapes(offered, withProduct: false), chosen is not null);
+
+            if (chosen is null)
+            {
+                logger.LogInformation(
+                    "{Aspsp} refused accounts [type/product/usage/currency]: {Shapes}.",
+                    record.AspspName, DescribeShapes(offered, withProduct: true));
+                // Nothing stored, nothing synced; the session just opened is useless, so close it (best effort).
+                logger.LogWarning("{Aspsp} offered several accounts and none could be chosen safely; nothing was stored.", record.AspspName);
+                await CloseOldSessionAsync(eb, sessionId, record.AspspName, logger);
+                return Rejected(
+                    "No account chosen",
+                    "The bank offered several accounts and none could be chosen safely. Nothing was connected.");
+            }
+
+            accounts = [chosen];
+        }
+
         // Story 4.3: the session this bank had before (same user, same bank only), read from the database before it is replaced.
         var oldSessionId = await consent.GetStoredSessionIdAsync(record.UserId, record.AspspName, ct);
         try
@@ -454,8 +481,23 @@ public static class ConsentEndpoints
             Currency: Text(a, "currency"),
             // Enable Banking's own cross-session account identifier. See ConnectedAccount.Key for why
             // it is the fallback and not the primary — it hashes the IBAN we already have.
-            IdentificationHash: Text(a, "identification_hash")))];
+            IdentificationHash: Text(a, "identification_hash"),
+            CashAccountType: Text(a, "cash_account_type"),
+            Product: Text(a, "product"),
+            Usage: Text(a, "usage")))];
     }
+
+    /// <summary>
+    /// Per-account type/product/usage/currency for the log, so a live response shows what a bank really sends.
+    /// Never the IBAN, name or uid. The values come from the bank, so they are control-stripped and short.
+    /// </summary>
+    private static string DescribeShapes(IEnumerable<ConnectedAccount> accounts, bool withProduct) =>
+        string.Join(", ", accounts.Select(a => withProduct
+            ? $"{Safe(a.CashAccountType)}/{Safe(a.Product)}/{Safe(a.Usage)}/{Safe(a.Currency)}"
+            : $"{Safe(a.CashAccountType)}/{Safe(a.Usage)}/{Safe(a.Currency)}"));
+
+    private static string Safe(string? value) =>
+        value is null ? "-" : new string([.. value.Where(c => !char.IsControl(c)).Take(MaxLoggedErrorLength)]);
 
     /// <summary>
     /// The consent lifetime the bank actually granted, which is not necessarily the one we asked for:
