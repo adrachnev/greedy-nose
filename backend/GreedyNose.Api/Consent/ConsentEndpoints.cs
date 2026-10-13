@@ -330,7 +330,7 @@ public static class ConsentEndpoints
         var accounts = offered;
         if (offered.Count > 0)
         {
-            // Several accounts: the current account is chosen by type. Only the chosen one is stored.
+            // Several accounts: the current account is chosen by type CACC and product "Girokonto". Only the chosen one is stored.
             var chosen = AccountSelector.Pick(offered);
             // The product is free text from the bank (it may hold a name), so it is logged only when we refuse
             // and need it to decide what to do next — never on a successful connect.

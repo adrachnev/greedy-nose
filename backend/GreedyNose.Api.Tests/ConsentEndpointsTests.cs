@@ -1237,35 +1237,39 @@ public sealed class ConsentEndpointsTests : IDisposable
         ? (HttpStatusCode.OK, $$"""{"url":"{{BankUrl}}"}""")
         : (HttpStatusCode.OK, $$"""{"session_id":"{{_sessionId}}","access":{"valid_until":"2027-01-01T00:00:00Z"},"accounts":[{{string.Join(',', accountJson)}}]}""");
 
-    [Fact]
-    public async Task Several_accounts_store_exactly_the_current_account()
+    private static string[] DkbAccounts(params string[] products) =>
+        [.. products.Select((p, i) => AccountJson($"u{i}", $"DE0000000000000000000{i}", "CACC", product: p))];
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    [InlineData(4)]
+    public async Task The_real_dkb_shape_stores_exactly_the_girokonto_in_any_position(int position)
     {
-        OfferAccounts(
-            AccountJson("u1", "DE00000000000000000001", "SVGS"),
-            AccountJson("u2", "DE00000000000000000002", "CACC"),
-            AccountJson("u3", "DE00000000000000000003", "CARD"));
+        var products = new[] { "Tagesgeld", "Girokonto u18", "Tagesgeld", "Girokonto u18", "Tagesgeld" };
+        products[position] = "Girokonto";
+        OfferAccounts(DkbAccounts(products));
 
         var (status, _) = await ConnectBank("DKB", "dkb-session-eeee5555");
 
         Assert.Equal(200, status);
         var stored = Assert.Single(_consent.Accounts);
-        Assert.Equal("u2", stored.Uid);
+        Assert.Equal($"u{position}", stored.Uid);
         Assert.Equal("CACC", stored.CashAccountType);
-        Assert.Equal("Product", stored.Product);
+        Assert.Equal("Girokonto", stored.Product);
         Assert.Equal("PRIV", stored.Usage);
         Assert.Equal(1, _firstSync.Requests);
         Assert.Empty(_deletes);
     }
 
     [Theory]
-    [InlineData("SVGS", "CARD")]   // no CACC at all
-    [InlineData("CACC", "cacc")]   // two current accounts
-    [InlineData(null, null)]       // types missing
-    public async Task Several_accounts_without_exactly_one_current_account_store_nothing_and_close_the_new_session(string? first, string? second)
+    [InlineData("Tagesgeld", "Girokonto u18", "Tagesgeld", "Girokonto u18", "Tagesgeld")] // no Girokonto
+    [InlineData("Girokonto", "Girokonto", "Tagesgeld", "Girokonto u18", "Tagesgeld")]     // duplicated
+    [InlineData("Girokonto u18", "Girokonto u18")]                                        // only the u18 ones
+    [InlineData("Tagesgeld", "Tagesgeld")]                                                // only Tagesgeld
+    public async Task Several_accounts_without_exactly_one_girokonto_store_nothing_and_close_the_new_session(params string[] products)
     {
-        OfferAccounts(
-            AccountJson("u1", "DE00000000000000000001", first),
-            AccountJson("u2", "DE00000000000000000002", second));
+        OfferAccounts(DkbAccounts(products));
 
         var (status, html) = await ConnectBank("DKB", "dkb-session-eeee5555");
 
@@ -1276,23 +1280,36 @@ public sealed class ConsentEndpointsTests : IDisposable
         Assert.Equal(0, _firstSync.Requests);
         Assert.Equal("/sessions/dkb-session-eeee5555", Assert.Single(_deletes).Path);
         // The log shows what the bank sent per account, never who owns it.
-        Assert.Contains(_logs.Lines, l => l.Contains("offered 2 account(s)") && l.Contains("/PRIV/EUR"));
-        Assert.Contains(_logs.Lines, l => l.Contains("refused accounts") && l.Contains("/Product/PRIV/EUR"));
+        Assert.Contains(_logs.Lines, l => l.Contains($"offered {products.Length} account(s)") && l.Contains("CACC/PRIV/EUR") && !l.Contains("Tagesgeld"));
+        Assert.Contains(_logs.Lines, l => l.Contains("refused accounts") && l.Contains($"CACC/{products[0]}/PRIV/EUR"));
         Assert.DoesNotContain(_logs.Lines, l => l.Contains("DE0000000000000000000") || l.Contains("Name u1") || l.Contains("dkb-session-eeee5555"));
+    }
+
+    [Fact]
+    public async Task Accounts_that_are_not_typed_CACC_are_refused_even_if_called_Girokonto()
+    {
+        OfferAccounts(
+            AccountJson("u1", "DE00000000000000000001", "SVGS", product: "Girokonto"),
+            AccountJson("u2", "DE00000000000000000002", null, product: "Girokonto"));
+
+        var (status, _) = await ConnectBank("DKB", "dkb-session-eeee5555");
+
+        Assert.Equal(400, status);
+        Assert.Empty(_consent.Accounts);
     }
 
     [Fact]
     public async Task A_successful_connect_never_logs_the_product_text()
     {
         OfferAccounts(
-            AccountJson("u1", "DE00000000000000000001", "SVGS", product: "Max Mustermann DE99FAKEIBAN"),
-            AccountJson("u2", "DE00000000000000000002", "CACC", product: "Max Mustermann DE99FAKEIBAN"));
+            AccountJson("u1", "DE00000000000000000001", "CACC", product: "Max Mustermann DE99FAKEIBAN"),
+            AccountJson("u2", "DE00000000000000000002", "CACC", product: "Girokonto"));
 
         var (status, _) = await ConnectBank("DKB", "dkb-session-eeee5555");
 
         Assert.Equal(200, status);
         Assert.Contains(_logs.Lines, l => l.Contains("offered 2 account(s)") && l.Contains("CACC/PRIV/EUR"));
-        Assert.DoesNotContain(_logs.Lines, l => l.Contains("Mustermann") || l.Contains("FAKEIBAN"));
+        Assert.DoesNotContain(_logs.Lines, l => l.Contains("Mustermann") || l.Contains("FAKEIBAN") || l.Contains("Girokonto"));
     }
 
     [Fact]
