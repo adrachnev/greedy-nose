@@ -161,6 +161,37 @@ Local host on the Production application, dev database, real N26. Counts only:
   at `microsoft.com/devicelogin`. Security defaults are **still disabled** — see the bead for re-enabling or a
   service principal.
 
+## Findings: DKB through the cloud (Story 3.5, 2026-10-13)
+
+- **Owner decision 2026-10-13: ING-DiBa is not connected; two banks (N26, DKB) are enough** for this tracer. Story 3.6 is
+  dropped, 3.8 is judged on two banks.
+- **Approval flow (AR11):** consent started with `tools/connect-bank.sh DKB DE <cloud url>` on the laptop, "Authentifizierung"
+  clicked in the browser, confirmed in the DKB app on the phone; the laptop browser moved on by itself to the callback page
+  "Connected". Nothing by hand. Browser and banking app were on two devices; the same-device path (phone only) is untested
+  (bead `gn-hkx`).
+- **Several accounts:** the consent returned **5 accounts**, all `CACC`/`PRIV`/`EUR`; the products are Tagesgeld (2),
+  "Girokonto u18" (2) and "Girokonto" (1). The type alone does not separate them, and the first account (`Accounts[0]`)
+  was not the current account: the first sync stored 0 debits. Rule now (commits `c197408`, `ef0b08e`): with several
+  accounts only an account typed `CACC` with the exact product "Girokonto" is chosen; zero or several matches choose
+  nothing, store nothing and close the new session (a `Pick` result of null). One account is taken as it is. Only the
+  chosen account is stored. Docs: `cash_account_type` is a required field, values CACC/CARD/CASH/LOAN/OTHR/SVGS.
+  The choice in the app is bead `gn-hkx` (after Tracer 3).
+- **First sync (after the rule):** **1 bank request, 1 page, 185 transactions** from 2026-07-15 (90 days), **168 debits**
+  stored silently (**0 pushes, 0 notifications**), 40 payees. `/debits` now lists 279 debits and 97 payees, N26 and DKB merged.
+  N26 was skipped in that tick (polled within its interval). The old DKB session was closed with `DELETE` (HTTP 200) and the
+  new one fetches, so a reconnect does not end the new consent at DKB (Story 4.3's open question, answered for DKB).
+- **Tuning data (counts only, Neon, 2026-10-13):**
+
+  | | debits | with `entry_reference` | composite fallback | payees | payees with a creditor IBAN |
+  |---|---|---|---|---|---|
+  | N26 | 111 | 65 | 46 | 57 | 0 |
+  | DKB | 168 | 168 | 0 | 40 | 39 |
+
+  DKB sends `entry_reference` on every debit and a creditor IBAN on almost every payee, so R10b's key and R3a's tier 1
+  work there; N26 stays the weaker case (composite key for 41 % of debits, no creditor IBAN).
+- **New beads:** `gn-hkx` (connect from the app and choose the account there), the HTTP-client logging of session id and
+  account uid in Application Insights (P2), the empty accounts list on a reconnect (P3).
+
 ## Delivery plan (decided 2026-10-12)
 
 **Rule:** code-only stories are built and tested **locally** (tests in the Linux container, live check against the dev
@@ -218,6 +249,9 @@ DKB, flagged beta) and recorded here then. N26 and Mock ASPSP state 15552000 s (
 | Epic 2 — N26 live on Azure, end to end (2.1–2.11) | in progress — 2.1–2.4, 2.9, 2.10 done (2026-10-07/08); **2.5 done 2026-10-08** (Neon project in eu-central-1, all 12 migrations applied, seed user present; see "Cloud database (Neon)" above); **2.6 done 2026-10-08** (Function App on Flex Consumption in Frankfurt, Key Vault references resolved, https only, 401/200 checked, tick without consent harmless; see "Azure deployment" above) |
 | Story 2.6a — the first sync tried against real N26, locally | **done 2026-10-09** — see "Findings: first sync at N26" below |
 | Story 2.7 — N26 through the cloud | **done 2026-10-09** — see "Findings: N26 through the cloud" below; the first Steady tick (12:00 UTC) still to be read |
+| Story 2.11 — a real charge produces a push on my phone | **done 2026-10-13** — the owner paid 1 EUR at N26; a manual tick (poll time of N26 reset in Neon, `POST /admin/functions/IngestionTick`, 15:03 UTC, the 4th N26 fetch of the UTC day, no 429) stored the debit (`/debits` 279 → 280) and sent **one** push, a heads-up with the "New payee" reason on the phone, laptop disconnected; no second push. Still to watch: the next real N26 tick (00:00 UTC) must not repeat it; a good payee's silence and the force-stopped-app case (AR14) are not tested. `gn-xeq` and `gn-6k5` stay open as checks before go-live (only 1-page syncs so far at both banks) |
+| Story 3.5 — DKB through the cloud | **done 2026-10-13** — see "Findings: DKB through the cloud" below; one account chosen by type and product, 168 debits stored silently, no push |
+| Story 3.6 — ING-DiBa through the cloud | **dropped 2026-10-13** (owner: two banks are enough) |
 | Story 3.7 — each bank reconnects and alerts on its own | **local part done 2026-10-12** (bead stays open) — 752 tests; two-bank tests for reconnect with and without bad debits, dead by time / closed by the bank next to a reconnecting or first-syncing bank, a non-EUR charge skipped and never compared with a EUR limit; the tick now logs one line per bank with the count of skipped charges (bank name and count only). **Privacy fix** found in review: log lines no longer carry payee, date, amount or an IBAN fragment (deploy: "Deploy 2" above). **Still open:** the per-bank count of skipped charges from the real first syncs (3.5/3.6) |
 | Story 4.2 — I can see my connection status | **done locally 2026-10-12** (not deployed, no migration) — 745 tests; `GET /status` (API key; `bash tools/status.sh`) lists per bank the state, valid-until, last success/attempt and a sanitised last error, plus the number of debits waiting for a push; no session id, IBAN, uid, amount or payee; `GET /health` only says `ok` and the worst real state. Live on the dev DB: 401 without and with a wrong key, both sandbox consents listed. Two review rounds |
 | Story 4.3 — a reconnect closes the old session | **done locally 2026-10-12** (not deployed, no migration) — 716 tests; after the callback has stored the new consent the old session of that bank is closed with `DELETE /sessions/{id}` (5 s, best effort, "already closed" counts as fine, logs carry no session id); a dead, announced session costs no fetch and no status call; "dead" now needs a terminal status (CLOSED, EXPIRED, REVOKED); a tick that races a reconnect does not push. **Open finding (first real reconnect):** whether `DELETE` also revokes the consent at a real bank is untested (Sandbox only) — after the first real reconnect check that the new session still fetches. Two review rounds, no tick-level live check (needs the owner's browser) |

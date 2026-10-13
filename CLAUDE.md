@@ -4,6 +4,18 @@
 
 ## Status
 
+**2026-10-13 — Story 3.5 done: DKB runs in Azure next to N26 (commits `c197408`, `ef0b08e`, Deploy 3, nothing pushed).** DKB's
+consent has 5 accounts, all `CACC`; `AccountSelector` takes the one with type CACC and the exact product "Girokonto" (zero
+or several matches = nothing chosen, nothing stored). First sync: 1 page, 185 transactions, 168 debits, no push; `/debits`
+merges both banks (279 debits). Tuning counts are in `TRACER-03-GO-LIVE.md` ("Findings: DKB through the cloud"). **Owner
+decisions:** ING-DiBa is not connected (3.6 dropped, two banks are enough); choosing the account in the app is bead
+`gn-hkx`, after Tracer 3. **Story 2.11 done the same day (Epic 2 closed):** a 1 € charge at N26 gave one heads-up push on the phone, laptop
+disconnected, no second push; a manual tick needs `BankConsents.LastAttemptAt` of that bank reset in Neon first (the
+poll interval skips a bank polled within 6 h) and costs one of N26's ~4 fetches a day. **Open:** the 00:00 UTC N26 tick
+must not repeat the push (check `NotificationLog`); `gn-xeq` / `gn-6k5` stay open before go-live; then 3.7 (needs a
+reconnect proof), 3.8 (two banks), `gn-7n2`, `gn-djm`, `gn-6yh`. New beads: `gn-6yh` (HTTP
+client logging prints session id and account uid, P2), `gn-153` (empty accounts list), `gn-hkx`. 779 backend tests.
+
 **2026-10-12 (end of day) — Deploy 2 done: the log privacy fix of Story 3.7 runs in Azure.** Code only, no migration; `/status`,
 `/health`, `/debits` fine. **Open for the next session:** (1) read the first tick of the new build (18:00 UTC, or the
 next ones) in Application Insights: N26 has `LastAttemptAt` set, no error, no push, and no payee, amount or IBAN in the log;
