@@ -16,9 +16,9 @@ must not repeat the push (check `NotificationLog`); `gn-xeq` / `gn-6k5` stay ope
 closed the same day (Epic 3 closed, two banks):** a 0.50 € DKB transfer gave exactly one push, the phone shows one list
 (same-day order is a tie, bead `gn-e8s`); week check for 429 is `gn-06m` (to 2026-10-20). **Tracer 3 is functionally
 done; before go-live:** `gn-xeq`, `gn-6k5`, `gn-06m`, `gn-7n2` (Entra security defaults), `gn-djm` (drop the old
-column), `gn-6yh` (HTTP client logs session id and account uid); after it `gn-hkx` and the docs cleanup `gn-tn2`.
+column); **`gn-6yh` is built and committed (HTTP logs without ids, 794 tests) but not deployed**; after it `gn-hkx` and the docs cleanup `gn-tn2`.
 New beads: `gn-6yh` (HTTP
-client logging prints session id and account uid, P2), `gn-153` (empty accounts list), `gn-hkx`. 779 backend tests.
+client logging prints session id and account uid, P2), `gn-153` (empty accounts list), `gn-hkx`. 794 backend tests.
 
 **2026-10-12 (end of day) — Deploy 2 done: the log privacy fix of Story 3.7 runs in Azure.** Code only, no migration; `/status`,
 `/health`, `/debits` fine. **Open for the next session:** (1) read the first tick of the new build (18:00 UTC, or the

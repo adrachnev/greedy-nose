@@ -69,11 +69,16 @@ public static class GreedyNoseCoreServices
             sp.GetRequiredService<IConsentPersistence>(),
             options.ConsentValidity,
             sp.GetRequiredService<ILogger<ConsentStore>>()));
+        // No default HttpClient logging (gn-6yh): it prints every URL, and an Enable Banking path holds a
+        // session id or an account uid. RedactedRequestLogHandler writes the one line we keep. Every
+        // Enable Banking client (typed, or by name from the factory) is this one registration.
+        services.ConfigureHttpClientDefaults(builder => builder.RemoveAllLoggers());
+        services.AddTransient<RedactedRequestLogHandler>();
         services.AddHttpClient<EnableBankingClient>(client =>
         {
             client.BaseAddress = new Uri(options.BaseUrl);
             client.Timeout = TimeSpan.FromSeconds(30);
-        });
+        }).AddHttpMessageHandler<RedactedRequestLogHandler>();
 
         services.AddTransient<AspspResolver>();
 

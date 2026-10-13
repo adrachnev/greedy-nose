@@ -192,6 +192,13 @@ Local host on the Production application, dev database, real N26. Counts only:
 - **New beads:** `gn-hkx` (connect from the app and choose the account there), the HTTP-client logging of session id and
   account uid in Application Insights (P2), the empty accounts list on a reconnect (P3).
 
+## As built: Enable Banking URLs out of the logs (bead `gn-6yh`, autorun 2026-10-13)
+
+- **Problem:** the default HttpClient logging wrote `Sending HTTP request DELETE .../sessions/<session id>` and `GET .../accounts/<uid>/transactions` into Application Insights (found in Story 3.5). Ids are no credential (every call needs our signed JWT), but a session id is never logged by rule.
+- **Fix (code only, no migration, `host.json` unchanged):** `ConfigureHttpClientDefaults(RemoveAllLoggers)` removes the default logging of every client; `RedactedRequestLogHandler` on the one Enable Banking client registration logs one line `Enable Banking {Method} {PathTemplate} -> {StatusCode}`. The path keeps only the fixed segments `auth`, `sessions`, `accounts`, `transactions`, `balances`, `aspsps`, `application`; every other segment becomes `{id}` (fails closed); no query, header, body or exception message (a transport failure logs method, template and exception type at Warning). The same line gives the fetch count against the ~4/day quota and a `-> 429` for the week check `gn-06m`. Brevo gets no URL line any more.
+- **Verified:** 794 backend tests in the container (779 before, 15 new); one review (no MUST FIX; the id heuristic was a blocklist, so the fix round made it an allowlist); positive control: with `RemoveAllLoggers` taken out both DI tests fail, restored afterwards.
+- **Not done (owner decides):** the deploy. After it, check one tick: the traces hold `Enable Banking GET /accounts/{id}/transactions -> 200` and no URL with an id. **Old traces keep the ids until the Application Insights retention removes them** (the live N26 session uid is among them; not a credential).
+
 ## Delivery plan (decided 2026-10-12)
 
 **Rule:** code-only stories are built and tested **locally** (tests in the Linux container, live check against the dev
