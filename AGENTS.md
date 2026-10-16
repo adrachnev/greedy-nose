@@ -198,8 +198,8 @@ keeps the **what and why**: `epics.md` and `REQUIREMENTS.md` stay the only place
 criteria — a story bead carries only a title and `--spec-id` pointing at its `epics.md` section,
 never a copy.
 
-- **Start of a session:** `bd ready` (what is unblocked), `bd show <id>` for one item. This replaces
-  reading the "Next:" prose in `CLAUDE.md`'s Status.
+- **Start of a session:** `bd ready` (what is unblocked), `bd show <id>` for one item. The state of the work is
+  never written into `CLAUDE.md`; its Status section is a few lines that point here.
 - **Per story:** pick the bead, plan in plan mode as before, `bd update <id> --claim`, give the coder
   the bead id. Never change the build/review process — Beads only tracks it.
 - **Review findings:** a MUST/SHOULD FIX goes back to the same coder as before. Anything deferred

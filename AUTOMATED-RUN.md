@@ -40,8 +40,8 @@ normal mode.
    effects / zero requests" check needs a **positive control**, and the thing under test must be
    confirmed running first.
 8. Docs in the same pass: the "as built" section (measured results, decisions, deferred items),
-   the Progress table, `CLAUDE.md`'s Status, the beads (close the step's bead with the commit hash,
-   refresh `.beads/issues.jsonl`), and the status memory.
+   the Progress table of the tracer document, the beads (close the step's bead with the commit hash,
+   refresh `.beads/issues.jsonl`). `CLAUDE.md`'s Status is not touched (cleaned up 2026-10-16).
 9. **Commit** on `main`, once per verified step — pre-authorized inside the run. Stage files
    explicitly (never `git add -A`; the tree holds gitignored secrets), message in the repo's
    style, end with the attribution line. **Never** push, amend, force or reset.

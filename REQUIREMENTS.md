@@ -1,7 +1,7 @@
 # Requirements
 
-This file is the single source of truth for **what the app does**. `CLAUDE.md` records status
-and past decisions; `ARCHITECTURE.md` records how it is built. Where either disagrees with
+This file is the single source of truth for **what the app does**. `CLAUDE.md` holds the short
+project status and the open/deferred list; `ARCHITECTURE.md` records how it is built. Where either disagrees with
 this file, **this file wins**. Mocks and code must follow it.
 
 Requirements are numbered (`R1`, `R2`, …) so we can refer to them precisely. Open points are
