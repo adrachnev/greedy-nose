@@ -4,6 +4,8 @@
   "logging": {
     "logLevel": {
       "Default": "Information",
+      "Azure.Core": "Warning",
+      "Azure.Identity": "Warning",
       "Host.Triggers.Timer": "Information"
     }
   },
