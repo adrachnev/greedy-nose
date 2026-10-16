@@ -53,8 +53,14 @@ per-bank labels in the debit list, other users' accounts.
 - How each bank behaves when consent is approved in its own app (DKB, ING) — recorded as a finding
   on the first real consent.
 - Each bank's `maximum_consent_validity` — read with the Production application.
-- Whether each fetched page counts against a bank's ~4 fetches per day.
-- Whether `DELETE /sessions/{id}` also revokes the consent at a real bank.
+- Whether each fetched page counts against a bank's ~4 fetches per day. **Evidence 2026-10-16 (Application Insights,
+  beads `gn-xeq`, `gn-6k5` closed):** every tick at N26 and DKB fetched exactly 1 page (first syncs 108 and 185
+  transactions, normal ticks 11–19), 4 ticks a day = 4 transaction requests per bank per day, no 429 in 30 days. The
+  bank's own counting of a second page is **not proven** (the Enable Banking FAQ says nothing on `continuation_key`;
+  only their support can answer) and never occurs with a 90-day window. The real risk is a fifth fetch in a UTC day
+  (a manual tick), not paging.
+- ~~Whether `DELETE /sessions/{id}` also revokes the consent at a real bank.~~ Answered for DKB on 2026-10-13: the new
+  session kept fetching after the old one was closed.
 - Behaviour of the target phone when the app is force-stopped.
 
 ## Cloud database (Neon) — Story 2.5
@@ -95,8 +101,15 @@ per-bank labels in the debit list, other users' accounts.
   so a new key cannot read the old rows — change the Key Vault secret, then connect each bank again.
   Migrations are never applied by the app: after a schema change run `DB=neon bash tools/ef-container.sh database
   update` before `bash tools/azure-deploy.sh`.
-- **Scripts** (all use the Azure CLI in a container, `tools/az.sh`, nothing to install; `bash tools/az.sh login
-  --use-device-code` once):
+- **Azure login (changed 2026-10-16, bead `gn-7n2` closed):** Entra security defaults are **on** (MFA for people).
+  The CLI on this machine is logged in as the service principal `sp-greedy-nose-tools` (role Contributor on
+  `rg-greedy-nose` only; client id `2bb8a88e-c51a-48cf-a5a4-12d1787f4525`, tenant `19ca364c-1284-42e1-85b5-bfb61dee02a3`),
+  so deploy, migrations' Azure side and log queries need no code and no MFA. It was created by hand in the portal
+  (App registration, secret, role assignment); the login is `bash tools/az-sp-login.sh <client-id> <tenant-id>
+  <secret-file>` (the file lies outside the repo and is deleted afterwards). **The secret expires after 12 months —
+  bead `gn-4dy`.** A device-code login (`bash tools/az.sh login --use-device-code`) still works for Azure Resource
+  Manager, but Graph and Log Analytics need an extra MFA, so use the service principal.
+- **Scripts** (all use the Azure CLI in a container, `tools/az.sh`, nothing to install):
   - `tools/azure-setup.sh` — creates everything above; safe to run again.
   - `tools/azure-secret.sh <vault> <name> secret:<UserSecretKey>|file:<UserSecretKey>` — copies one local value
     into the Key Vault without printing it.
@@ -108,7 +121,14 @@ per-bank labels in the debit list, other users' accounts.
     (master key from `az functionapp keys list`), body `{}` → 202.
 - **Logs:** Application Insights; query with `bash tools/az.sh monitor app-insights query --app appi-greedy-nose -g
   rg-greedy-nose --analytics-query "traces | where timestamp > ago(30m) | project timestamp, message"`.
-  They hold SQL text and the fixed owner id, no secrets. Logs arrive a few minutes late.
+  Logs arrive a few minutes late. Since the log privacy fixes (`gn-6yh`, Deploy 2/4) our own lines carry no session id,
+  account uid, IBAN, payee or amount; checked 2026-10-16 with regex counts on the message text. From 2026-10-16
+  `host.json` sets `Azure.Core` and `Azure.Identity` to Warning (they were about 80 % of the lines). Query as the
+  service principal: `WS=$(bash tools/az.sh monitor log-analytics workspace show -g rg-greedy-nose -n log-greedy-nose
+  --query customerId -o tsv)`, then `bash tools/az.sh monitor log-analytics query -w "$WS" --analytics-query
+  "AppTraces | where TimeGenerated > ago(1d) | where Message startswith 'Tick fetched'" -o tsv` (the app-insights
+  query command above needs an extra MFA under security defaults). One request line per Enable Banking call:
+  `Enable Banking GET /accounts/{id}/transactions -> 200` (count them for the ~4/day check).
 - **Cold start (measured 2026-10-08):** the first `GET /debits` after 12 minutes idle answered 200 in 4.6 s
   (right after the deploy: 6.5 s); the next call 0.17 s. Pushes are not affected (the timer runs the tick).
   Cost check in Azure Cost Analysis is still to do after 2–3 days.
@@ -224,8 +244,9 @@ flows (before Story 3.5), and check once that the tick logs no payee, amount or 
 `gn-6k5` answered for N26), 3.5 (DKB), 3.6 (ING-DiBa), then 3.7 and 3.8 (partly testable locally, proof only live).
 A redeploy happens only when a live story needs a code fix.
 
-**Also before go-live:** `gn-7n2` (switch Entra security defaults back on) and the lesson of Story 2.8 — the phone's
-device token must be in the cloud before live data flows.
+**Also before go-live:** ~~`gn-7n2` (switch Entra security defaults back on)~~ done 2026-10-16, and the lesson of Story
+2.8 — the phone's device token must be in the cloud before live data flows (5 pushes were lost on 2026-10-10 because 2.7
+ran before 2.8).
 
 **Deploy 1 — done 2026-10-12 (about 13:45 UTC).** Both migrations below were applied to Neon first (counts unchanged: 108
 debits, 57 payees, 1 sync state, 1 consent), the old build kept answering (200 / 401) in between, then
@@ -269,5 +290,6 @@ DKB, flagged beta) and recorded here then. N26 and Mock ASPSP state 15552000 s (
 | Story 3.2 — the worker walks every bank | **done locally 2026-10-12** (not deployed; migration `AddConsentPollState` pending for Neon) — 648 tests; live on the dev DB two consents at once: the stale N26 sandbox consent failed (404) and the Mock ASPSP still synced in the same tick, per-bank attempt/success/error recorded. New: per-bank budget `Ingestion:BankTimeout` (40 s, bead `gn-ftd` for multi-page banks) |
 | Story 3.1 — the worker takes the user from the consent | **done locally 2026-10-12** (not deployed, no migration) — 617 tests, live check on the dev DB with a fresh Sandbox consent |
 | Story 2.8 — release app on the phone | **done 2026-10-12** — signed release APK (arm64; key `C:\Users\Nutzer\.greedy-nose\release.jks` plus untracked `app/android/keystore.properties`), cloud URL from untracked `app/src/data/backend.local.ts`, https only; release status line (unreachable / not authorized / not configured / unreadable / empty / alerts not set up). Verified: `DeviceTokens` = 1 and one rule in Neon. **Lesson:** 2.7 ran before 2.8, so 5 pushes (2026-10-09 18:00 to 10-11 00:00 UTC) ended `NoToken`/`GaveUp` and the failure mail came — the 2.10 mail worked as designed. Those pushes are lost (the 24 h retry is over). |
-| Epic 3 — DKB and ING-DiBa watched too (3.1–3.8) | not started |
-| Epic 4 — never silently without alerts (4.1–4.3) | not started |
+| Epic 3 — DKB and ING-DiBa watched too (3.1–3.8) | **closed 2026-10-13, two banks** (ING-DiBa dropped by the owner, 3.6 not done) |
+| Epic 4 — never silently without alerts (4.1–4.3) | **done 2026-10-12** (local), deployed at Deploy 1 |
+| Closing steps before go-live | **2026-10-16:** `gn-6yh` (logs without ids) deployed and checked; `gn-djm` (old column) dropped on dev and Neon (commit `694fd20`); `gn-7n2` done (security defaults on, service principal login, see "Azure login"); `gn-xeq` and `gn-6k5` closed on log evidence (see Open questions), the two leftovers are `gn-61q` and `gn-ubu` (P3); SDK logs to Warning (`a98be13`). **Left:** `gn-06m` (week check for 429, to 2026-10-20), then Tracer 3 is closed. |

@@ -129,6 +129,30 @@ the single source of truth for product behavior; where anything else disagrees, 
   `adb reverse` tunnel for Metro's port (8081) looks identical on the device to "Metro isn't
   running" even when Metro is healthy — check the tunnel before assuming the bundler is down.
 
+## Cloud and release operations
+
+Names, settings and findings: `TRACER-03-GO-LIVE.md`, "Azure deployment". Only the working rules are here.
+
+- Azure CLI: `bash tools/az.sh <args>` (container; the login lives in the Docker volume `greedy-nose-azure`). The
+  login is the service principal `sp-greedy-nose-tools` (`bash tools/az-sp-login.sh`, Contributor on `rg-greedy-nose`
+  only, secret renewal: bead `gn-4dy`). Entra security defaults are on, so never plan a device-code login for Graph
+  or Log Analytics work.
+- Deploy: migrations on Neon first (`DB=neon bash tools/ef-container.sh database update`), then
+  `bash tools/azure-deploy.sh`; afterwards `bash tools/status.sh https://func-greedy-nose-611f0.azurewebsites.net`.
+  Code that is already running does not need a redeploy for a migration that only drops a dead column.
+- The permission classifier blocks a production deploy, a migration on Neon and the creation of credentials when
+  Claude runs them. Do not work around it: prepare everything, then ask the owner to run the command themselves
+  in the session with `! <command>`, and verify the result afterwards.
+- A manual ingestion tick costs one of a bank's ~4 fetches of the UTC day: reset `BankConsents.LastAttemptAt` of that
+  bank in Neon first (the poll interval skips a bank polled within 6 h), then `POST /admin/functions/IngestionTick`
+  (TRACER-03 has the call). Check the count of today's `Enable Banking GET … transactions` log lines before doing it.
+- Logs: Application Insights / Log Analytics, query examples in TRACER-03. Our own lines carry no ids; keep it that way
+  (a new log line never prints a session id, account uid, IBAN, payee or amount).
+- Release APK (phone build): `cd app/android; .\gradlew.bat app:assembleRelease -PreactNativeArchitectures=arm64-v8a`.
+  The signing key (`C:\Users\Nutzer\.greedy-nose\release.jks`, the owner backs it up), `app/android/keystore.properties`
+  and `app/src/data/backend.local.ts` are untracked on purpose. The device token must reach the cloud before real
+  data flows, or pushes are lost.
+
 ## Conventions that differ from defaults
 
 - Terminology follows `R0`: `payee`/`debit`/`good`/`bad` — never `debtor`/`debitor`/`transaction`/
