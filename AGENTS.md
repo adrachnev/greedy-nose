@@ -10,7 +10,8 @@ the single source of truth for product behavior; where anything else disagrees, 
 
 ## Policy
 
-- Always respond in English in this project, regardless of any global default language.
+- The console language follows the owner (German at the moment, as set in the global settings). Documents, code,
+  comments and commit messages stay English.
 - Code under `app/` is written only by the `coder-mobile` subagent; code under `backend/` only
   by `coder-backend`. Never write it in the main session, even for something that looks small —
   that also skips the automatic review trigger, since review fires on a subagent stopping, not on
