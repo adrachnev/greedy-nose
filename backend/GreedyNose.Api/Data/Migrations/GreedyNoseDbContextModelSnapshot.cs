@@ -94,9 +94,6 @@ namespace GreedyNose.Api.Data.Migrations
                     b.Property<string>("AccountKey")
                         .HasColumnType("text");
 
-                    b.Property<string>("ExpiryNotifiedSessionHash")
-                        .HasColumnType("text");
-
                     b.Property<DateTimeOffset>("FirstSyncCompletedAt")
                         .HasColumnType("timestamp with time zone");
 

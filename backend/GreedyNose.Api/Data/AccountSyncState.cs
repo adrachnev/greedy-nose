@@ -28,12 +28,4 @@ public sealed class AccountSyncState
     /// encrypted, in <c>BankConsents</c>, and this table must never hold it).
     /// </summary>
     public string? LastSessionIdHash { get; set; }
-
-    /// <summary>
-    /// OBSOLETE, no longer read or written (Story 4.1): the "already told" memory lives on
-    /// <c>BankConsent.ExpiryNotifiedSessionHash</c>. Kept only so the still-running old code works between the
-    /// migration and the new deploy; the column is dropped in a later migration (bead).
-    /// </summary>
-    [Obsolete("Moved to BankConsent.ExpiryNotifiedSessionHash (Story 4.1); column is dropped after deploy.")]
-    public string? ExpiryNotifiedSessionHash { get; set; }
 }
