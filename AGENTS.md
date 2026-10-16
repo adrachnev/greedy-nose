@@ -219,6 +219,28 @@ never a copy.
 - The `bd` CLI was installed with `npm install -g @beads/bd`; it runs on this machine despite
   Smart App Control (checked 2026-10-05).
 
+## Work after Tracer 3: plan with BMAD, record in the right place (decided 2026-10-16)
+
+The three tracer documents are history and stay as they are; there is no fourth tracer. New work is planned with BMAD
+and built with the process in Policy.
+
+- **Where what is written** (one place per thing):
+  - what the app does: `REQUIREMENTS.md`; design decisions: `ARCHITECTURE.md`; plan of a story (description,
+    acceptance criteria): `_bmad-output/planning-artifacts/epics.md` — **a plan, no "As built" blocks any more**;
+  - what was built, measured or decided while doing a story (numbers, findings, deviations): the **notes of its
+    bead** (`bd update <id> --append-notes`) and the commit message; a decision that changes the design also goes into
+    `ARCHITECTURE.md`; operating knowledge goes into `AGENTS.md`;
+  - state and order of work: Beads. `CLAUDE.md` Status stays a few lines.
+- **Before the next epic is planned** (bead `gn-tn2`): `ARCHITECTURE.md` must be correct again (it still describes the
+  in-process worker, the consumption plan, the Key Vault role and the Health Monitor), and the 20 "As built" blocks of
+  `epics.md` are moved into the bead notes or `TRACER-03-GO-LIVE.md` and removed from `epics.md`. BMAD plans from these
+  documents, so stale ones produce stories on wrong assumptions.
+- **First planning step after Tracer 3:** turn the next topics into epics and stories (`bmad-create-epics-and-stories`):
+  choosing the account in the app (`gn-hkx`), the remaining screens and onboarding, the resilience beads. Each story
+  then gets a bead as before.
+- BMAD plans only. Building and reviewing stays as in Policy (plan mode, `coder-*`, `coder-reviewer`); do not use
+  `bmad-build`.
+
 ## Local backend setup notes (outside the managed block; added 2026-10-07)
 
 - Story 2.10: the backend also refuses to start without `Brevo:ApiKey`, `Brevo:SenderEmail`,
