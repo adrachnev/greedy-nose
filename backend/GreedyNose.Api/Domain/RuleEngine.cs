@@ -115,6 +115,20 @@ public static class RuleEngine
     };
 
     /// <summary>
+    /// R11b: a push can arrive up to 72 h late, so its body says when the charge was booked
+    /// ("Over your limit of 30,00 €. Booked 22 Sep."). The time is added (in UTC, labelled) only when the
+    /// bank gave one (<paramref name="hasTime"/>); a day-only booking is midnight padding, not a time.
+    /// Applied at send time from the stored debit, so the first send and every retry word it the same way
+    /// without the booking date being frozen into <c>PendingPushes.Reason</c>.
+    /// </summary>
+    public static string WithBookingDate(string reason, DateTimeOffset booked, bool hasTime)
+    {
+        var utc = booked.ToUniversalTime();
+        var when = utc.ToString(hasTime ? "d MMM, HH:mm 'UTC'" : "d MMM", CultureInfo.InvariantCulture);
+        return $"{reason} Booked {when}.";
+    }
+
+    /// <summary>
     /// A fixed de-DE-style amount ("49,00 €") for push text — the server has no device locale to
     /// format with (TRACER-02-NOTIFICATIONS.md's "Formatting default" note). Built explicitly
     /// rather than through <c>ToString("C")</c> or <c>new CultureInfo("de-DE")</c>: both key off

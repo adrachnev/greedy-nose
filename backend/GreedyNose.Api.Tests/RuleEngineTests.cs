@@ -155,4 +155,28 @@ public class RuleEngineTests
         Assert.DoesNotContain("−", text);
         Assert.DoesNotContain("-", text);
     }
+
+    [Fact]
+    public void WithBookingDate_names_the_day_for_a_day_only_booking()
+    {
+        var booked = new DateTimeOffset(2026, 10, 19, 0, 0, 0, TimeSpan.Zero);
+
+        Assert.Equal("You marked this payee as bad. Booked 19 Oct.", RuleEngine.WithBookingDate("You marked this payee as bad.", booked, hasTime: false));
+    }
+
+    [Fact]
+    public void WithBookingDate_adds_the_utc_time_only_when_the_bank_gave_one()
+    {
+        var booked = new DateTimeOffset(2026, 10, 19, 14, 5, 0, TimeSpan.FromHours(2));
+
+        Assert.Equal("X. Booked 19 Oct, 12:05 UTC.", RuleEngine.WithBookingDate("X.", booked, hasTime: true));
+    }
+
+    [Fact]
+    public void WithBookingDate_reads_the_utc_day_when_the_offset_changes_the_date()
+    {
+        var booked = new DateTimeOffset(2026, 10, 19, 0, 30, 0, TimeSpan.FromHours(2));
+
+        Assert.Equal("X. Booked 18 Oct, 22:30 UTC.", RuleEngine.WithBookingDate("X.", booked, hasTime: true));
+    }
 }

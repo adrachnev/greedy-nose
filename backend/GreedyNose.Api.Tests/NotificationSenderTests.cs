@@ -232,11 +232,11 @@ public class NotificationSenderTests
     }
 
     [Fact]
-    public void The_message_expires_after_one_hour_because_a_stale_alert_is_worthless()
+    public void The_message_waits_72_hours_for_a_phone_that_is_off()
     {
         var message = FirebaseNotificationSender.BuildMessage(new PushMessage(FakeToken, "t", "b"));
 
-        Assert.Equal(TimeSpan.FromHours(1), message.Android.TimeToLive);
+        Assert.Equal(TimeSpan.FromHours(72), message.Android.TimeToLive);
     }
 
     [Fact]

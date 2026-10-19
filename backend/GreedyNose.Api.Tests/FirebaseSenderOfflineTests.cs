@@ -241,7 +241,7 @@ public class FirebaseSenderOfflineTests
     /// object, not the request.
     /// </summary>
     [Fact]
-    public async Task The_request_the_sdk_sends_carries_the_token_the_text_high_priority_and_a_one_hour_ttl()
+    public async Task The_request_the_sdk_sends_carries_the_token_the_text_high_priority_and_a_72_hour_ttl()
     {
         using var h = Answering(() => Sent("0:1"));
 
@@ -255,7 +255,7 @@ public class FirebaseSenderOfflineTests
         Assert.Equal("Greedy Nose", message.GetProperty("notification").GetProperty("title").GetString());
         Assert.Equal("Test push from the backend", message.GetProperty("notification").GetProperty("body").GetString());
         Assert.Equal("high", message.GetProperty("android").GetProperty("priority").GetString());
-        Assert.Equal("3600s", message.GetProperty("android").GetProperty("ttl").GetString());
+        Assert.Equal("259200s", message.GetProperty("android").GetProperty("ttl").GetString());
         Assert.False(message.TryGetProperty("data", out _), "no data payload yet");
     }
 

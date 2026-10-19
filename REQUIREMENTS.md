@@ -241,6 +241,15 @@ explicit: a debit that turns bad later because of a rule edit never notifies (R1
 never sent" cannot be the signal.
 
 **R12** — Notifications carry no quick actions. Tapping one opens the debit detail, which links
+**R11b — A push waits for a phone that is off** (settled 2026-10-19). "Accepted by the push service" is not
+"delivered": a phone that is switched off or offline cannot show anything. The push therefore stays queued at the
+push service for **72 hours**, so it arrives when the phone is back online, without the app being started. Because
+it can arrive late, it says **when the charge was booked**, so a late alert is never mistaken for a fresh one.
+Not covered: a phone offline for more than 72 hours, an app force-stopped in Android settings, and a push that the
+service accepted but never delivered (no receipt exists; a delivery receipt is a separate, later decision).
+Found 2026-10-19: two DKB debits pushed at 00:00 UTC were lost because the phone was off and the queue time was
+1 hour.
+
 to the payee's rule screen.
 
 **R12a — Wording** (settled 2026-08-14). A debit can be bad for three different reasons, and the

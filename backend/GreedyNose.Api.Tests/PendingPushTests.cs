@@ -210,6 +210,7 @@ public class PendingPushTests
 
         var push = Assert.Single(s.Sender.Sent);
         Assert.StartsWith("NEW SHOP", push.Title);
+        Assert.Equal("New payee — you haven't seen this one before. Booked 22 Sep.", push.Body); // R11b: the retry words it like the first send
         var mark = Assert.Single(await MarksAsync(s.Db));
         Assert.Equal(PendingPush.EndedSent, mark.EndReason);
         Assert.Equal(Start.AddHours(6), mark.EndedAt);
@@ -219,6 +220,22 @@ public class PendingPushTests
         var log = Assert.Single(await verify.NotificationLog.ToListAsync());
         Assert.Equal(mark.DebitId, log.DebitId);
         Assert.Equal(mark.Reason, log.Reason);
+        Assert.DoesNotContain("Booked", mark.Reason);
+        Assert.DoesNotContain("Booked", log.Reason);
+    }
+
+    [Fact]
+    public async Task A_retried_push_for_a_debit_booked_with_a_time_states_it_in_utc()
+    {
+        var s = await NewSetupAsync(Ok, false, Booked("2026-09-22T00:30:00+02:00", "NEW SHOP", "10.00", "E1"));
+        await Tick(s); // no token: owed
+        await AddTokenAsync(s.Db, "tok-1", s.Clock);
+
+        s.Clock.Now = Start.AddHours(6);
+        await Tick(s);
+
+        // 00:30 at +02:00 is the day before in UTC.
+        Assert.Equal("New payee — you haven't seen this one before. Booked 21 Sep, 22:30 UTC.", Assert.Single(s.Sender.Sent).Body);
     }
 
     [Fact]

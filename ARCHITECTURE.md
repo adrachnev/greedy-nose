@@ -605,6 +605,14 @@ bank) within a 60 s budget, for at most 24 h, then gives up and logs it; failed 
 reconnect summary push (R20) is retried the same way, its counts N and M frozen at creation. Only
 `TokenNoLongerValid` prunes a token; `Rejected` means a human must look.
 
+**A push waits 72 h for a phone that is off, and says when the charge was booked (R11b, decided 2026-10-19).** The
+FCM time-to-live is 72 hours (`FirebaseNotificationSender.TimeToLive`; it was 1 h and two alerts for a switched-off
+phone were dropped). "Accepted by FCM" is still not "delivered" and no receipt exists. Because a push can arrive late,
+the debit push body is R12a's reason plus `Booked 19 Oct.` (with `, 14:32 UTC` only when the bank gave a time;
+`RuleEngine.WithBookingDate`). The suffix is added at send time from the stored debit, in the first send and in every
+retry, so `PendingPushes.Reason` and `NotificationLog.Reason` keep the plain reason and the date is never frozen twice.
+The reconnect summary (R20) is not a debit and carries no date.
+
 **The operator mail** (Story 2.10, `PushFailureWatch`, state in `PushHealth`): a send to all of a user's tokens is one
 attempt; after **three failed attempts in a row** one email goes to the owner through Brevo, once per incident. The
 flag is set only after Brevo accepted the mail, so a failed mail is retried at the next evaluation. When a push works

@@ -17,11 +17,13 @@ namespace GreedyNose.Api.Notifications;
 public sealed class FirebaseNotificationSender : INotificationSender
 {
     /// <summary>
-    /// How long FCM keeps trying to deliver a message to a phone that is offline. An alert about a
-    /// charge that is hours old is worthless — worse than none, since the user cannot tell it is
-    /// stale — so this is short. (FCM's own default is four weeks.)
+    /// How long FCM keeps a message queued for a phone that is off or offline (R11b). Long on purpose:
+    /// "accepted by FCM" is not "delivered", and a one-hour value lost two alerts to a phone that was
+    /// switched off. A late alert is acceptable because the debit push names the booking date, so it is
+    /// never mistaken for a fresh one. Not covered: a phone off for longer than this, a force-stopped app.
+    /// (FCM's own default is four weeks.)
     /// </summary>
-    public static readonly TimeSpan TimeToLive = TimeSpan.FromHours(1);
+    public static readonly TimeSpan TimeToLive = TimeSpan.FromHours(72);
 
     // These two values are paired with the Android app and must change together with it: the app
     // creates the notification channel in MainApplication and ships the drawable as

@@ -561,6 +561,33 @@ public class IngestionRunnerTests
         await using var verify = NewInMemoryContext(dbName);
         var log = await verify.NotificationLog.SingleAsync(n => n.UserId == SeedData.UserId);
         Assert.Equal("New payee — you haven't seen this one before.", log.Reason);
+        Assert.DoesNotContain("Booked", log.Reason); // R11b: the date is added at send time, never stored
+    }
+
+    [Fact]
+    public async Task A_debit_booked_with_a_time_states_it_in_utc_in_the_push_and_keeps_the_stored_reason_plain()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var clock = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        var consent = NewConsentStore(clock);
+
+        await SeedBootstrappedAsync(dbName, clock);
+        await using (var db = NewInMemoryContext(dbName))
+        {
+            db.DeviceTokens.Add(new DeviceToken { Id = Guid.NewGuid(), UserId = SeedData.UserId, Token = "tok-1", UpdatedAt = clock.GetUtcNow() });
+            await db.SaveChangesAsync();
+        }
+
+        // 14:05 at +02:00 is 12:05 UTC (R11b names the time in UTC).
+        var fetcher = new FakeDebitsFetcher(Mapped(Booked("2026-09-22T14:05:00+02:00", "TIME SHOP")));
+        var sender = new FakeSender(_ => SendResult.Accepted("x"));
+        var runner = NewRunner(new InMemoryDbContextFactory(dbName), consent, fetcher, sender, clock);
+
+        await runner.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal("New payee — you haven't seen this one before. Booked 22 Sep, 12:05 UTC.", Assert.Single(sender.Sent).Body);
+        await using var verify = NewInMemoryContext(dbName);
+        Assert.DoesNotContain("Booked", (await verify.NotificationLog.SingleAsync()).Reason);
     }
 
     [Fact]
@@ -615,7 +642,7 @@ public class IngestionRunnerTests
         await runner.RunOnceAsync(CancellationToken.None);
 
         Assert.Single(sender.Sent);
-        Assert.Contains("Over your limit of 30,00 €.", sender.Sent[0].Body);
+        Assert.Equal("Over your limit of 30,00 €. Booked 22 Sep.", sender.Sent[0].Body);
     }
 
     [Fact]
@@ -642,7 +669,7 @@ public class IngestionRunnerTests
         await runner.RunOnceAsync(CancellationToken.None);
 
         Assert.Single(sender.Sent);
-        Assert.Equal("You marked this payee as bad.", sender.Sent[0].Body);
+        Assert.Equal("You marked this payee as bad. Booked 22 Sep.", sender.Sent[0].Body);
     }
 
     [Fact]

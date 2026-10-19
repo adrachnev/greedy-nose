@@ -863,7 +863,8 @@ public sealed class IngestionRunner(
             return;
         }
 
-        var sendResult = await SendToAllTokensAsync(db, tokens, title, reason, ct);
+        var body = RuleEngine.WithBookingDate(reason, debit.Timestamp, debit.HasTime); // R11b
+        var sendResult = await SendToAllTokensAsync(db, tokens, title, body, ct);
         await RecordAttemptAsync(userId, sendResult.AnySent, sendResult.Failure);
 
         if (!sendResult.AnySent)
@@ -1050,7 +1051,7 @@ public sealed class IngestionRunner(
             var debit = await db.Debits.SingleAsync(d => d.UserId == userId && d.Id == mark.DebitId, ct);
             var payee = await db.Payees.SingleAsync(p => p.UserId == userId && p.Id == debit.PayeeId, ct);
             title = $"{payee.Name} · {RuleEngine.FormatAmountEUR(debit.AmountEUR)}";
-            body = mark.Reason!;
+            body = RuleEngine.WithBookingDate(mark.Reason!, debit.Timestamp, debit.HasTime); // R11b: same wording as the first send
         }
         else
         {
