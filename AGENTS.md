@@ -248,9 +248,10 @@ and built with the process in Policy.
     built) or "deferred". A row without any of these is a gap in the plan; check the table at every planning round.
   - **A story needs behaviour no R states?** First write the R in `REQUIREMENTS.md`, then the story. A design decision
     made while building goes into `ARCHITECTURE.md`; if the title of an A section changes, search `epics.md` for it.
-  - **Not yet done:** the existing stories still cite the old FR/NFR/AR numbers of Tracer 3 (mapped at the top of
-    `epics.md`), the three UX-DR were left as they were, and the coverage map per R does not exist yet. The next
-    planning round (`bmad-create-epics-and-stories`) creates it.
+  - **State:** the stories of Tracer 3 cite R numbers and A section titles (the old FR/NFR/AR numbers are gone from
+    `epics.md`; `git show 28e4587:_bmad-output/planning-artifacts/epics.md` has the lists). The three UX-DR were left
+    as they were. `epics.md` holds a coverage map of Tracer 3 only; the full table per R does not exist yet and is made
+    in the next planning round (`bmad-create-epics-and-stories`).
 - **First planning step after Tracer 3:** turn the next topics into epics and stories (`bmad-create-epics-and-stories`):
   choosing the account in the app (`gn-hkx`), the remaining screens and onboarding, the resilience beads. Each story
   then gets a bead as before.

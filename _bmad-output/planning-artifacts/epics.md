@@ -26,7 +26,7 @@ on it). No `DESIGN.md`/`EXPERIENCE.md` UX pair exists; `mocks/` is the UX source
 **Explicitly out of Tracer 3** (kept here so nobody re-adds them): in-app onboarding (R26/R26a —
 the owner connects N26 once through the backend page and classifies payees on the Rules screen),
 the in-app connection-expired banner (`01d`), Disconnect / Delete account (R18, `06b`/`06c`),
-the Health Monitor job (only a small operator-email slice for failed pushes comes in, see AR18), iOS, a bank-selection screen, per-bank labels in the
+the Health Monitor job (only a small operator-email slice for failed pushes comes in, see R11a), iOS, a bank-selection screen, per-bank labels in the
 debit list, other users' accounts (Restricted Production is owner-only).
 
 **What was built, measured or decided** while doing a story is not kept here: it is in the notes of the story's
@@ -40,61 +40,12 @@ bead (`bd show <id>`, the bead's `--spec-id` points back to its section) and in 
 
 ## Requirements Inventory
 
-### Functional Requirements
+### Functional, non-functional and architecture requirements
 
-The texts live in `REQUIREMENTS.md`; this list only says which requirements each FR stands for. "Baseline" = already
-built and verified against the sandbox/N26; go-live had to keep it true on the cloud and across several banks.
-
-- FR1 = R22a (one account per bank, several banks at once; N26 and DKB, ING-DiBa dropped)
-- FR2 = R25, R20b (first sync, silent); all-or-nothing: `ARCHITECTURE.md`, "Ingestion modes"
-- FR3 = R9, R2a (the list comes from stored data, no incoming money)
-- FR4 = R10, R10a, R10b, R10c, R11 (baseline)
-- FR5 = R12a, R17a (baseline)
-- FR6 = R4–R7, R13, R14, R21, and R35 (a saved rule reaches the backend; the go-live addition)
-- FR7 = R19; once per session: `ARCHITECTURE.md`, "Consent lifecycle". The in-app banner half was out of the tracer.
-- FR8 = R20, R20a (baseline, per bank)
-- FR9 = R15, R16 (baseline). The skipped non-EUR charge is a known gap, see "Currently open" in `REQUIREMENTS.md`
-- FR10 = R22
-
-### NonFunctional Requirements
-
-The texts live in `REQUIREMENTS.md` (since 2026-10-19, section "Constraints and qualities") and `ARCHITECTURE.md`; this
-list only says which is which.
-
-- NFR1 (never miss a new bad charge) = R1, R3b, R10b
-- NFR2 (zero cost) = R27; the services: `ARCHITECTURE.md`, "Cost"
-- NFR3 (owner's accounts only) = R28
-- NFR4 (the bank's fetch cap) = R29; the design: `ARCHITECTURE.md`, "Transaction ingestion"
-- NFR5 (latency, same day is enough) = R30
-- NFR6 (one bank's failure is isolated) = R31
-- NFR7 (secrets and bank data) = R32; the design: `ARCHITECTURE.md`, "Authentication and secrets"
-- NFR8 (nothing open to the public) = R33
-- NFR9 (free-tier Postgres never loses data): `ARCHITECTURE.md`, "Cost"
-- NFR10 (platform): Android only = R34; backend on net10.0 with the isolated worker model: `ARCHITECTURE.md`, "Hosting, as built"
-
-### Additional Requirements
-
-No starter template (brownfield). The blockers from `TRACER-03-GO-LIVE.md` were AR1–AR9. The texts live in
-`REQUIREMENTS.md`, `ARCHITECTURE.md` and `AGENTS.md`; this list only says where.
-
-- AR1 (debit list from the database) = R9, R29; `ARCHITECTURE.md`, "Transaction ingestion"
-- AR2 (authentication on every endpoint, one current-user seam) = R33; `ARCHITECTURE.md`, "Authentication and secrets"
-- AR3 (consent store in the database) = `ARCHITECTURE.md`, "Data model" (`BankConsents`)
-- AR4 (multi-consent worker) = R22a, R31; `ARCHITECTURE.md`, "Hosting, as built" and "Data model"
-- AR5 (hosting: Azure Functions, isolated worker) = `ARCHITECTURE.md`, "Hosting, as built"
-- AR6 (cloud Postgres: Neon, migrations by hand) = `ARCHITECTURE.md`, "Hosting, as built" and "Cost"
-- AR7 (HTTPS redirect URL, no custom domain) = `ARCHITECTURE.md`, "Cost"
-- AR8 (switch to the Production application, consents granted fresh) = R28; `ARCHITECTURE.md`, "Cost"
-- AR9 (consent validity from the bank's own maximum) = `ARCHITECTURE.md`, "Cost"
-- AR10 (pagination, 90-day first sync) = R25; `ARCHITECTURE.md`, "Transaction ingestion"
-- AR11 (way back into the app after consent: the browser) = `ARCHITECTURE.md`, "Consent lifecycle"
-- AR12 (sideloaded self-signed release APK) = `ARCHITECTURE.md`, "Authentication and secrets"; the build: `AGENTS.md`, "Cloud and release operations"
-- AR13 (rules reach the backend) = R35
-- AR14 (push quality: channel, icon) = `ARCHITECTURE.md`, "Client" ("Push on Android")
-- AR15 (first-sync visibility, status endpoint) = `ARCHITECTURE.md`, "Reliability" and "Consent lifecycle"
-- AR16 (a reconnect closes the old session) = `ARCHITECTURE.md`, "Data model" (`BankConsents`)
-- AR17 (tests run on this machine) = `AGENTS.md`, "Running and verifying"
-- AR18 (a failed push is retried, never lost) = R11a; `ARCHITECTURE.md`, "Reliability"
+These are no longer numbered here. The stories cite **R numbers** (`REQUIREMENTS.md`) and **section titles of
+`ARCHITECTURE.md`** (written `A: "Title"`). The Tracer 3 numbers FR1–FR10, NFR1–NFR10 and AR1–AR18 survive only in
+bead notes, `TRACER-03-GO-LIVE.md` and old commits; `git show 28e4587:_bmad-output/planning-artifacts/epics.md` has
+the lists they stood for.
 
 ### UX Design Requirements
 
@@ -109,25 +60,28 @@ Source is `mocks/` and `REQUIREMENTS.md` ("Known mock gaps"); there is no `DESIG
   list must keep telling apart "backend unreachable / not signed in" from "genuinely empty" —
   the device is the worst place to guess.
 - UX-DR3 (R12, R17): The push title/body follow R12a and device-locale amounts; with a dedicated
-  Android channel (AR14) the look is checked on the device, not assumed.
+  Android channel (A: "Client") the look is checked on the device, not assumed.
 
-### FR Coverage Map
+### Coverage Map (Tracer 3)
 
-FR1: Epic 3 (Epic 2 for the N26 part) — several banks at once, one consent each, one merged list
-FR2: Epic 1 (first sync: 90 days, all pages), verified live in Epic 2 (N26) and Epic 3 (DKB, ING)
-FR3: Epic 1 — debit list from stored data
-FR4: Epic 2 — new booked bad debit → one push, verified live (baseline, built)
-FR5: Epic 2 — push wording, plus the dedicated Android channel (baseline, built)
-FR6: Epic 2 — rules reach the backend (resync at app start)
-FR7: Epic 4 — dead-consent push, including the "dies before the first sync" gap
-FR8: Epic 3 — reconnect summary per bank (baseline, built)
-FR9: Epic 3 — EUR check against the real banks (baseline, built)
-FR10: Epic 3 — no literal bank name in app copy (UX-DR1)
+Which epic delivers which requirements. This is the map of the finished Tracer 3; the full table with one row per R,
+including "baseline" and "deferred", is made at the next planning round (`AGENTS.md`, "Work after Tracer 3").
 
-Technical (AR) and non-functional (NFR) requirements are carried by the stories that deliver them:
-AR1, AR2, AR3, AR10, AR17 → Epic 1; AR5, AR6, AR7, AR8, AR12, AR13, AR14, AR18 → Epic 2;
-AR4, AR9, AR11 → Epic 3; AR15, AR16 → Epic 4. UX-DR1 → Epic 3, UX-DR2 → Epic 2,
-UX-DR3 → Epic 2. NFR1–NFR10 apply across all epics and become acceptance criteria.
+R22a: Epic 3 (Epic 2 for the N26 part) — several banks at once, one consent each, one merged list
+R25, R20b: Epic 1 (first sync: 90 days, all pages), verified live in Epic 2 (N26) and Epic 3 (DKB)
+R9, R2a: Epic 1 — debit list from stored data
+R10, R10a, R10b, R10c, R11: Epic 2 — new booked bad debit → one push, verified live (baseline, built)
+R12a, R17a: Epic 2 — push wording, plus the dedicated Android channel (baseline, built)
+R4–R7, R13, R14, R21, R35: Epic 2 — rules reach the backend (resync at app start)
+R19: Epic 4 — dead-consent push, including the "dies before the first sync" gap
+R20, R20a: Epic 3 — reconnect summary per bank (baseline, built)
+R15, R16: Epic 3 — EUR check against the real banks (baseline, built)
+R22: Epic 3 — no literal bank name in app copy (UX-DR1)
+R11a: Epic 2 — a failed push is retried (Stories 2.9, 2.10)
+R27–R34: apply across all epics and become acceptance criteria
+
+Architecture decisions are carried by the stories that deliver them (see `A:` in each story's head).
+UX-DR1 → Epic 3, UX-DR2 → Epic 2, UX-DR3 → Epic 2.
 
 ## Epic List
 
@@ -138,29 +92,29 @@ proven bank); Epic 3 adds the two unknown banks, still inside Tracer 3.
 The owner can rely on the backend to guard his data and to serve the debit list from stored data;
 the tests run, so every later story is verifiable. Epic 1 is the most technical epic: a backend
 that must be safe before deployment is the real value here.
-**FRs covered:** FR2 (first sync: 90 days, all pages), FR3
-**Also:** AR1, AR2, AR3, AR10, AR17
+**Delivers:** R25, R9, R2a, R29, R33
+**Architecture:** A: "Authentication and secrets", "Data model", "Transaction ingestion"; tests on this machine: `AGENTS.md`, "Running and verifying"
 
 ### Epic 2: N26 live on Azure, end to end
 A real N26 bad charge becomes a push on the owner's phone, and a failed push is never lost — with the backend on Azure and the phone
 not attached to the laptop.
-**FRs covered:** FR4, FR5, FR6 (and FR1/FR2 for N26)
-**Also:** AR5, AR6, AR7, AR8, AR12, AR13, AR14, AR18, UX-DR2, UX-DR3
+**Delivers:** R10, R10a, R10b, R10c, R11, R11a, R12a, R17a, R4–R7, R13, R14, R21, R35 (and R22a, R25, R28 for N26)
+**Architecture:** A: "Hosting, as built", "Cost", "Authentication and secrets", "Client", "Reliability"; UX-DR2, UX-DR3
 
 ### Epic 3: DKB and ING-DiBa watched too
 All three banks feed one debit list, and one bank failing never stops the others.
-**FRs covered:** FR1, FR8, FR9, FR10
-**Also:** AR4, AR9, AR11, UX-DR1
+**Delivers:** R22a, R20, R20a, R15, R16, R22, R31
+**Architecture:** A: "Hosting, as built", "Data model", "Cost", "Consent lifecycle"; UX-DR1
 
 ### Epic 4: I'm never silently left without alerts
 A dead connection is noticed, not silent, and each bank's state can be seen.
-**FRs covered:** FR7
-**Also:** AR15, AR16
+**Delivers:** R19
+**Architecture:** A: "Reliability", "Consent lifecycle", "Data model"
 
 ## Epic 1: A backend I can trust to deploy
 
 The owner can rely on the backend to guard his data and to serve the debit list from stored data;
-the tests run, so every later story is verifiable. (FR2, FR3; AR1, AR2, AR3, AR10, AR17.)
+the tests run, so every later story is verifiable. (R25, R9, R2a; A: "Authentication and secrets", "Data model", "Transaction ingestion".)
 Epic 1 deliberately adds nothing for the app's user interface beyond the API key header.
 
 ### Story 1.1: Backend tests run on my machine
@@ -245,7 +199,7 @@ unprotected pair, closed right after)
 **Given** the key
 **Then** it is compared in constant time, never logged, never in `appsettings.json`, and read
 from configuration (user secrets locally)
-**And** tests cover 401 for every other endpoint and success with the key (NFR7, NFR8)
+**And** tests cover 401 for every other endpoint and success with the key (R32, R33)
 
 
 ### Story 1.4: Starting a consent is protected
@@ -276,7 +230,7 @@ database, not in memory
 **Then** it is rejected and nothing is started at the bank
 
 **And** the `state` is never logged; tests cover missing, wrong, used and expired `state`, and the
-happy path (NFR7, NFR8)
+happy path (R32, R33)
 
 
 ### Story 1.5: One "current user" lookup
@@ -297,7 +251,7 @@ So that moving to per-user sign-in later changes one spot, not every endpoint.
 **Then** both rows belong to that user (proves the seam is real)
 
 **And** the existing tests still pass; behaviour is unchanged for the owner
-**And** the ingestion worker's own `SeedData.UserId` uses stay until Epic 3 (AR4); no new
+**And** the ingestion worker's own `SeedData.UserId` uses stay until Epic 3 (R22a, R31); no new
 `SeedData.UserId` appears anywhere
 
 
@@ -305,7 +259,7 @@ So that moving to per-user sign-in later changes one spot, not every endpoint.
 
 As the owner,
 I want the debit list to come from what the backend has already stored,
-So that opening the app never spends the bank's few daily fetches (FR3, AR1).
+So that opening the app never spends the bank's few daily fetches (R9, R29).
 
 **Acceptance Criteria:**
 
@@ -336,7 +290,7 @@ So that opening the app never spends the bank's few daily fetches (FR3, AR1).
 
 As the owner,
 I want my bank consents kept in the database, encrypted,
-So that the backend can run in the cloud and no consent sits in a loose file (AR3).
+So that the backend can run in the cloud and no consent sits in a loose file (A: "Data model").
 
 **Implementation note:** the encryption key comes from configuration here (user secrets
 locally); Key Vault is wired in Epic 2.
@@ -346,7 +300,7 @@ locally); Key Vault is wired in Epic 2.
 **Given** the migration is applied
 **Then** a `BankConsents` table exists, one row per `(UserId, bank)`
 **And** the session id and consent payload are encrypted at rest — never plaintext in the
-database or in logs (NFR7)
+database or in logs (R32)
 
 **Given** consents for two banks
 **Then** there are two rows and reading or replacing one never touches the other
@@ -354,7 +308,7 @@ database or in logs (NFR7)
 **Given** a consent already exists for a bank
 **When** `/callback` completes a new consent for it
 **Then** the row is replaced (the reconnect path); the old session is *not* closed here (Epic 4,
-AR16)
+A: "Data model")
 
 **Given** the backend restarts
 **Then** the consent state — including its expiry, and `Expired` for a dead one — is restored
@@ -373,7 +327,7 @@ from the database
 
 As the owner,
 I want the first sync to pull the last 12 months completely,
-So that the history is whole and the same for every bank (FR2, AR10, R25).
+So that the history is whole and the same for every bank (R25, R20b; A: "Transaction ingestion").
 
 **Acceptance Criteria:**
 
@@ -407,8 +361,8 @@ counts against the ~4 fetches per day)
 ## Epic 2: N26 live on Azure, end to end
 
 A real N26 bad charge becomes a push on the owner's phone, and a failed push is never lost — with the backend on Azure and the phone
-not attached to the laptop. (FR4, FR5, FR6, and FR1/FR2 for N26; AR5, AR6, AR7, AR8, AR12, AR13,
-AR14, AR18, UX-DR2, UX-DR3.) Stories 2.1–2.4, 2.9 and 2.10 are code and can be built by coders
+not attached to the laptop. (R10, R10a, R10b, R10c, R11, R11a, R12a, R17a, R4–R7, R13, R14, R21, R35, and R22a,
+R25 for N26; A: "Hosting, as built", "Cost", "Authentication and secrets", "Client", "Reliability"; UX-DR2, UX-DR3.) Stories 2.1–2.4, 2.9 and 2.10 are code and can be built by coders
 (good candidates for an automated run; 2.10 also needs a Brevo account from the owner); 2.5–2.8
 and 2.11 involve the owner's Azure account, secrets, real bank data and phone, so they run with
 the owner. **Order decision (2026-10-01):** the push retry (2.9) and the failure email (2.10)
@@ -419,8 +373,7 @@ lost. As code-only stories they can also be built earlier, any time after Epic 1
 
 As the owner,
 I want the app to resend all my rules to the backend when it starts,
-So that a rule I saved never stays missing on the backend, where the push decision is made (FR6,
-AR13).
+So that a rule I saved never stays missing on the backend, where the push decision is made (R35).
 
 **Acceptance Criteria:**
 
@@ -450,7 +403,7 @@ deferred in plan mode
 
 As the owner,
 I want a bad-debit push to pop up on the screen with a clear icon,
-So that I notice it the moment it arrives (FR5, AR14, UX-DR3).
+So that I notice it the moment it arrives (R12a, R17a; A: "Client"; UX-DR3).
 
 **Acceptance Criteria:**
 
@@ -478,7 +431,7 @@ with a Mock ASPSP debit and without screenshots of the notification shade
 
 As the owner,
 I want the bank polling to run as a timer-triggered Azure Function,
-So that it runs on the free Functions plan without an always-on server (AR5).
+So that it runs on the free Functions plan without an always-on server (A: "Hosting, as built").
 
 **Acceptance Criteria:**
 
@@ -503,7 +456,7 @@ the trigger calls the runner once; it runs locally against the dev database
 
 As the owner,
 I want the API and the first sync to work inside the Functions host,
-So that one deployment serves the app and the poller (AR5).
+So that one deployment serves the app and the poller (A: "Hosting, as built").
 
 **Acceptance Criteria:**
 
@@ -527,7 +480,7 @@ So that one deployment serves the app and the poller (AR5).
 
 As the owner,
 I want a cloud Postgres with my schema,
-So that the deployed backend has somewhere to keep its data (AR6, NFR9).
+So that the deployed backend has somewhere to keep its data (A: "Hosting, as built", "Cost").
 
 **Acceptance Criteria:**
 
@@ -554,7 +507,7 @@ setting in the cloud) — never in Git, logs or docs
 
 As the owner,
 I want the backend running in Azure on free resources,
-So that it polls and serves the app without my laptop (AR5, NFR2, NFR7, NFR8).
+So that it polls and serves the app without my laptop (R27, R32, R33; A: "Hosting, as built").
 
 **Acceptance Criteria:**
 
@@ -591,7 +544,7 @@ written in `TRACER-03-GO-LIVE.md`
 
 As the owner,
 I want to see what a first sync does against my real N26 account, on my own machine,
-So that I know the page count and the quota behaviour before the cloud connection (FR1, NFR-quota).
+So that I know the page count and the quota behaviour before the cloud connection (R22a, R29).
 
 **Owner step:** real bank data and real quota — not for an unattended run. No code change.
 
@@ -616,7 +569,7 @@ as counts only (answers `gn-xeq`, and the page-quota part of `gn-6k5`)
 
 As the owner,
 I want my real N26 account connected to the cloud backend,
-So that my real debits are watched (FR1, FR2, AR7, AR8).
+So that my real debits are watched (R22a, R25, R28; A: "Cost").
 
 **Owner step:** real bank data and real quota — not for an unattended run.
 
@@ -649,7 +602,7 @@ first sync made is recorded as a finding
 
 As the owner,
 I want a signed release APK on my phone that talks to the cloud backend,
-So that the app works without my laptop (AR12, UX-DR2).
+So that the app works without my laptop (A: "Authentication and secrets"; UX-DR2).
 
 **Acceptance Criteria:**
 
@@ -675,7 +628,7 @@ empty list it says there are no debits — three different states (UX-DR2)
 
 As the owner,
 I want a push that could not be sent to be remembered and tried again,
-So that a bad charge never goes unannounced (FR4, AR18, R11a).
+So that a bad charge never goes unannounced (R10, R11, R11a; A: "Reliability").
 
 **Acceptance Criteria:**
 
@@ -719,7 +672,7 @@ rule-edit case, the summary retry, and that other debits are unaffected
 
 As the owner and operator,
 I want one email when pushes keep failing,
-So that a broken push channel is noticed within hours, not days (AR18).
+So that a broken push channel is noticed within hours, not days (R11a; A: "Reliability").
 
 **Owner step:** create a Brevo account, a sender and an API key (free tier, 300 mails a day).
 
@@ -758,7 +711,7 @@ once per incident, the follow-up and a failing sender
 
 As the owner,
 I want a real bad charge to reach my phone as a push,
-So that I know the whole chain works without my laptop (FR4, FR5; the tracer's definition of done
+So that I know the whole chain works without my laptop (R10, R10a, R10b, R10c, R11, R12a; the tracer's definition of done
 for N26).
 
 **Owner step:** a real charge, the real phone.
@@ -777,7 +730,7 @@ the laptop
 **Then** no push arrives
 
 **Given** the app is force-stopped in Android settings
-**Then** whether the push still arrives is recorded as a finding (AR14)
+**Then** whether the push still arrives is recorded as a finding (A: "Client")
 
 **And** if the 6-hour wait is too long, one tick may be triggered by hand once, only after counting
 the day's N26 fetches so the quota is not exceeded
@@ -785,15 +738,15 @@ the day's N26 fetches so the quota is not exceeded
 
 ## Epic 3: DKB and ING-DiBa watched too
 
-All three banks feed one debit list, and one bank failing never stops the others. (FR1, FR8, FR9,
-FR10; AR4, AR9, AR11, UX-DR1.) Stories 3.1–3.4 are code and can be built by coders; 3.5–3.8
+All three banks feed one debit list, and one bank failing never stops the others. (R22a, R20, R20a, R15, R16, R22, R31;
+A: "Hosting, as built", "Data model", "Cost", "Consent lifecycle"; UX-DR1.) Stories 3.1–3.4 are code and can be built by coders; 3.5–3.8
 involve the owner's banks and real data, so they run with the owner.
 
 ### Story 3.1: The worker takes the user from the consent
 
 As the owner,
 I want the ingestion worker to use the user that owns each consent,
-So that no part of the worker is tied to one hardcoded user (AR4, multi-user preparation).
+So that no part of the worker is tied to one hardcoded user (R22a, multi-user preparation).
 
 **Acceptance Criteria:**
 
@@ -815,7 +768,7 @@ device tokens — uses that consent's user
 
 As the owner,
 I want one tick to cover all my banks, with one bank's failure never stopping the others,
-So that a problem at one bank never silences alerts from the others (FR1, AR4, NFR6).
+So that a problem at one bank never silences alerts from the others (R22a, R31).
 
 **Acceptance Criteria:**
 
@@ -846,7 +799,7 @@ endpoint reads them)
 
 As the owner,
 I want to connect any bank by name, with that bank's own consent limit,
-So that DKB and ING-DiBa work without being hardcoded (AR9, FR10).
+So that DKB and ING-DiBa work without being hardcoded (R22; A: "Cost").
 
 **Acceptance Criteria:**
 
@@ -871,7 +824,7 @@ ING-DiBa are recorded in `TRACER-03-GO-LIVE.md`; tests use a stubbed list
 
 As the owner,
 I want no literal bank name in the app's text,
-So that the app is right for every bank I connect (FR10, UX-DR1).
+So that the app is right for every bank I connect (R22; UX-DR1).
 
 **Acceptance Criteria:**
 
@@ -892,7 +845,7 @@ connect error, empty list, settings, disconnect confirmation)
 
 As the owner,
 I want my DKB account connected to the cloud backend,
-So that its charges are watched too (FR1, FR2, AR11).
+So that its charges are watched too (R22a, R25; A: "Consent lifecycle").
 
 > **Dropped 2026-10-13:** the owner decided two banks (N26, DKB) are enough. Nothing prevents adding ING-DiBa later.
 
@@ -904,7 +857,7 @@ So that its charges are watched too (FR1, FR2, AR11).
 **When** I start a consent for DKB from a browser and approve it in DKB's own banking app
 **Then** the consent is stored encrypted, with `valid_until` per Story 3.3
 **And** how the approval flowed — whether the browser came back on its own, and what I had to do
-by hand — is recorded as a finding (AR11)
+by hand — is recorded as a finding (A: "Consent lifecycle")
 
 **Given** the browser does not return and the consent cannot be completed
 **Then** the story stops and we decide (for example a deep link), instead of working around it
@@ -923,7 +876,7 @@ IBAN, is recorded as tuning data for R10b and R3a — counts only, no raw bank d
 
 As the owner,
 I want my ING-DiBa account connected to the cloud backend,
-So that its charges are watched too (FR1, FR2, AR11).
+So that its charges are watched too (R22a, R25; A: "Consent lifecycle").
 
 **Owner step:** real bank data and real quota — not for an unattended run.
 
@@ -932,7 +885,7 @@ So that its charges are watched too (FR1, FR2, AR11).
 **Given** the ING-DiBa account is linked in the Enable Banking Control Panel
 **When** I start a consent for ING-DiBa from a browser and approve it in ING's own banking app
 **Then** the consent is stored encrypted, with `valid_until` per Story 3.3
-**And** how the approval flowed is recorded as a finding (AR11)
+**And** how the approval flowed is recorded as a finding (A: "Consent lifecycle")
 
 **Given** the browser does not return and the consent cannot be completed
 **Then** the story stops and we decide, instead of working around it
@@ -950,7 +903,7 @@ So that its charges are watched too (FR1, FR2, AR11).
 
 As the owner,
 I want a reconnect or a dead consent at one bank to affect only that bank,
-So that the other banks' alerts carry on (FR8, FR9, NFR6).
+So that the other banks' alerts carry on (R20, R20a, R15, R16, R31).
 
 **Acceptance Criteria:**
 
@@ -962,7 +915,7 @@ B's session hash, debits and sync state are untouched
 **Then** A gets its one expiry push per session, and bank B keeps being polled
 
 **Given** a charge in a currency other than EUR at any bank
-**Then** it is skipped and logged, never compared with a EUR limit (FR9)
+**Then** it is skipped and logged, never compared with a EUR limit (R15, R16)
 **And** the per-bank count of skipped charges from the real first syncs is recorded; if there
 were none, the finding says no foreign-currency charge was observed
 
@@ -973,7 +926,7 @@ a real reconnect only happens when a real consent expires
 
 As the owner,
 I want to see all three banks on one list and be alerted from each,
-So that I know the whole go-live works (FR1; the tracer's definition of done for all three banks).
+So that I know the whole go-live works (R22a; the tracer's definition of done for all three banks).
 
 > **Done 2026-10-13 for two banks** (ING-DiBa dropped, see Story 3.6).
 
@@ -999,15 +952,14 @@ during the first week
 
 ## Epic 4: I'm never silently left without alerts
 
-A dead connection is noticed, not silent, and the owner can see each bank's state. (FR7; AR15,
-AR16.) The push retry and failure email (AR18, R11a) moved into Epic 2 (Stories 2.9 and 2.10).
+A dead connection is noticed, not silent, and the owner can see each bank's state. (R19; A: "Reliability", "Consent lifecycle", "Data model".) The push retry and failure email (R11a) moved into Epic 2 (Stories 2.9 and 2.10).
 All three stories are backend code and good candidates for an automated run.
 
 ### Story 4.1: A consent that dies during the first sync still alerts me
 
 As the owner,
 I want a consent that dies before its first sync finishes to alert me too,
-So that no dead connection is ever silent (FR7, AR15, R19).
+So that no dead connection is ever silent (R19; A: "Reliability", "Consent lifecycle").
 
 **Acceptance Criteria:**
 
@@ -1033,7 +985,7 @@ reconnect resets
 
 As the owner,
 I want a status page for my bank connections,
-So that I can tell which bank works without opening logs (AR15).
+So that I can tell which bank works without opening logs (A: "Reliability").
 
 **Acceptance Criteria:**
 
@@ -1063,7 +1015,7 @@ this endpoint
 
 As the owner,
 I want the old session closed when I reconnect a bank,
-So that stale sessions do not pile up and a dead session stops costing calls (AR16).
+So that stale sessions do not pile up and a dead session stops costing calls (A: "Data model").
 
 **Acceptance Criteria:**
 
