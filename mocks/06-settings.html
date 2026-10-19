@@ -9,22 +9,65 @@
   <div class="phone">
     <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
     <div class="nav-bar"><h1>Settings</h1><span></span></div>
+    <!--
+      R36 — banks are managed here, one card per connected bank, state first. The two cards show two states side by
+      side; a real list has whatever the user connected. Every card has Delete (per bank, R18; there is no
+      delete-everything action). The other action depends on the state:
+        Active        no action but Delete
+        Expired       Reconnect (R19)
+      Reconnect opens the same consent screen (01b#reconnect): no bank search, no account
+      choice, no first sync.
+
+      Settings.html#no-bank is the same screen with no bank connected — where the app opens on first start, and where
+      it lands after the last bank is deleted. One sentence says what the app is for; "Connect a bank" is the only way on.
+    -->
     <div class="screen">
       <div class="content">
+        <span id="no-bank"></span>
 
-        <div class="section-label">Connected banks</div>
+        <div class="state-main">
+          <div class="section-label">Banks</div>
+
         <div class="card" style="gap:10px;">
           <div style="display:flex;align-items:center;gap:10px;">
-            <div class="bank-logo" style="background:var(--neutral-bg);color:var(--text-muted);">Bank</div>
+            <div class="bank-logo" style="background:var(--neutral-bg);color:var(--text-muted);">EB</div>
             <div class="tx-info" style="flex:1;">
-              <div class="tx-name">Your bank</div>
-              <div class="tx-date">Connected · access renews in 64 days</div>
+              <div class="tx-name">Example Bank</div>
+              <div class="tx-date">Main account · access valid for 64 more days</div>
             </div>
             <span class="pill pill-good">Active</span>
           </div>
           <div class="divider"></div>
-          <a class="nav-link" href="01d-connection-expired.html" style="font-size:14px;">Renew access early</a>
-          <a class="nav-link" href="06b-disconnect-confirm.html" style="font-size:14px;color:var(--bad);">Disconnect your bank</a>
+          <div style="display:flex;gap:20px;font-size:14px;">
+            <a class="nav-link" href="06c-delete-confirm.html" style="font-size:14px;color:var(--bad);margin-left:auto;">Delete</a>
+          </div>
+        </div>
+
+        <div class="card" style="gap:10px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div class="bank-logo" style="background:var(--neutral-bg);color:var(--text-muted);">EB</div>
+            <div class="tx-info" style="flex:1;">
+              <div class="tx-name">Example Savings</div>
+              <div class="tx-date">Current account · access expired</div>
+            </div>
+            <span class="pill pill-bad">Expired</span>
+          </div>
+          <div class="divider"></div>
+          <div style="display:flex;gap:20px;font-size:14px;">
+            <a class="nav-link" href="01b-connect-consent.html#reconnect" style="font-size:14px;font-weight:600;">Reconnect</a>
+            <a class="nav-link" href="06c-delete-confirm.html" style="font-size:14px;color:var(--bad);margin-left:auto;">Delete</a>
+          </div>
+        </div>
+
+          <a class="btn btn-outline" href="01-select-bank.html" style="color:var(--accent);">Connect a bank</a>
+        </div>
+
+        <div class="state-alt">
+          <div class="card" style="align-items:center;text-align:center;gap:12px;padding:24px 16px;">
+            <div class="tx-name" style="font-size:17px;">No bank connected</div>
+            <p class="hint" style="font-size:13px;">Greedy Nose alerts you the moment a payee you marked Bad charges you. Connect your bank to start.</p>
+            <a class="btn btn-primary" href="01-select-bank.html" style="width:100%;">Connect a bank</a>
+          </div>
         </div>
 
         <div class="section-label">Notifications</div>
@@ -42,8 +85,6 @@
             <span class="pill pill-neutral">Off</span>
           </div>
         </div>
-
-        <a class="btn btn-outline" href="06c-delete-confirm.html" style="color:var(--bad);border-color:var(--bad);margin-top:8px;">Delete account &amp; data</a>
       </div>
     </div>
     <div class="tab-bar">

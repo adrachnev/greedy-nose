@@ -14,7 +14,7 @@
       R23 — the search field stays, because this screen is the real debit list
       with a banner on top of it (R19), not a replacement for it. The history
       below is kept and still worth searching; R21 makes the same point about
-      rules staying editable while disconnected.
+      rules staying editable while the connection is expired.
     -->
     <div class="search-field">
       <span class="search-text search-text-placeholder">Search debits…</span>
@@ -33,13 +33,18 @@
           has to say it. A push goes out too when the consent expires by
           itself, since the user may not open the app for days.
 
-          The history below is deliberately still here (R18): disconnecting or
-          expiring keeps rules and debits, it only stops live access.
+          The history below is deliberately still here (R18): an expired connection
+          keeps rules and debits, it only stops live access.
+        -->
+        <!--
+          One banner per bank that is expired (R19, R22a); it names the bank, because the banks are otherwise not told
+          apart in this list. This frame shows the case where it is the only bank, hence the "Last seen" header below;
+          with another bank still live, newer debits keep arriving and that header is not shown.
         -->
         <div class="card" style="background:var(--bad-bg);gap:6px;border-left:3px solid var(--bad);">
-          <div class="tx-name" style="color:var(--bad);">Bank connection expired</div>
-          <p class="hint" style="color:var(--bad);opacity:0.85;">Your bank access expired after its limited validity period, per PSD2 regulation. Nothing is being monitored right now — you won't be alerted about any charge until you reconnect.</p>
-          <a class="btn btn-bad" href="01-connect-bank.html" style="margin-top:4px;">Reconnect your bank</a>
+          <div class="tx-name" style="color:var(--bad);">Example Savings: connection expired</div>
+          <p class="hint" style="color:var(--bad);opacity:0.85;">Access to Example Savings expired after its limited validity period, per PSD2 regulation. You will not be alerted about charges at this bank until you reconnect..</p>
+          <a class="btn btn-bad" href="01b-connect-consent.html#reconnect" style="margin-top:4px;">Reconnect Example Savings</a>
         </div>
 
         <div class="section-label">Last seen · Aug 3</div>

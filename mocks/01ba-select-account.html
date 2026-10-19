@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Choose Account</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
+    <div class="nav-bar"><h1>Choose account</h1><a class="nav-link" href="06-settings.html">Cancel</a></div>
+    <!--
+      R36 / R22a — one account per bank. Shown only when the bank returns more than one usable account; with a single
+      account this step is skipped and the first sync starts right after consent.
+
+      The row leads with the account's name, falls back to its product, then to "Account"; the IBAN is not shown in
+      full, only its last four digits, so two accounts with the same name stay apart. "Suggested" marks the first
+      current account the bank returns (the account people pay with); it is only a hint, the user decides.
+      Only accounts in euro are listed (R15, R22); others are not offered.
+
+      Cancel (and going back) ends the attempt and discards everything, the consent included (R25); there is no
+      half-finished bank to come back to.
+
+      01ba-select-account.html#failed: the bank returned no usable account.
+    -->
+    <div class="screen">
+      <div class="content">
+        <span id="failed"></span>
+
+        <div class="state-main">
+          <p class="hint">Example Bank has more than one account. Greedy Nose watches one account per bank — pick the one you pay with.</p>
+
+          <div class="section-label">Example Bank</div>
+
+          <a class="bank-row" href="01bb-syncing.html" style="justify-content:space-between;">
+            <div class="tx-info"><div class="tx-name">Main account</div><div class="tx-date">Current account · …4521</div></div>
+            <span class="pill pill-good">Suggested</span>
+          </a>
+          <a class="bank-row" href="01bb-syncing.html">
+            <div class="tx-info"><div class="tx-name">Savings</div><div class="tx-date">Savings account · …0937</div></div>
+          </a>
+          <a class="bank-row" href="01bb-syncing.html">
+            <div class="tx-info"><div class="tx-name">Joint account</div><div class="tx-date">Current account · …7714</div></div>
+          </a>
+
+          <p class="hint">You can add or remove a bank later in Settings.</p>
+        </div>
+
+        <div class="state-alt" style="align-items:center;text-align:center;justify-content:center;flex:1;">
+          <div class="tx-name" style="font-size:16px;">No supported account</div>
+          <p class="empty-note">Example Bank returned no account in euro that we can watch.</p>
+          <a class="btn btn-primary" href="06-settings.html" style="width:100%;">Back to Settings</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

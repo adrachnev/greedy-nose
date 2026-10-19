@@ -554,3 +554,24 @@ body {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* Alternate states of one screen, chosen by the URL fragment (page.html#no-bank, page.html#reconnect). The marker
+   (<span id="no-bank"> or <span id="reconnect">) is the first child of .content; the blocks that differ are siblings
+   after it, marked .state-main (shown by default) and .state-alt (shown only when the marker is the target). One
+   file per screen, so two states of the same screen can never drift apart. */
+.state-main, .state-alt { flex-direction: column; gap: 12px; }
+.state-main { display: flex; }
+.state-alt { display: none; }
+#no-bank:target ~ .state-main, #reconnect:target ~ .state-main { display: none; }
+#no-bank:target ~ .state-alt, #reconnect:target ~ .state-alt { display: flex; }
+
+/* The error variant of a screen (page.html#failed): replaces the main block, like #no-bank and #reconnect do above. */
+#failed:target ~ .state-main { display: none; }
+#failed:target ~ .state-alt { display: flex; }
+/* A message that is only added on top of the normal screen (it does not replace anything). */
+.state-extra { display: none; flex-direction: column; gap: 12px; }
+#failed:target ~ .state-extra { display: flex; }
+
+/* Same device for a confirmation that reads differently for the last bank (06c-delete-confirm.html#last-bank). */
+#last-bank:target ~ .state-main { display: none; }
+#last-bank:target ~ .state-alt { display: block; }

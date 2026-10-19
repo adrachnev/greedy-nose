@@ -11,9 +11,16 @@
     <div class="nav-bar"><h1>Grant Access</h1><span></span></div>
     <div class="screen">
       <div class="content">
-        <div class="card" style="align-items:center;text-align:center;gap:12px;">
-          <div class="bank-logo" style="width:56px;height:56px;font-size:14px;background:var(--neutral-bg);color:var(--text-muted);">Bank</div>
-          <div class="tx-name" style="font-size:17px;">Greedy Nose is requesting access</div>
+        <span id="reconnect"></span>
+        <!-- The bank is named with its country, so the user can check the pick (the same name exists in several countries). -->
+        <div class="card state-main" style="align-items:center;text-align:center;gap:12px;">
+          <div class="bank-logo" style="width:56px;height:56px;font-size:14px;background:var(--neutral-bg);color:var(--text-muted);">EB</div>
+          <div class="tx-name" style="font-size:17px;white-space:normal;">Greedy Nose is requesting access to Example Bank (Germany)</div>
+          <p class="hint">This app (via Enable Banking) will be able to:</p>
+        </div>
+        <div class="card state-alt" style="align-items:center;text-align:center;gap:12px;">
+          <div class="bank-logo" style="width:56px;height:56px;font-size:14px;background:var(--neutral-bg);color:var(--text-muted);">EB</div>
+          <div class="tx-name" style="font-size:17px;white-space:normal;">Greedy Nose is requesting access to Example Savings (Germany)</div>
           <p class="hint">This app (via Enable Banking) will be able to:</p>
         </div>
 
@@ -29,12 +36,24 @@
           <div class="tx-info"><div class="tx-name" style="color:var(--bad);">Move or withdraw money</div></div>
         </div>
 
-        <p class="hint">Access is valid for a limited time, per PSD2 regulation. You can revoke it anytime from your bank's app.</p>
+        <p class="hint">After Allow Access you log in at your bank; we never see your login. Access is valid for a limited time, per PSD2 regulation. Deleting the bank in Settings ends it here and at your bank.</p>
 
         <div style="flex:1"></div>
 
-        <a class="btn btn-primary" href="01bb-syncing.html">Allow Access</a>
-        <a class="btn btn-outline" href="01-connect-bank.html">Cancel</a>
+        <!-- First connection (R36): consent, then the choice of account, then the silent first sync (R25). -->
+        <div class="state-main" style="gap:8px;">
+          <a class="btn btn-primary" href="01ba-select-account.html">Allow Access</a>
+          <a class="btn btn-outline" href="06-settings.html">Cancel</a>
+        </div>
+        <!--
+          Reconnect after expiry (01b-connect-consent.html#reconnect): the bank and its account are already known, so there
+          is no bank search and no account choice. There is no first sync either, because this is not a new
+          connection: R20 (one summary push) applies, not R25.
+        -->
+        <div class="state-alt" style="gap:8px;">
+          <a class="btn btn-primary" href="06-settings.html">Allow Access</a>
+          <a class="btn btn-outline" href="06-settings.html">Cancel</a>
+        </div>
       </div>
     </div>
   </div>

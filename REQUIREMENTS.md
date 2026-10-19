@@ -285,6 +285,24 @@ saved in the app must therefore get there reliably, also after an error or while
 charge is classified with an old or missing rule. The app sends a rule when it is saved and resends all rules when it starts, so a send that failed is made up
 for at the next start.
 
+**R36 — Settings is where banks are managed, and where the app starts without one** (settled 2026-10-19; replaces
+the `01-connect-bank` screen, which is removed). Settings lists every connected bank with its state (connected,
+expired) and offers, per bank, delete (R18; delete asks for a confirmation that says it cannot be undone) and, for an
+expired one, **reconnect**. "Connect a bank" starts the flow: search the bank by name (the hits show name and
+country), consent, choice of the account, first sync (R25), onboarding (R26). A bank that is already connected is shown
+in the hits as "Connected" and cannot be picked again (one consent per bank, R22a). With one account at a bank the
+choice is skipped (R22a). Until onboarding is finished the bank does not exist for the user (R25): there is no card
+for it, no "syncing" state and nothing to resume. Reconnecting an expired connection goes straight to the consent of
+that bank, with no bank search, no account choice and no first sync (R20 applies, not R25); if the bank does not
+return the stored IBAN, the reconnect is refused with a clear message and the old data stays (the account `uid`
+changes with every consent, so the IBAN is what identifies the account). There is no early renewal, no disconnect and
+no "review payees" entry on a bank's card: an expired connection is announced by the banner and the push (R19), and a
+payee that was not reviewed during onboarding is bad and is classified in the Rules tab (R26a). With no bank connected, and after
+the last bank is deleted, the app opens on Settings: one sentence says what the app does, and "Connect a bank" is the
+primary action; the empty debit list points back to it, and so does the rule list while no rule exists (rules outlive
+their bank, R18). A connection that is expired shows a banner on the debit list **per bank, naming it** (R19), because
+the debit list does not name the bank of a debit (R22a). Settings is the one place that shows which banks are connected.
+
 ## Banks
 
 **R22 — The app is bank-agnostic** (settled 2026-08-14). Any ASPSP reachable through Enable
@@ -328,25 +346,35 @@ account's history for a **fixed window of the last 90 days** (settled 2026-10-09
 since 2026-10-01 and "as much as the ASPSP returns" before; real N26 refused a 12-month `date_from` with
 `WRONG_TRANSACTIONS_PERIOD`; the window is an upper limit — a bank may return less). Every bank gets
 the same window, so banks do not differ by their own defaults (R22). Every debit that pull produces is **already-seen** the moment it's fetched (R10c) and
-feeds directly into onboarding (R26); none of it can notify, no matter how many app launches or
-network retries it takes to finish pulling. If the pull is interrupted partway through, resuming
-it is still the **same first sync**, never a gap (R20) — there is no prior "seen" state yet for
-R20's summary to diff against.
+feeds directly into onboarding (R26); none of it can notify.
 
-**R18** — The connection ends in three ways, with different consequences (settled 2026-08-14):
+**Nothing of a new connection is visible until onboarding is finished** (settled 2026-10-19). Until the user ends
+onboarding (R26), the bank is not listed in Settings, its debits are not in the debit list, no push comes from it and
+no rule exists for it. There are no intermediate states the user can see or come back to. If the consent is
+cancelled, the account choice is left, the pull fails (also when the bank's fetch cap is used up, R29: the message says
+to try again tomorrow), the app is closed or the user goes back, **everything of that attempt is discarded**, the
+consent included; a new attempt asks the bank for consent again. This is the same first sync, never a gap (R20): there
+is no prior "seen" state for R20's summary to diff against.
+
+**R18** — A bank's connection ends in two ways, with different consequences (settled 2026-08-14; "delete" became
+per bank on 2026-10-19; the owner dropped a separate "Disconnect" the same day — delete is the only way to end a connection
+on purpose, and there is no delete-everything action, so rules are never wiped):
 
 | How it ends | Rules | History | Connection |
 |---|---|---|---|
 | PSD2 consent expires on its own (~90 days) | kept | kept | re-authorize to resume |
-| User taps Disconnect (`06b`) | kept | kept | reconnect anytime |
-| User deletes the account (`06c`) | wiped | wiped | gone, not undoable |
+| User deletes a bank (`06c`) | kept (they belong to the payee, not to a bank, R3a) | that bank's debits wiped | gone, not undoable |
+
+Deleting also revokes the access at the bank (Enable Banking) and drops the pushes of that bank that were not sent
+yet. The confirmation names the bank; for the last bank it also says that no alert comes until a bank is connected.
 
 **R19 — A dead connection is never silent.** No alerts arriving looks exactly like "nothing bad
 happened", which is the one failure that breaks R1. So: a persistent banner on the debit list
-whenever the connection is expired or disconnected (`01d-connection-expired`), **plus one
+whenever the connection is expired (`01d-connection-expired`), **plus one
 push** when the consent expires by itself — the user may not open the app for days. **Title**:
-`Bank connection expired`. **Body**: `Reconnect to keep getting alerts.` Tapping it opens the
-debit list, same as the banner underneath it.
+`«Bank»: connection expired`, naming the bank (R22a: with several banks the user must see which one). **Body**:
+`Reconnect to keep getting alerts.` Tapping it opens the debit list, same as the banner underneath it. The banner and
+this push are the **only** warning: the connection cannot be renewed before it runs out (R36).
 
 **R20 — Reconnecting after a gap sends one summary notification** — not one push per bad debit.
 The charges from the gap carry identifiers the app has never seen, so R10b would otherwise fire a
@@ -363,36 +391,41 @@ ordinary day. A gap with exactly **one** bad debit still uses R20's summary word
 the replacement is unconditional for any reconnect gap, not only once there'd otherwise be a
 literal burst of more than one push.
 
-**R20b — Reconnecting right after deleting the account is never R20's path.** R18's deletion
-wipes both rules and history, so there is no prior "seen" state left for a gap summary to diff
-against. That reconnect re-enters R25's silent first sync instead, identical to a brand-new
-install — not a summary, and not silence-by-accident either.
+**R20b — Reconnecting right after deleting a bank is never R20's path.** R18's deletion wipes that bank's
+history, so there is no prior "seen" state left for a gap summary to diff against. That reconnect re-enters R25's
+silent first sync instead, identical to connecting the bank for the first time — not a summary, and not
+silence-by-accident either. The rules that stayed behind (R18) apply to the new sync's payees, so onboarding (R26)
+shows only the payees that have no rule.
 
-**R21** — Rules stay **editable while disconnected**. Harmless, and it lets the user prepare
+**R21** — Rules stay **editable while a connection is expired**. Harmless, and it lets the user prepare
 before reconnecting.
 
 ## Onboarding
 
-**R26 — Onboarding.** Right after the first sync (R25), the user sees every payee that sync
-turned up, each starting as **bad** (R5's "no rule" row). Tapping good or bad on a card writes
-that payee's rule **immediately** — unlike the Edit Rule screen (R13a), there is no separate Save
-step and no per-payee Back to discard; each tap is its own commit (`01c-classify-payees`). This is
-the only point where classifying happens in bulk instead of one payee at a time.
+**R26 — Onboarding** (rewritten 2026-10-19; it used to write a rule on every tap). Right after the first sync
+(R25), the user sees the payees that sync turned up **and that have no rule yet** (rules outlive their bank, R18),
+as a plain list with no controls per payee: name, amount, number of charges (`01c-classify-payees`). There are two
+ways to end it, and each saves everything of the new connection in one step — the bank, its debits and the rules:
 
-**Mark all Good** writes good for every visible payee in one tap, the same immediate write as an
-individual toggle. This is a deliberate, accepted trade-off, not an oversight: bulk-review
-convenience against the risk of sweeping a genuinely bad payee (the mock's own example,
-ScamyLoans GmbH) into good without individually looking at it — and a good-classified payee never
-alerts (R5), so there's no automatic second chance beyond the user separately noticing it later on
-the Rules tab. Accepted for the same reason R3a and R3b accept their own best-effort gaps: the one
-person using Mark all Good is the same person about to rely on this app's alerts, doing so on
-their own history, in one deliberate extra tap beyond letting the bad default stand.
+- **Mark all Good and start** writes a good rule, without an amount limit, for every payee in the list.
+- **Keep all Bad and start** writes nothing: a payee without a rule is bad already (R5).
 
-**R26a** — Onboarding is **not gated on full review**. The user can leave at any point ("Start
-Monitoring"); a payee they didn't get to simply has no rule, which R4b/R5 already make bad. That
-payee's **next** new charge — after the first sync, not any of the historical debits it pulled —
-notifies normally (R10), worded per R12a's "no rule" case. Onboarding only ever suppresses alerts
-for the history R25 pulled, never for anything that arrives afterward.
+Going back, cancelling or closing the app ends nothing and discards everything (R25). If saving fails (no network),
+the user stays on the list with a message and can try again; nothing is saved half way. If no payee is left without a
+rule, or the pull found no debits, the list is skipped: the bank is saved at once and the app shows the debit list.
+Classifying one payee at a time stays what the Rules tab is for (R13a).
+
+**Mark all Good is a deliberate, accepted trade-off, not an oversight:** it is one of the two choices, with the
+risk of sweeping a genuinely bad payee (the mock's own example, ScamyLoans GmbH) into good — and a good-classified
+payee never alerts (R5), so there is no automatic second chance beyond the user noticing it later on the Rules tab.
+The list in front of the two buttons is the protection: the user reads the names before agreeing, and "Keep all Bad"
+is the answer to a name that looks wrong. Accepted for the same reason R3a and R3b accept their own best-effort gaps:
+the person choosing is the same person about to rely on this app's alerts, on their own history.
+
+**R26a** — Not reviewing is allowed: "Keep all Bad and start" is exactly that. A payee without a rule is bad
+(R4b/R5), and its **next** new charge — after the first sync, not any of the historical debits it pulled — notifies
+normally (R10), worded per R12a's "no rule" case. Onboarding only ever suppresses alerts for the history R25 pulled,
+never for anything that arrives afterward.
 
 ## Constraints and qualities
 
@@ -469,9 +502,9 @@ of writing.
 **Known mock gaps, deliberately left open** (from the 2026-08-14 review — decide before the
 matching screen is coded):
 
-1. R19 covers expired **and** disconnected, but only expired is drawn (`01d`). After the user
+1. ~~R19 covers expired **and** disconnected, but only expired is drawn (`01d`). After the user
    taps Disconnect there is no mock of the debit list in that state, and Settings still shows an
-   "Active" pill.
+   "Active" pill.~~ — moot since 2026-10-19: there is no Disconnect any more.
 2. R19's "one push when the consent expires by itself" has no mock (wording is now specified in
    R19 itself, settled 2026-09-24). That push is what reaches a user who has not opened the app
    in a week.

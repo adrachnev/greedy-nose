@@ -8,11 +8,30 @@
 <body>
   <div class="phone">
     <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
+    <div class="nav-bar"><span></span><a class="nav-link" href="06-settings.html">Cancel</a></div>
+    <!--
+      R25 — the first sync of a new connection. Nothing of it is visible or saved until onboarding is finished (R26),
+      so Cancel, going back or closing the app discards the whole attempt, the consent included.
+
+      01bb-syncing.html#failed: the pull failed (the bank is unavailable, or its fetch cap for today is used up, R29).
+      Everything of the attempt is discarded; "Try again" starts it over with a new consent at the bank.
+    -->
     <div class="screen">
       <div class="content" style="align-items:center;justify-content:center;text-align:center;gap:16px;">
-        <div class="spinner"></div>
-        <div class="tx-name" style="font-size:16px;">Fetching your debits</div>
-        <p class="hint">This usually takes a few seconds — we're pulling your recent history from your bank via Enable Banking.</p>
+        <span id="failed"></span>
+
+        <div class="state-main" style="align-items:center;gap:16px;">
+          <div class="spinner"></div>
+          <div class="tx-name" style="font-size:16px;">Fetching your debits</div>
+          <p class="hint">This usually takes a few seconds — we're pulling your recent history from your bank via Enable Banking.</p>
+        </div>
+
+        <div class="state-alt" style="align-items:center;gap:12px;width:100%;">
+          <div class="tx-name" style="font-size:16px;color:var(--bad);">Couldn't fetch your debits</div>
+          <p class="hint">Your bank didn't answer, or it allows no more requests today. Nothing has been saved. If it is the daily limit, try again tomorrow.</p>
+          <a class="btn btn-primary" href="01-select-bank.html" style="width:100%;">Try again</a>
+          <a class="nav-link" href="06-settings.html">Back to Settings</a>
+        </div>
       </div>
     </div>
   </div>

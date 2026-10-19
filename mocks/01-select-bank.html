@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Choose Your Bank</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
+    <div class="nav-bar"><h1>Connect a bank</h1><a class="nav-link" href="06-settings.html">Cancel</a></div>
+
+    <!--
+      R36 — the user finds the bank by typing its name; the list comes from Enable Banking, so nothing here names a
+      bank in advance (R22). Each hit shows the name AND the country: the same bank name can exist in several
+      countries, and the backend refuses an ambiguous one (Story 3.3), so the user picks a row instead of typing the
+      exact name. The search field is pinned like R23's, for the same reason.
+
+      The screen opens with the field empty (placeholder "Search your bank…", no list yet); the frame shows it with a
+      query typed. Nothing typed is not a state of its own: there is nothing to list.
+
+      A bank that is already connected is shown as "Connected" and cannot be tapped (one consent per bank, R22a).
+
+      01-select-bank.html#failed: the list of banks could not be loaded (offline, Enable Banking down). It must not
+      look like "No bank found" (01a), which would make the user think the bank is unsupported.
+    -->
+    <div class="search-field">
+      <span class="search-text">example</span>
+      <a class="search-clear" href="01-select-bank.html" aria-label="Clear search"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></a>
+    </div>
+
+    <div class="screen">
+      <div class="content">
+        <span id="failed"></span>
+
+        <div class="state-main">
+          <div class="section-label">3 banks</div>
+
+          <a class="bank-row" href="01b-connect-consent.html">
+            <div class="bank-logo" style="background:var(--neutral-bg);color:var(--text-muted);">EB</div>
+            <div class="tx-info"><div class="tx-name">Example Bank</div><div class="tx-date">Germany</div></div>
+          </a>
+          <a class="bank-row" href="01b-connect-consent.html">
+            <div class="bank-logo" style="background:var(--neutral-bg);color:var(--text-muted);">ED</div>
+            <div class="tx-info"><div class="tx-name">Example Direct</div><div class="tx-date">Germany</div></div>
+          </a>
+          <div class="bank-row" style="opacity:0.55;">
+            <div class="bank-logo" style="background:var(--neutral-bg);color:var(--text-muted);">EB</div>
+            <div class="tx-info" style="flex:1;"><div class="tx-name">Example Bank</div><div class="tx-date">Austria</div></div>
+            <span class="pill pill-good">Connected</span>
+          </div>
+        </div>
+
+        <div class="state-alt" style="align-items:center;text-align:center;justify-content:center;flex:1;">
+          <div class="tx-name" style="font-size:16px;">Couldn't load banks</div>
+          <p class="empty-note">Check your connection and try again.</p>
+          <a class="btn btn-primary" href="01-select-bank.html" style="width:100%;">Try again</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

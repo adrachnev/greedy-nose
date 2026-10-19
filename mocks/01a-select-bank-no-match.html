@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bank Not Found</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
+    <div class="nav-bar"><h1>Connect a bank</h1><a class="nav-link" href="06-settings.html">Cancel</a></div>
+    <!-- Same pinned field with the query kept, so the empty list is never mistaken for a broken screen (R23b's reasoning). -->
+    <div class="search-field">
+      <span class="search-text">zzz</span>
+      <a class="search-clear" href="01-select-bank.html" aria-label="Clear search"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></a>
+    </div>
+    <div class="screen">
+      <div class="content" style="align-items:center;justify-content:center;text-align:center;gap:8px;">
+        <div class="tx-name" style="font-size:16px;">No bank found</div>
+        <p class="empty-note">Nothing matches “zzz”. Check the spelling, or try the name without extra words.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

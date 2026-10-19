@@ -44,18 +44,28 @@
   </div>
 
   <div class="group">
-    <h2>1 · Onboarding</h2>
-    <p>One-time. Ends at “Start Monitoring”, after which nothing from this group is seen again.</p>
+    <h2>1 · Connecting a bank</h2>
+    <p>Started from Settings (R36), for every bank. Search the bank by name, grant access, pick the account if the bank has several, wait for the silent first sync, then end with one of two choices for the payees that have no rule yet (R26). Nothing is saved before that (R25): going back or closing the app discards the attempt.</p>
   </div>
 
   <div class="frame-label">
-    <span>1. Connect Bank</span>
-    <iframe src="01-connect-bank.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+    <span>1. Choose Your Bank (search)</span>
+    <iframe src="01-select-bank.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">
-    <span>1b. Grant Access (consent)</span>
+    <span>1a. Bank Not Found</span>
+    <iframe src="01a-select-bank-no-match.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>1b. Grant Access (first connection)</span>
     <iframe src="01b-connect-consent.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>1b. Grant Access — reconnect (state of 1b)</span>
+    <iframe src="01b-connect-consent.html#reconnect" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">
@@ -64,12 +74,28 @@
   </div>
 
   <div class="frame-label">
+    <span>1e. Connection Failed — reconnect (state of 1e)</span>
+    <iframe src="01e-connect-error.html#reconnect" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>1ba. Choose Account (only if the bank has several)</span>
+    <iframe src="01ba-select-account.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+
+  <div class="frame-label">
     <span>1bb. Syncing (fetching debits)</span>
     <iframe src="01bb-syncing.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">
-    <span>1c. Review Payees (onboarding)</span>
+    <span>1bb. Syncing — failed (state of 1bb)</span>
+    <iframe src="01bb-syncing.html#failed" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>1c. Your Payees (onboarding, last step)</span>
     <iframe src="01c-classify-payees.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
@@ -91,6 +117,11 @@
   <div class="frame-label">
     <span>2b. Debit List — Empty</span>
     <iframe src="02b-debit-list-empty.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>2b. Debit List — no bank (state of 2b)</span>
+    <iframe src="02b-debit-list-empty.html#no-bank" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">
@@ -128,6 +159,11 @@
     <span>4c. Rules — Empty</span>
     <iframe src="04c-payee-rules-empty.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
+  <div class="frame-label">
+    <span>4c. Rules — no bank (state of 4c)</span>
+    <iframe src="04c-payee-rules-empty.html#no-bank" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
 
   <div class="frame-label">
     <span>4b. Payee Rule — Good (amount limit shown)</span>
@@ -157,24 +193,29 @@
   </div>
 
   <div class="group">
-    <h2>5 · Settings</h2>
-    <p>Both destructive actions are confirmed, and they differ: disconnecting keeps rules and
-    history, deleting the account keeps nothing (R18).</p>
+    <h2>5 · Settings — where banks are managed</h2>
+    <p>Deleting a bank is the only way to end a connection on purpose. It is per bank and confirmed, it wipes only that
+    bank’s debits and it never touches rules (R18). The app opens on the “no bank” state when no bank is connected (R36).</p>
   </div>
 
   <div class="frame-label">
-    <span>6. Settings</span>
+    <span>6. Settings — no bank (first start, state of 6)</span>
+    <iframe src="06-settings.html#no-bank" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>6. Settings (two banks, two states)</span>
     <iframe src="06-settings.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">
-    <span>6b. Confirm Disconnect Bank</span>
-    <iframe src="06b-disconnect-confirm.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+    <span>6c. Confirm Delete Bank</span>
+    <iframe src="06c-delete-confirm.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">
-    <span>6c. Confirm Delete Account</span>
-    <iframe src="06c-delete-confirm.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+    <span>6c. Confirm Delete — last bank (state of 6c)</span>
+    <iframe src="06c-delete-confirm.html#last-bank" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="group">

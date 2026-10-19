@@ -2,105 +2,78 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Classify Payees</title>
+<title>Your Payees</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="phone">
     <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
-    <div class="nav-bar"><h1>Review Payees</h1><span></span></div>
+    <div class="nav-bar"><h1>Your payees</h1><a class="nav-link" href="06-settings.html">Cancel</a></div>
+    <!--
+      R26 — the last step of connecting a bank. Nothing of this connection is saved until one of the two buttons is
+      tapped (R25): Cancel, going back or closing the app discards the bank, its debits and the consent.
+
+      The list is read-only on purpose: it is what protects "Mark all Good" (R26) — the user reads the names before
+      agreeing. A payee that needs a closer look is classified one at a time on the Rules tab afterwards (R13a).
+      Only payees WITHOUT a rule are listed; rules outlive a deleted bank (R18), so a returning bank may show few or
+      none — with none the screen is skipped and the debit list opens at once.
+
+      Nothing here notifies: everything pulled during the first sync is stored as already-seen (R25).
+
+      01c-classify-payees.html#failed: saving did not work (no network). The user stays here, nothing is half saved.
+    -->
     <div class="screen">
       <div class="content">
-        <p class="hint">We found 5 payees in your recent history. Every payee starts as <strong>Bad</strong> until you mark it Good — so classify the ones you recognize now to avoid unnecessary alerts.</p>
+        <span id="failed"></span>
+        <p class="hint">Example Bank: we found 5 payees without a rule in your last 90 days. Nothing is saved until you choose.</p>
 
-        <!--
-          This screen is the only place the "reviewed" distinction is visible
-          (R4b): tapping either button writes a rule, and a payee with a rule
-          counts as reviewed. Leaving one untouched keeps it bad, which is the
-          same classification but not the same thing.
-
-          Nothing here notifies: everything pulled during the first sync is
-          stored as already-seen (R25), so classifying history is silent.
-        -->
-
-        <div style="display:flex;gap:8px;">
-          <div class="btn btn-outline" style="flex:1;padding:10px;font-size:13px;color:var(--good);border-color:var(--good);">Mark all Good</div>
-        </div>
-        <p class="hint" style="text-align:center;">Tip: swipe a card <strong>right</strong> for Good, <strong>left</strong> to keep Bad — or use the buttons below each one.</p>
-
-        <div class="card" style="gap:12px;">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <div class="avatar" style="background:var(--bad-bg);color:var(--bad);">SP</div>
-            <div class="tx-info" style="flex:1;">
-              <div class="tx-name">Spotify AB</div>
-              <div class="tx-date">€9.99 · Subscription</div>
-            </div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-btn">Good</div>
-            <div class="toggle-btn bad-active">Bad</div>
+        <div class="tx-row">
+          <div class="avatar">SP</div>
+          <div class="tx-info" style="flex:1;">
+            <div class="tx-name">Spotify AB</div>
+            <div class="tx-date">€9.99 · Subscription · 3 charges</div>
           </div>
         </div>
-
-        <div class="card" style="gap:12px;">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <div class="avatar" style="background:var(--bad-bg);color:var(--bad);">SC</div>
-            <div class="tx-info" style="flex:1;">
-              <div class="tx-name">ScamyLoans GmbH</div>
-              <div class="tx-date">€49.00 · Direct debit</div>
-            </div>
+        <div class="tx-row">
+          <div class="avatar">SC</div>
+          <div class="tx-info" style="flex:1;">
+            <div class="tx-name">ScamyLoans GmbH</div>
+            <div class="tx-date">€49.00 · Direct debit · 1 charge</div>
           </div>
-          <div class="toggle-row">
-            <div class="toggle-btn">Good</div>
-            <div class="toggle-btn bad-active">Bad</div>
+        </div>
+        <div class="tx-row">
+          <div class="avatar">BM</div>
+          <div class="tx-info" style="flex:1;">
+            <div class="tx-name">Bäckerei Müller</div>
+            <div class="tx-date">up to €34.21 · Card payment · 6 charges</div>
+          </div>
+        </div>
+        <div class="tx-row">
+          <div class="avatar">VF</div>
+          <div class="tx-info" style="flex:1;">
+            <div class="tx-name">Vodafone GmbH</div>
+            <div class="tx-date">€24.99 · Direct debit · 3 charges</div>
+          </div>
+        </div>
+        <div class="tx-row">
+          <div class="avatar">LL</div>
+          <div class="tx-info" style="flex:1;">
+            <div class="tx-name">Landlord J. Meyer</div>
+            <div class="tx-date">€850.00 · Bank transfer · 3 charges</div>
           </div>
         </div>
 
-        <div class="card" style="gap:12px;">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <div class="avatar" style="background:var(--good-bg);color:var(--good);">BM</div>
-            <div class="tx-info" style="flex:1;">
-              <div class="tx-name">Bäckerei Müller</div>
-              <div class="tx-date">€34.21 · Card payment</div>
-            </div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-btn good-active">Good</div>
-            <div class="toggle-btn">Bad</div>
-          </div>
-        </div>
-
-        <div class="card" style="gap:12px;">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <div class="avatar" style="background:var(--bad-bg);color:var(--bad);">VF</div>
-            <div class="tx-info" style="flex:1;">
-              <div class="tx-name">Vodafone GmbH</div>
-              <div class="tx-date">€24.99 · Direct debit</div>
-            </div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-btn">Good</div>
-            <div class="toggle-btn bad-active">Bad</div>
-          </div>
-        </div>
-
-        <div class="card" style="gap:12px;">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <div class="avatar" style="background:var(--good-bg);color:var(--good);">LL</div>
-            <div class="tx-info" style="flex:1;">
-              <div class="tx-name">Landlord J. Meyer</div>
-              <div class="tx-date">€850.00 · Bank transfer</div>
-            </div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-btn good-active">Good</div>
-            <div class="toggle-btn">Bad</div>
+        <div class="state-extra">
+          <div class="card" style="background:var(--bad-bg);gap:4px;border-left:3px solid var(--bad);">
+            <div class="tx-name" style="color:var(--bad);">Couldn't save</div>
+            <p class="hint" style="color:var(--bad);opacity:0.85;">Check your connection and try again. Nothing has been saved.</p>
           </div>
         </div>
 
         <div style="flex:1"></div>
-        <a class="btn btn-primary" href="02-debit-list.html">Start Monitoring</a>
-        <p class="hint" style="text-align:center;">Any payee you didn't review stays Bad and will alert you on its next charge.</p>
+        <a class="btn btn-primary" href="02-debit-list.html">Mark all Good and start</a>
+        <a class="btn btn-outline" href="02-debit-list.html">Keep all Bad and start</a>
+        <p class="hint" style="text-align:center;"><strong>Good</strong>: these payees never alert you. <strong>Bad</strong>: each of them alerts you on its next charge until you mark it Good on the Rules tab.</p>
       </div>
     </div>
   </div>
