@@ -52,7 +52,7 @@ the single source of truth for product behavior; where anything else disagrees, 
   - `TRACER-02-NOTIFICATIONS.md` (2026-09-17 → 09-23) — Postgres, FCM push, rules sync, rule
     engine, ingestion worker; done, verified on the device.
   - `TRACER-03-GO-LIVE.md` (from 2026-09-29) — the owner-only productive version on Azure with
-    N26, DKB and ING-DiBa; in progress.
+    N26 and DKB (ING-DiBa dropped); closed 2026-10-19.
 - `.claude/agents/coder-mobile.md` / `coder-backend.md` / `coder-reviewer.md` — the three subagent
   definitions Policy refers to above.
 - `mocks/index.html` — the UI ground truth for `coder-mobile`; static HTML/CSS phone mockups, one

@@ -4,13 +4,13 @@
 
 ## Status
 
-Last cleaned up 2026-10-16. This section stays short on purpose: the state of the work lives in Beads, not here
+Last cleaned up 2026-10-19. This section stays short on purpose: the state of the work lives in Beads, not here
 (see `AGENTS.md`, "Work tracking with Beads"). Do not write session diaries into this file.
 
-- **Where we are:** Tracer 3 (go-live) is functionally done. The backend runs in Azure (Functions + Neon), N26 and DKB are
-  connected, the release app is on the owner's phone, a real charge gives one push. Only the week check for 429
-  (`gn-06m`, to 2026-10-20) is left before Tracer 3 is closed. ING-DiBa is deliberately not connected.
-- **What is next:** `bd ready`. After Tracer 3 the order is `gn-hkx` (choose the account in the app), then `gn-tn2`
+- **Where we are:** Tracer 3 (go-live) is closed (2026-10-19). The backend runs in Azure (Functions + Neon), N26 and DKB
+  are connected, the release app is on the owner's phone, a real charge gives one push, the week check found no 429.
+  ING-DiBa is deliberately not connected.
+- **What is next:** `bd ready`. The order is `gn-hkx` (choose the account in the app), then `gn-tn2`
   (finish the documentation cleanup), then the resilience beads.
 - **Live document:** `TRACER-03-GO-LIVE.md`, read its Progress first. Older history: `git log` and the two earlier
   tracer documents.
