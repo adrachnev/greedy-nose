@@ -214,6 +214,12 @@ new `SeedData.UserId`.
   ecosystem for the two riskiest integrations (bank consent webview flow, push
   notifications).
 
+**Push on Android (decided 2026-10-01, built in Story 2.2).** The default FCM channel shows no heads-up and a generic
+icon, and the alert is the whole product. So the app creates its own high-importance notification channel `alerts`
+(`MainApplication.kt`) and ships a monochrome small icon `ic_stat_alert`; the backend names both in the Android part of
+every push (`FirebaseNotificationSender`, `AndroidChannelId`). The three places must stay in sync, and the manifest
+says so. What the target phone does when the app is force-stopped is still unmeasured (open in `TRACER-03-GO-LIVE.md`).
+
 ## Backend
 
 Separate service from the client — its language doesn't need to match RN. **ASP.NET Core /
@@ -635,6 +641,12 @@ security defaults (MFA for people) are on. How it is used is an operating matter
 
 PSD2 access consents expire periodically (commonly ~90 days) and need re-authorization. This
 needs its own check/notification path, independent of the transaction poller.
+
+**The way back into the app after a consent (decided 2026-10-01).** A consent is finished **in the browser**: the owner
+starts it from a browser (`tools/connect-bank.sh`), approves in the bank's own app, and the `/callback` page only says
+"Connected" (it shows no session id or IBAN); the owner opens Greedy Nose afterwards. There is no deep link back into
+the app — later, if ever. At DKB the approval happened in the DKB app on the phone while the browser on the laptop moved
+on by itself; the same-device path (phone only) is untested. Starting a consent from inside the app is bead `gn-hkx`.
 
 **A dead connection is never silent (R19).** No alerts arriving looks exactly like "nothing bad
 happened" — the one failure mode that breaks R1 while appearing to work perfectly. So expiry

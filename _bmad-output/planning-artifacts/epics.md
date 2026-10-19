@@ -74,127 +74,27 @@ list only says which is which.
 
 ### Additional Requirements
 
-No starter template (brownfield). The blockers from `TRACER-03-GO-LIVE.md` are AR1–AR9; the rest
-come from `ARCHITECTURE.md` and `TODO.md` findings that go-live makes real.
+No starter template (brownfield). The blockers from `TRACER-03-GO-LIVE.md` were AR1–AR9. The texts live in
+`REQUIREMENTS.md`, `ARCHITECTURE.md` and `AGENTS.md`; this list only says where.
 
-- AR1 (blocker 1): **Debit list from the database.** `GET /debits` must read stored debits and
-  payees, never call the bank per request (N26 allows ~4 fetches/day). The worker is the only
-  thing that fetches.
-- AR2 (blocker 2): **Authentication on every endpoint**, including `POST /rules` and
-  `POST /device-token` (both documented as open "before deployed anywhere"). Remove `/raw`,
-  `/aspsps` and the open `/connect`. Owner-only; no multi-user login needed, but a phone handed
-  to another account must not keep the old user's alerts.
-  **Decided 2026-10-01: a single static API key** (long random string, HTTPS only, kept in Key
-  Vault / app settings, never in Git; rotating = change on the server and ship a new app), with
-  **one "current user" seam** — all endpoints get the user from one place, so a later move to
-  per-user sign-in (OAuth/OIDC) touches that seam plus the app's sign-in, not every endpoint.
-  The browser pages (`/connect`, `/callback`) cannot send a header; they need their own
-  protection (e.g. a one-time `state`), to be settled in the story.
-  **Multi-user preparation, decided 2026-10-01 (cheap now, costly to retrofit):** (1) the seam
-  replaces the hardcoded `SeedData.UserId` in the endpoints (`/rules`, `/device-token`) as they are
-  touched — for now it always returns the owner; (2) the new consent table carries a `UserId`
-  (see AR3); (3) the worker takes the user from the consent, not from the seed constant (see AR4);
-  (4) **rule for all new code: no new `SeedData.UserId`.** Deliberately *not* done now: sign-in /
-  identity provider, per-user app storage, account creation and management. Before real
-  multi-user, still to fix: the payee key is not scoped per user (`TODO.md`).
-- AR3 (blocker 3): **Consent store in the database.** A `BankConsents` table replaces
-  `consent.local.json`: one row per bank **per user** (key `(UserId, bank)`; today's file has no
-  user at all), tokens encrypted with a Key Vault key, session id kept only as a hash elsewhere. A repeat `/connect` for a bank that already has a consent
-  **replaces** it — that is the reconnect path (decided 2026-10-01).
-- AR4: **Multi-consent worker.** The Ingestion Worker walks every consent each tick, isolates
-  per-bank failures, and reads the poll interval per ASPSP. `AccountSyncStates` is already keyed
-  `(UserId, AccountKey)`. The worker takes the user from each consent row, not from
-  `SeedData.UserId` (about 25 hardcoded uses today in `IngestionRunner`).
-- AR5 (blocker 4): **Hosting: Azure Functions, isolated worker model** (decided 2026-10-01; free
-  at this scale — Consumption grant 1M executions / 400k GB-s, Flex 250k / 100k; Functions plan
-  Consumption vs Flex to be picked in the story). The in-process `BackgroundService` loop becomes
-  a **timer trigger** (every 6 h) that runs one existing `IngestionRunner` tick; the API runs in
-  the same Functions host (ASP.NET Core integration) or separately — settle in the story. The
-  first sync stays API-triggered right after the consent callback. Accepted cost: a cold start of
-  roughly 2–7 s on the first request after a quiet period (pushes are not affected, they come
-  from the worker). Rejected: App Service F1 (60 CPU min/day, no Always On, unloads after ~20 min
-  idle); Container Apps with one always-on replica (~$1–3/month, kept as the fallback).
-- AR6 (blocker 4): **Cloud Postgres: Neon free tier** (decided 2026-10-01; compute suspends after
-  5 min idle and resumes on its own, no data loss), with the six EF migrations applied
-  **manually from the owner's machine at deploy time**, not automatically at startup (a Function
-  app can start several instances). Connection string in secrets.
-- AR7 (blocker 5): An **HTTPS address** registered as the redirect URL in the Enable Banking
-  *Production* application (Sandbox and Production differ), and `/callback` served on it.
-  **Decided 2026-10-01: the default `https://<name>.azurewebsites.net/callback`, no custom domain**
-  (free, HTTPS included); the exact URL must be fixed before registering — Enable Banking checks
-  it strictly (`REDIRECT_URI_NOT_ALLOWED` on a mismatch).
-- AR8 (blocker 6): **Switch to the Production application** (`ApplicationId`, `PrivateKeyPath`,
-  `RedirectUrl`) in the cloud config. **Decided 2026-10-01: all three consents (N26, DKB,
-  ING-DiBa) are granted fresh through the cloud callback** — the old local N26 consent
-  (valid to 2026-12-15) is not restored, so the full cloud path (callback, encrypted storage,
-  first sync) is exercised for every bank. Each account must first be linked in the Enable
-  Banking Control Panel.
-- AR9: **Consent validity.** `valid_until` is a flat 90 days today; read each ASPSP's
-  `maximum_consent_validity` (`GET /aspsps?country=DE` with the Production application) before
-  authorizing, or a bank with a shorter cap rejects `POST /auth`. **Decided 2026-10-01: read the
-  list fresh at every `/connect`, no cache** (`/connect` is rare); use the smaller of 90 days and
-  the bank's maximum.
-- AR10: **Pagination.** Follow `continuation_key`; the fetcher must return the **complete**
-  history or throw (first sync is all-or-nothing); fix the fallback-id ordinal colliding across
-  pages; send `date_from` so banks do not return arbitrary history lengths. **Decided 2026-10-01:
-  the first sync pulls a fixed window of the last 90 days** (an upper limit — a bank may return
-  less). This **changes R25** ("as much as the ASPSP returns, no how-far-back setting"), so
-  `REQUIREMENTS.md` must be updated first. To check while building: whether each page counts
-  against the bank's ~4 fetches/day. Needed before DKB and
-  ING first syncs are trustworthy; also fixes `FirstSeenAt` and the Reconnect N/M undercount.
-- AR11: **Return path into the app after consent.** DKB and ING switch into their own banking
-  apps for authorization; how the user lands back in Greedy Nose (redirect/deep link) is the
-  biggest open unknown. **Decided 2026-10-01: option 1 for Tracer 3 — finish in the browser.** The
-  owner starts each consent from a browser, approves in the bank's own app, and the `/callback`
-  page just says "done"; the owner opens Greedy Nose afterwards. No app work, no deep link (later).
-  Each bank's real behaviour is recorded as a finding in `TRACER-03-GO-LIVE.md` on the first
-  real consent.
-- AR12 (blocker 7): **Release build** of the Android app pointing at the cloud address (no
-  `adb reverse`, `USE_BACKEND` on). **Decided 2026-10-01: a sideloaded, self-signed release APK
-  installed by the owner, no Play Store.** The signing key stays out of Git like every other
-  secret; the API key (AR2) is baked into the build.
-- AR13: **Rules reach the backend reliably.** A failed first sync of a rule is never retried and
-  rules saved before sync existed never arrived; add a per-launch resync of local rules (the
-  backend upsert is idempotent). **Decided 2026-10-01: resend all local rules at app start, plus
-  the existing send on every create/edit; no extra resend when the app returns to the
-  foreground.** Also: `POST /rules` race and the "Unknown payee" placeholder.
-- AR14: **Push quality before shipping.** FCM's default channel shows no heads-up pop-up and a
-  generic icon; add a dedicated high-importance channel and a proper small icon. **Decided
-  2026-10-01: in Tracer 3** (the alert is the whole product); the force-stop behaviour is a test on
-  the owner's phone, recorded as a finding. Check what the
-  target phone does when the app is force-stopped.
-- AR15: **First-sync visibility.** A consent that dies before the first sync finishes stays
-  silent (only a log line). The app also cannot read the connection state at all yet
-  (`ConsentStore.GetState` has no endpoint; `/health` still says `connected: true`).
-  **Decided 2026-10-01:** (1) a backend status endpoint, protected by the API key, listing per
-  bank: connected/expired, valid until, last successful poll — read in a browser or with `curl`,
-  no app screen (banner/Settings stay later); (2) fix the silent "dies before the first sync
-  finishes" case so it still sends the expiry push.
-- AR16: **Hygiene.** Close the old session when a reconnect completes (`DELETE /sessions/{id}`);
-  a dead session keeps costing calls every tick. **Decided 2026-10-01: in Tracer 3.** Caveat:
-  `DELETE` was only tested in the sandbox; whether it also revokes the consent at a real bank is
-  unchecked — record as a finding.
-- AR17: **Verification environment.** `dotnet test` is blocked here by a Windows Application
-  Control policy (`0x800711C7`) — find a way to run the backend tests before the go-live stories
-  rely on them. **Decided 2026-10-01: fix this first — an early story in the first epic.** It is
-  the owner's own machine (not managed), so a local fix (adjust the Application Control policy /
-  allow the repo build output) should be possible; CI or a container is the fallback.
-- AR18: **A failed push is retried, never silently lost.** Today a failed send (`Rejected`/
-  `Transient`/no token) still commits the debit as seen, so the alert is never retried (accepted
-  on 2026-09-29; **reversed 2026-10-01**). Decided 2026-10-01:
-  - The bad debit is **saved and shown in the list** even if its push failed.
-  - It gets an explicit **"push owed" mark**, set when the first send fails. It cannot be inferred
-    from "bad debit with no `NotificationLog` row" — a debit that turns bad later through a rule
-    edit has none either and must never notify (R10a).
-  - Every tick, besides fetching, the worker **retries all debits with the mark**, in addition to
-    new ones; it never blocks ingestion of other debits.
-  - **Failed attempts are logged** (per debit: attempts, last outcome, time).
-  - **Limit:** retry for at most 24 h, then give up and log it. *(confirmed 2026-10-01)*
-  - **Operator email:** when pushes fail several times in a row (3 attempts, *confirmed
-    2026-10-01*), one email goes to the owner (once per incident, not every tick), so a broken push channel is
-    noticed. This pulls a small slice of the Health Monitor email (Brevo, free) into Tracer 3; the
-    rest of the Health Monitor stays out.
-  - Only `TokenNoLongerValid` may prune a token; `Rejected` means a human must look.
+- AR1 (debit list from the database) = R9, R29; `ARCHITECTURE.md`, "Transaction ingestion"
+- AR2 (authentication on every endpoint, one current-user seam) = R33; `ARCHITECTURE.md`, "Authentication and secrets"
+- AR3 (consent store in the database) = `ARCHITECTURE.md`, "Data model" (`BankConsents`)
+- AR4 (multi-consent worker) = R22a, R31; `ARCHITECTURE.md`, "Hosting, as built" and "Data model"
+- AR5 (hosting: Azure Functions, isolated worker) = `ARCHITECTURE.md`, "Hosting, as built"
+- AR6 (cloud Postgres: Neon, migrations by hand) = `ARCHITECTURE.md`, "Hosting, as built" and "Cost"
+- AR7 (HTTPS redirect URL, no custom domain) = `ARCHITECTURE.md`, "Cost"
+- AR8 (switch to the Production application, consents granted fresh) = R28; `ARCHITECTURE.md`, "Cost"
+- AR9 (consent validity from the bank's own maximum) = `ARCHITECTURE.md`, "Cost"
+- AR10 (pagination, 90-day first sync) = R25; `ARCHITECTURE.md`, "Transaction ingestion"
+- AR11 (way back into the app after consent: the browser) = `ARCHITECTURE.md`, "Consent lifecycle"
+- AR12 (sideloaded self-signed release APK) = `ARCHITECTURE.md`, "Authentication and secrets"; the build: `AGENTS.md`, "Cloud and release operations"
+- AR13 (rules reach the backend) = R35
+- AR14 (push quality: channel, icon) = `ARCHITECTURE.md`, "Client" ("Push on Android")
+- AR15 (first-sync visibility, status endpoint) = `ARCHITECTURE.md`, "Reliability" and "Consent lifecycle"
+- AR16 (a reconnect closes the old session) = `ARCHITECTURE.md`, "Data model" (`BankConsents`)
+- AR17 (tests run on this machine) = `AGENTS.md`, "Running and verifying"
+- AR18 (a failed push is retried, never lost) = R11a; `ARCHITECTURE.md`, "Reliability"
 
 ### UX Design Requirements
 
