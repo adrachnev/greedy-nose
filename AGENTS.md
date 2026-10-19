@@ -235,6 +235,22 @@ and built with the process in Policy.
   `epics.md` (13 stories) were moved into the notes of their beads and removed (the file also held a stale second copy of
   Epic 1, now gone). BMAD plans from these documents; keep them this way: no history in `epics.md`, no stale design in
   `ARCHITECTURE.md`.
+- **How the documents refer to each other** (decided 2026-10-19). The chain is `REQUIREMENTS.md` (R: what must hold, and
+  why) → epic → story → bead; `ARCHITECTURE.md` (A: how it is built) is a side input to the stories. A reference points to
+  the place where a thing is written; it never copies the text.
+  - **Epic:** one goal for the owner in a sentence, and the R numbers it delivers (one line). It does not list its
+    stories; they belong to it through their number (story 3.2 is in epic 3, bead `gn-yhb.2` is a child of `gn-yhb`).
+  - **Story:** its head names the R it delivers and the A it must respect. A is the **section title** in
+    `ARCHITECTURE.md` (for example `ARCHITECTURE.md, "Ingestion modes"`), not a number. The acceptance criteria are
+    testable behaviour (Given/When/Then); they may be concrete but do not repeat a rule's wording or its numbers
+    ("at the pace of R29", not "every 6 h").
+  - **Coverage map:** `epics.md` holds one table with a row per R: the epic that delivers it, or "baseline" (already
+    built) or "deferred". A row without any of these is a gap in the plan; check the table at every planning round.
+  - **A story needs behaviour no R states?** First write the R in `REQUIREMENTS.md`, then the story. A design decision
+    made while building goes into `ARCHITECTURE.md`; if the title of an A section changes, search `epics.md` for it.
+  - **Not yet done:** the existing stories still cite the old FR/NFR/AR numbers of Tracer 3 (mapped at the top of
+    `epics.md`), the three UX-DR were left as they were, and the coverage map per R does not exist yet. The next
+    planning round (`bmad-create-epics-and-stories`) creates it.
 - **First planning step after Tracer 3:** turn the next topics into epics and stories (`bmad-create-epics-and-stories`):
   choosing the account in the app (`gn-hkx`), the remaining screens and onboarding, the resilience beads. Each story
   then gets a bead as before.
