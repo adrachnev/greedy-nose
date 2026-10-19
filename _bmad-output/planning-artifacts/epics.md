@@ -29,6 +29,11 @@ the in-app connection-expired banner (`01d`), Disconnect / Delete account (R18, 
 the Health Monitor job (only a small operator-email slice for failed pushes comes in, see AR18), iOS, a bank-selection screen, per-bank labels in the
 debit list, other users' accounts (Restricted Production is owner-only).
 
+**What was built, measured or decided** while doing a story is not kept here: it is in the notes of the story's
+bead (`bd show <id>`, the bead's `--spec-id` points back to its section) and in `TRACER-03-GO-LIVE.md`. This file is the plan.
+**Outcome of the tracer (2026-10-19):** closed with N26 and DKB; ING-DiBa was dropped by the owner (Story 3.6 not done,
+3.8 judged on two banks).
+
 **Process reminder:** each story is built exactly as before (plan mode, `coder-backend`/
 `coder-mobile`, `coder-reviewer` started by hand, findings back to the same coder). Never
 `bmad-build`.
@@ -322,11 +327,6 @@ pass/fail per test
 **Given** no local fix works
 **Then** the fallback (CI or a container) is set up and documented instead
 
-**As built (2026-10-01):** the block is Smart App Control (state 1), not a managed policy, and
-the owner chose not to switch it off. The tests run in a Linux container (`dotnet/sdk:10.0`, the
-repo mounted read-only, NuGet cached in a named volume): **310 passed, 0 failed, about 11 s**,
-repeatable after every change. The command is in `AGENTS.md`; `dotnet build` still works on the
-host. Coders and reviewers use the same command for backend tests.
 
 ### Story 1.2: The app sends the API key with every backend call
 
@@ -354,17 +354,6 @@ So that it keeps working once the backend starts requiring the key (Story 1.3).
 
 *(The backend ignores the header until Story 1.3, so nothing breaks in between.)*
 
-**As built (2026-10-01):** header `Authorization: Bearer <key>` (Story 1.3 must accept exactly
-this; it also lets a later per-user token reuse the header). The key lives in the gitignored
-`app/src/data/apiKey.local.ts`, with the committed template `apiKey.local.example.ts`; no new
-dependency. `backendAuth.ts` reads it through a guarded `require`, and `metro.config.js` sets
-`allowOptionalDependencies: true` — verified with a real `react-native bundle`: it builds without
-the file, and with a throwaway key file the key is in the bundle (file deleted afterwards).
-Missing key: no request is sent, the feed shows "API key not configured", the rules and
-device-token syncs warn and skip, and a rule is still saved locally. 211 jest tests (was 200),
-`tsc` clean, `eslint` only the 3 old warnings. One review pass, no MUST/SHOULD FIX. Known and
-accepted: the key sits in the JS bundle, so a release APK carries it (rotate by shipping a new
-APK). Not verified end to end against the backend — Story 1.3 is not built yet.
 
 ### Story 1.3: The backend requires the API key and drops the debug endpoints
 
@@ -394,20 +383,6 @@ unprotected pair, closed right after)
 from configuration (user secrets locally)
 **And** tests cover 401 for every other endpoint and success with the key (NFR7, NFR8)
 
-**As built (2026-10-01):** `Auth/ApiKeyMiddleware` (registered first in `Program.cs`) +
-`Auth/ApiKeyOptions` (`Api:Key`, fail closed: missing, shorter than 32 characters or edge
-whitespace stops the startup). `Authorization: Bearer <key>` (scheme case-insensitive), SHA-256 +
-`FixedTimeEquals`, 401 with `WWW-Authenticate: Bearer` and an empty body; unknown paths also 401.
-Exempt only `/connect` and `/callback` (exact segment match, so `/connectx` is not; removed in
-Story 1.4). `/raw` and `/aspsps` are gone (and `EnableBankingOptions.RawDumpDirectory`, whose only
-reader was `/raw`); `/health` needs the key. A rejection logs only a sanitized, truncated path.
-346 tests (310 + 36 new, in the container), host `dotnet build` clean, one review pass (no MUST
-FIX; the three cheap items fixed). **Verified live** in a container against the dev Postgres: 18
-curl checks (no/wrong/right key, lower-case `bearer`, key without scheme, `/raw` and `/aspsps` →
-404, `/callback` exempt, `/CONNECTX` 401, POST `/rules` and `/device-token` with an empty body →
-400 so nothing was written), the key in no log and no tracked file, and the backend refusing to
-start with a short key. **Finding:** Smart App Control also blocks *running* the backend on the
-host, so it now runs in a container (`tools/run-backend-container.sh`, see `AGENTS.md`).
 
 ### Story 1.4: Starting a consent is protected
 
@@ -439,26 +414,6 @@ database, not in memory
 **And** the `state` is never logged; tests cover missing, wrong, used and expired `state`, and the
 happy path (NFR7, NFR8)
 
-**As built (2026-10-01):** `POST /connect-links` (behind the API key; `/connect-links` is a
-different path segment, so the `/connect` exemption does not cover it) returns `{ url }` built from
-the origin of `RedirectUrl`; `GET /connect?token=` spends the link once, mints the `state` in the
-same write and redirects to the bank; `GET /callback` spends the `state` *before* trading the code.
-New table `PendingConsents` (migration `AddPendingConsents`, applied manually to the dev DB): only
-SHA-256 hashes of token and state (unique indexes), `Version` concurrency token, 30 minute lifetime,
-cascade FK to `Users`; expired rows are deleted when a new link is created. Failures: 400 (bad,
-used, expired or lost-race secret — indistinguishable), 502 (Enable Banking failed, a network
-fault, or the consent could not be stored); the bank body, session id, IBANs and any `?error=`
-text are never shown; both pages send `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
-`ConsentStore` lost its in-memory pending state and the premature `AspspName` overwrite;
-`Complete(...)` takes the bank from the record. Endpoint code moved to `Consent/ConsentEndpoints.cs`.
-398 tests (346 + 52 new, in the container), two review passes (no MUST FIX; both SHOULD FIX
-rounds applied). **Verified live** against the dev Postgres: no key → 401, link → 302 once then 400,
-no/garbage token → 400, unknown state → 400, `?error=<script>` not echoed, headers present, raw
-token not in the DB, and **a real race — two parallel requests on one link gave exactly one 302 and
-one 400**. Not run live: a completed callback (needs a real bank code) and the log grep (my check
-failed; the unit tests assert it). The helper is `tools/connect-bank.sh` (`GN_NO_OPEN=1` skips the
-browser). Deliberately not done: rate limiting, and an `https` check on the bank's redirect URL
-(see `TODO.md`).
 
 ### Story 1.5: One "current user" lookup
 
@@ -481,17 +436,6 @@ So that moving to per-user sign-in later changes one spot, not every endpoint.
 **And** the ingestion worker's own `SeedData.UserId` uses stay until Epic 3 (AR4); no new
 `SeedData.UserId` appears anywhere
 
-**As built (2026-10-05):** `Auth/ICurrentUser` (`Guid UserId`) and `Auth/OwnerCurrentUser`
-(returns `SeedData.UserId`), registered scoped in `Program.cs`. `RulesEndpoint` and
-`DeviceTokenEndpoint` take it as a parameter and no longer name `SeedData.UserId`. **Deviation
-from the AC wording:** `/debits` is untouched — it uses no user today (it still calls the bank
-live); Story 1.6 injects the service when it reads stored data (noted as a comment on bead
-`gn-ywx.6`). Also still on `SeedData.UserId`, deliberately: `ConsentEndpoints` (browser pages, no
-request user), `IngestionRunner` (Epic 3), the model seed. 400 tests (398 + 2 new, in the
-container), one review pass, no MUST FIX. **Gap, accepted:** the "different user" test covers
-`/rules` only — the device-token refresh uses `ExecuteUpdateAsync`, which EF InMemory lacks, so
-that endpoint needs a Postgres-backed test (bead `gn-vgm`); the refresh is keyed on `Token` only
-(bead `gn-oue`). Not run live: no behaviour change.
 
 ### Story 1.6: The debit list comes from stored data
 
@@ -523,392 +467,6 @@ So that opening the app never spends the bank's few daily fetches (FR3, AR1).
 **And** incoming money is never in it (R2a)
 **And** the app's pull-to-refresh only re-reads this endpoint
 
-**As built (2026-10-05):** `Debits/DebitsEndpoint.HandleAsync(ICurrentUser, GreedyNoseDbContext,
-CancellationToken)` replaces the inline lambda in `Program.cs`. It reads the user's stored debits
-(all accounts, newest first, `Id` as tie-break) and the payees they reference, and returns the
-unchanged `DebitsDto` shape; the timestamp format is one shared constant
-(`TransactionMapper.TimestampFormat`). No bank, consent or fetcher dependency; nothing stored → 200
-with empty lists (the old 409 is gone). 409 tests (400 + 9 new, in the container), one review pass,
-no MUST FIX. **Verified live** (container backend, dev Postgres, Sandbox application): `/debits` →
-200, 94 debits and 44 payees with the same field names as before, **zero** Enable Banking requests
-caused by it (request count 1 → 1 around the call; the one request is the worker's startup tick),
-401 without the key. **Not done, recorded as beads:** the app's pull-to-refresh (the app has no
-`RefreshControl` yet, `gn-hw1`), `skipped` is always 0 because stored data cannot recount refused
-charges (`gn-dyv`), no paging (`gn-w67`).
-
-### Story 1.7: Consents live in an encrypted database table
-
-As the owner,
-I want my bank consents kept in the database, encrypted,
-So that the backend can run in the cloud and no consent sits in a loose file (AR3).
-
-**Implementation note:** the encryption key comes from configuration here (user secrets
-locally); Key Vault is wired in Epic 2.
-
-**Acceptance Criteria:**
-
-**Given** the migration is applied
-**Then** a `BankConsents` table exists, one row per `(UserId, bank)`
-**And** the session id and consent payload are encrypted at rest — never plaintext in the
-database or in logs (NFR7)
-
-**Given** consents for two banks
-**Then** there are two rows and reading or replacing one never touches the other
-
-**Given** a consent already exists for a bank
-**When** `/callback` completes a new consent for it
-**Then** the row is replaced (the reconnect path); the old session is *not* closed here (Epic 4,
-AR16)
-
-**Given** the backend restarts
-**Then** the consent state — including its expiry, and `Expired` for a dead one — is restored
-from the database
-**And** `consent.local.json` is no longer read or written
-
-**Given** the wrong encryption key
-**Then** the failure is loud and clear, never a silently empty store
-
-**And** the ingestion worker behaves as before with one consent, and all ingestion tests pass
-(multi-consent is Epic 3)
-
-**As built (2026-10-07):** table `BankConsents` (PK `UserId` + `AspspName`, FK to `Users` with cascade),
-`SessionIdCipher` and `PayloadCipher` as `bytea`. `ConsentCipher` = AES-256-GCM, random 12-byte nonce
-per value, layout `[version][nonce][tag][ciphertext]`, associated data `{user}|{bank}|{column}` (a value
-moved to another row or column fails to decrypt). Key = `Consent:EncryptionKey` (base64, 32 bytes),
-validated at startup; Key Vault comes in Epic 2. `ConsentStore` keeps its in-memory surface but persists
-through `IConsentPersistence`/`DbConsentPersistence`: `CompleteAsync` saves first and updates memory only if
-the save worked (a failed save throws and the callback shows its generic 502 page, nothing leaked);
-`RestoreAsync` loads the most recently connected row, an expired consent still loads as `Expired`, and a
-wrong key stops the backend with a clear `ConsentDecryptionException` — never a silently empty store.
-`consent.local.json` is no longer read or written and `ConsentFilePath` is gone. **Decision:** the old
-consent file is not migrated (N26 is connected fresh through the cloud in 2.7; the local Sandbox consent
-was redone once). 465 tests (430 + 35), one review pass, no MUST FIX. **Verified live** (Sandbox, dev
-Postgres, container): migration applied; the backend starts with no consent from the empty table; after a
-real Mock ASPSP consent in the browser there is one row with 65-byte and 445-byte ciphertexts and no
-plaintext markers in them, the old file untouched; a restart restores the consent as Active with the
-expiry the bank gave; a start with a wrong key fails loudly at startup; the following Reconnect tick found
-0 new debits and sent no push. **Open (beads):** `gn-7h4` (Epic 2: startup retry on transient DB errors,
-run migrations before the first start, key rotation needs a re-consent), `gn-uxv` (Epic 3: normalize the
-bank name, walk all rows).
-
-### Story 1.8: The first sync pulls 12 months, all pages
-> **Changed 2026-10-09 (Story 2.6a):** the window is now **90 days** (`IngestionRunner.FirstSyncWindowDays`), not 12 months — real N26 answered 422 `WRONG_TRANSACTIONS_PERIOD` to 12 months and to 180 days. The acceptance criteria below record what was built on 2026-10-05.
-
-As the owner,
-I want the first sync to pull the last 12 months completely,
-So that the history is whole and the same for every bank (FR2, AR10, R25).
-
-**Acceptance Criteria:**
-
-**Given** a first sync
-**When** the fetcher runs
-**Then** it sends `date_from` = today minus 12 months and follows `continuation_key` until no page
-is left
-
-**Given** a page fails midway
-**Then** the fetcher throws and nothing is stored (the first sync stays all-or-nothing); the next
-tick starts it again
-
-**Given** a same-day, same-amount, same-payee group split across a page boundary
-**Then** the fallback debit ids do not collide and no debit is lost or duplicated (ordinal across
-the whole result)
-
-**Given** a bank returns less than 12 months
-**Then** the sync succeeds with what it returned
-
-**Given** a bank answers `ASPSP_RATE_LIMIT_EXCEEDED` mid-sync
-**Then** the sync fails as a whole and retries at the next tick
-
-**Given** any sync
-**Then** it logs how many bank requests it made (answers the open question whether each page
-counts against the ~4 fetches per day)
-**And** `Payee.FirstSeenAt` uses the earliest date across all pages
-**And** steady-state and reconnect ticks also follow pagination, so a long gap is not undercounted
-(the exact date window for those is settled in plan mode)
-
-**As built (2026-10-05):** `IDebitsFetcher.FetchAsync(account, dateFrom, ct)`. The runner
-decides the mode **once** before fetching (`DetermineMode`) and computes `dateFrom` with the pure
-`IngestionRunner.ComputeDateFrom`: first sync = UTC today minus 12 months; steady and reconnect =
-the date of the newest stored debit of the account (else the first-sync date) minus 7 days of
-overlap, never later than today and never earlier than 12 months back. **Every tick** — not only the
-first sync — sends `date_from`, follows `continuation_key` (escaped) to the last page and maps all
-pages in **one** `TransactionMapper.Map` call (ordinals run across pages); a repeated-key guard and
-a 200-page cap stop a runaway loop, and any failed page, incl. `ASPSP_RATE_LIMIT_EXCEEDED`, throws
-so nothing is stored. Every tick logs its page count. The overlap re-fetches known debits; the id
-dedup makes that harmless (tests: one push, N/M over the new debits only). `Payee.FirstSeenAt`
-already takes the earliest date of the batch. 430 tests (400 + 30), three review passes, no MUST FIX.
-**Verified live** (Sandbox / Mock ASPSP, dev Postgres): first sync = 4 pages from 2025-10-05, stored
-198 further debits silently (94 → 292); a second first sync (row removed again) fetched the same 4
-pages and stored 0 (ids stable, no duplicates); a normal tick = 1 page from the newest debit minus 7
-days, no push, no new rows. **History of the design:** an earlier build paged only on the first
-sync (to spare the ~4 fetches/day quota); the owner decided on 2026-10-05 that every tick pages from
-the last fetch on, so a backlog is never undercounted. **Open before go-live (blocks 2.11, 3.5, 3.6):**
-`gn-xeq` and `gn-6k5` — does each page count against the bank quota, does a bank reject an old
-`date_from`, does the bank filter on the same day as the mapper.
-
-## Epic 2: N26 live on Azure, end to end
-A real N26 bad charge becomes a push on the owner's phone, and a failed push is never lost — with the backend on Azure and the phone
-not attached to the laptop.
-**FRs covered:** FR4, FR5, FR6 (and FR1/FR2 for N26)
-**Also:** AR5, AR6, AR7, AR8, AR12, AR13, AR14, AR18, UX-DR2, UX-DR3
-
-### Epic 3: DKB and ING-DiBa watched too
-All three banks feed one debit list, and one bank failing never stops the others.
-**FRs covered:** FR1, FR8, FR9, FR10
-**Also:** AR4, AR9, AR11, UX-DR1
-
-### Epic 4: I'm never silently left without alerts
-A dead connection is noticed, not silent, and each bank's state can be seen.
-**FRs covered:** FR7
-**Also:** AR15, AR16
-
-## Epic 1: A backend I can trust to deploy
-
-The owner can rely on the backend to guard his data and to serve the debit list from stored data;
-the tests run, so every later story is verifiable. (FR2, FR3; AR1, AR2, AR3, AR10, AR17.)
-Epic 1 deliberately adds nothing for the app's user interface beyond the API key header.
-
-### Story 1.1: Backend tests run on my machine
-
-As the owner,
-I want `dotnet test` to run on my machine,
-So that every later backend story is verified by real tests.
-
-**Implementation note:** this is a machine/toolchain fix, not product code — the main session
-does it (see `AGENTS.md`, Policy), not `coder-backend`.
-
-**Acceptance Criteria:**
-
-**Given** a freshly built backend
-**When** I run `dotnet test GreedyNose.Api.Tests`
-**Then** the tests load and execute — no `FileLoadException` / `0x800711C7` — and the result is
-pass/fail per test
-**And** the baseline (how many tests pass today) is recorded in `TRACER-03-GO-LIVE.md`
-
-**Given** I change code and rebuild
-**When** I run the tests again
-**Then** they still run (the fix does not depend on a one-time exception for one specific DLL)
-
-**Given** the fix is a Windows Application Control setting or an allowed path
-**Then** it is limited to what the repository's build output needs, not a global weakening
-**And** it is documented in `AGENTS.md` ("Running and verifying") so a new machine can repeat it
-
-**Given** no local fix works
-**Then** the fallback (CI or a container) is set up and documented instead
-
-**As built (2026-10-01):** the block is Smart App Control (state 1), not a managed policy, and
-the owner chose not to switch it off. The tests run in a Linux container (`dotnet/sdk:10.0`, the
-repo mounted read-only, NuGet cached in a named volume): **310 passed, 0 failed, about 11 s**,
-repeatable after every change. The command is in `AGENTS.md`; `dotnet build` still works on the
-host. Coders and reviewers use the same command for backend tests.
-
-### Story 1.2: The app sends the API key with every backend call
-
-As the owner,
-I want the app to send my API key with every backend call,
-So that it keeps working once the backend starts requiring the key (Story 1.3).
-
-**Acceptance Criteria:**
-
-**Given** backend mode is on and the key is in a local, gitignored config file
-**When** the app calls `/debits`, `/rules` or `/device-token`
-**Then** each request carries the key in a header
-
-**Given** backend mode is on and the key is missing
-**When** the app starts
-**Then** the data-source badge says the backend is not configured — never a silently empty list
-(UX-DR2)
-
-**Given** the repository
-**Then** the key is in no tracked file; only a template file names the setting
-**And** fixture mode behaves exactly as before
-
-**And** jest tests cover the header on each call and the missing-key state; `tsc`, `eslint` and
-`jest` pass
-
-*(The backend ignores the header until Story 1.3, so nothing breaks in between.)*
-
-**As built (2026-10-01):** header `Authorization: Bearer <key>` (Story 1.3 must accept exactly
-this; it also lets a later per-user token reuse the header). The key lives in the gitignored
-`app/src/data/apiKey.local.ts`, with the committed template `apiKey.local.example.ts`; no new
-dependency. `backendAuth.ts` reads it through a guarded `require`, and `metro.config.js` sets
-`allowOptionalDependencies: true` — verified with a real `react-native bundle`: it builds without
-the file, and with a throwaway key file the key is in the bundle (file deleted afterwards).
-Missing key: no request is sent, the feed shows "API key not configured", the rules and
-device-token syncs warn and skip, and a rule is still saved locally. 211 jest tests (was 200),
-`tsc` clean, `eslint` only the 3 old warnings. One review pass, no MUST/SHOULD FIX. Known and
-accepted: the key sits in the JS bundle, so a release APK carries it (rotate by shipping a new
-APK). Not verified end to end against the backend — Story 1.3 is not built yet.
-
-### Story 1.3: The backend requires the API key and drops the debug endpoints
-
-As the owner,
-I want every backend data endpoint to require my API key,
-So that nobody else can read my debits or change my rules.
-
-**Acceptance Criteria:**
-
-**Given** a request to any endpoint except `/connect` and `/callback` (Story 1.4), including `/health`, with no key or a wrong key
-**When** it is handled
-**Then** the answer is 401 and no data or connection state is revealed
-
-**Given** a request with the right key
-**When** it is handled
-**Then** the endpoint behaves exactly as before
-
-**Given** `/raw` and `/aspsps`
-**Then** they no longer exist (404) and their tests are removed
-
-**Given** `/connect` and `/callback`
-**Then** they are handled by Story 1.4; until then they keep working as today (the one
-unprotected pair, closed right after)
-
-**Given** the key
-**Then** it is compared in constant time, never logged, never in `appsettings.json`, and read
-from configuration (user secrets locally)
-**And** tests cover 401 for every other endpoint and success with the key (NFR7, NFR8)
-
-**As built (2026-10-01):** `Auth/ApiKeyMiddleware` (registered first in `Program.cs`) +
-`Auth/ApiKeyOptions` (`Api:Key`, fail closed: missing, shorter than 32 characters or edge
-whitespace stops the startup). `Authorization: Bearer <key>` (scheme case-insensitive), SHA-256 +
-`FixedTimeEquals`, 401 with `WWW-Authenticate: Bearer` and an empty body; unknown paths also 401.
-Exempt only `/connect` and `/callback` (exact segment match, so `/connectx` is not; removed in
-Story 1.4). `/raw` and `/aspsps` are gone (and `EnableBankingOptions.RawDumpDirectory`, whose only
-reader was `/raw`); `/health` needs the key. A rejection logs only a sanitized, truncated path.
-346 tests (310 + 36 new, in the container), host `dotnet build` clean, one review pass (no MUST
-FIX; the three cheap items fixed). **Verified live** in a container against the dev Postgres: 18
-curl checks (no/wrong/right key, lower-case `bearer`, key without scheme, `/raw` and `/aspsps` →
-404, `/callback` exempt, `/CONNECTX` 401, POST `/rules` and `/device-token` with an empty body →
-400 so nothing was written), the key in no log and no tracked file, and the backend refusing to
-start with a short key. **Finding:** Smart App Control also blocks *running* the backend on the
-host, so it now runs in a container (`tools/run-backend-container.sh`, see `AGENTS.md`).
-
-### Story 1.4: Starting a consent is protected
-
-As the owner,
-I want starting and finishing a bank consent to be protected too,
-So that nobody else can connect a bank account to my backend or replay a consent link.
-
-**Acceptance Criteria:**
-
-**Given** the owner starts a consent from a browser
-**When** `/connect` is opened
-**Then** it works without putting the API key into a URL (the mechanism — e.g. a one-time link
-issued by an authenticated call — is settled in plan mode)
-**And** it issues a one-time `state` bound to that bank
-
-**Given** `/callback` is called
-**When** the `state` is missing, unknown, already used or expired
-**Then** it is rejected and no consent is stored
-**And** a valid `state` completes the consent once; replaying it is rejected
-
-**Given** the backend restarts, or several instances run (Azure Functions can stop when idle and
-scale out)
-**Then** an issued `state` is still valid and a used one is still refused — it is stored in the
-database, not in memory
-
-**Given** a consent request without the key and without a valid one-time link
-**Then** it is rejected and nothing is started at the bank
-
-**And** the `state` is never logged; tests cover missing, wrong, used and expired `state`, and the
-happy path (NFR7, NFR8)
-
-**As built (2026-10-01):** `POST /connect-links` (behind the API key; `/connect-links` is a
-different path segment, so the `/connect` exemption does not cover it) returns `{ url }` built from
-the origin of `RedirectUrl`; `GET /connect?token=` spends the link once, mints the `state` in the
-same write and redirects to the bank; `GET /callback` spends the `state` *before* trading the code.
-New table `PendingConsents` (migration `AddPendingConsents`, applied manually to the dev DB): only
-SHA-256 hashes of token and state (unique indexes), `Version` concurrency token, 30 minute lifetime,
-cascade FK to `Users`; expired rows are deleted when a new link is created. Failures: 400 (bad,
-used, expired or lost-race secret — indistinguishable), 502 (Enable Banking failed, a network
-fault, or the consent could not be stored); the bank body, session id, IBANs and any `?error=`
-text are never shown; both pages send `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
-`ConsentStore` lost its in-memory pending state and the premature `AspspName` overwrite;
-`Complete(...)` takes the bank from the record. Endpoint code moved to `Consent/ConsentEndpoints.cs`.
-398 tests (346 + 52 new, in the container), two review passes (no MUST FIX; both SHOULD FIX
-rounds applied). **Verified live** against the dev Postgres: no key → 401, link → 302 once then 400,
-no/garbage token → 400, unknown state → 400, `?error=<script>` not echoed, headers present, raw
-token not in the DB, and **a real race — two parallel requests on one link gave exactly one 302 and
-one 400**. Not run live: a completed callback (needs a real bank code) and the log grep (my check
-failed; the unit tests assert it). The helper is `tools/connect-bank.sh` (`GN_NO_OPEN=1` skips the
-browser). Deliberately not done: rate limiting, and an `https` check on the bank's redirect URL
-(see `TODO.md`).
-
-### Story 1.5: One "current user" lookup
-
-As the owner,
-I want every endpoint to get the user from one place,
-So that moving to per-user sign-in later changes one spot, not every endpoint.
-
-**Acceptance Criteria:**
-
-**Given** `/rules`, `/device-token` and `/debits`
-**When** they need the user
-**Then** they ask one current-user service, which returns the owner for now
-**And** none of them references `SeedData.UserId` directly
-
-**Given** a test double that returns a different user id
-**When** a rule is saved and a device token registered
-**Then** both rows belong to that user (proves the seam is real)
-
-**And** the existing tests still pass; behaviour is unchanged for the owner
-**And** the ingestion worker's own `SeedData.UserId` uses stay until Epic 3 (AR4); no new
-`SeedData.UserId` appears anywhere
-
-**As built (2026-10-05):** `Auth/ICurrentUser` (`Guid UserId`) and `Auth/OwnerCurrentUser`
-(returns `SeedData.UserId`), registered scoped in `Program.cs`. `RulesEndpoint` and
-`DeviceTokenEndpoint` take it as a parameter and no longer name `SeedData.UserId`. **Deviation
-from the AC wording:** `/debits` is untouched — it uses no user today (it still calls the bank
-live); Story 1.6 injects the service when it reads stored data (noted as a comment on bead
-`gn-ywx.6`). Also still on `SeedData.UserId`, deliberately: `ConsentEndpoints` (browser pages, no
-request user), `IngestionRunner` (Epic 3), the model seed. 400 tests (398 + 2 new, in the
-container), one review pass, no MUST FIX. **Gap, accepted:** the "different user" test covers
-`/rules` only — the device-token refresh uses `ExecuteUpdateAsync`, which EF InMemory lacks, so
-that endpoint needs a Postgres-backed test (bead `gn-vgm`); the refresh is keyed on `Token` only
-(bead `gn-oue`). Not run live: no behaviour change.
-
-### Story 1.6: The debit list comes from stored data
-
-As the owner,
-I want the debit list to come from what the backend has already stored,
-So that opening the app never spends the bank's few daily fetches (FR3, AR1).
-
-**Acceptance Criteria:**
-
-**Given** stored debits and payees
-**When** the app calls `GET /debits`
-**Then** it gets them in the existing JSON shape (the contract `app/src/domain/model.ts` and
-`backendFeed.ts` validate today), newest first, with no good/bad classification (R6)
-
-**Given** a fetcher that throws if it is ever called
-**When** `GET /debits` is served
-**Then** the request still succeeds — the endpoint makes no bank call
-
-**Given** the worker stores a new debit
-**When** `GET /debits` is called next
-**Then** the new debit appears without any bank call
-
-**Given** no debits have been stored yet (before the first sync)
-**When** `GET /debits` is called
-**Then** it answers 200 with an empty list, not an error
-
-**Given** accounts of several banks (R22a)
-**Then** the list merges all of the user's accounts, ordered by date
-**And** incoming money is never in it (R2a)
-**And** the app's pull-to-refresh only re-reads this endpoint
-
-**As built (2026-10-05):** `Debits/DebitsEndpoint.HandleAsync(ICurrentUser, GreedyNoseDbContext,
-CancellationToken)` replaces the inline lambda in `Program.cs`. It reads the user's stored debits
-(all accounts, newest first, `Id` as tie-break) and the payees they reference, and returns the
-unchanged `DebitsDto` shape; the timestamp format is one shared constant
-(`TransactionMapper.TimestampFormat`). No bank, consent or fetcher dependency; nothing stored → 200
-with empty lists (the old 409 is gone). 409 tests (400 + 9 new, in the container), one review pass,
-no MUST FIX. **Verified live** (container backend, dev Postgres, Sandbox application): `/debits` →
-200, 94 debits and 44 payees with the same field names as before, **zero** Enable Banking requests
-caused by it (request count 1 → 1 around the call; the one request is the worker's startup tick),
-401 without the key. **Not done, recorded as beads:** the app's pull-to-refresh (the app has no
-`RefreshControl` yet, `gn-hw1`), `skipped` is always 0 because stored data cannot recount refused
-charges (`gn-dyv`), no paging (`gn-w67`).
 
 ### Story 1.7: Consents live in an encrypted database table
 
@@ -981,22 +539,6 @@ counts against the ~4 fetches per day)
 **And** steady-state and reconnect ticks also follow pagination, so a long gap is not undercounted
 (the exact date window for those is settled in plan mode)
 
-**As built (2026-10-05):** `IDebitsFetcher.FetchAsync(account, firstSync, ct)`; the runner decides
-the mode **once** before fetching (`DetermineMode`, same rule as before) and uses that value for
-the fetch and the commit. `EnableBankingDebitsFetcher`: a first sync sends `date_from` = UTC date
-minus 12 months, follows `continuation_key` (escaped) until none, merges all pages and maps them in
-**one** `TransactionMapper.Map` call (ordinals run across pages), with a repeated-key guard and a
-200-page cap; any failed page, incl. `ASPSP_RATE_LIMIT_EXCEEDED`, throws so nothing is stored. Every
-tick logs how many pages it fetched. `Payee.FirstSeenAt` already takes the earliest date of the
-batch, so it covers all pages. 424 tests (409 + 15), two review passes (the second only on the
-mode change), no MUST FIX. **Verified live** (Sandbox / Mock ASPSP, dev Postgres): with the
-account's sync row removed the first sync fetched 4 pages from 2025-10-05, stored 198 further
-debits silently (94 → 292, no duplicates), 0 pushes, the row was recreated (original row restored
-afterwards). **Deviation from the AC, decided in plan mode and now to be confirmed by the owner:**
-steady and reconnect ticks do **not** page — they stay one request with no `date_from`, because the
-bank allows ~4 fetches a day and each page is a request; a reconnect after a long gap therefore
-still undercounts (see `gn-mm1`, `gn-40m`). **Open before go-live:** `gn-xeq` (P1, blocks Story
-2.11) — does a real 12-month first sync (here 4 pages) fit N26's daily quota?
 
 ## Epic 2: N26 live on Azure, end to end
 
@@ -1143,20 +685,6 @@ setting in the cloud) — never in Git, logs or docs
 
 **And** the migration command is written down in `TRACER-03-GO-LIVE.md`
 
-**As built (2026-10-08):** Neon project in eu-central-1 (free tier, database `neondb`, direct host,
-no pooler). The connection string is the user secret `ConnectionStrings:Neon`; the tools take it with
-`DB=neon` (`tools/ef-container.sh`, `tools/run-functions-container.sh`), print nothing, and the dev
-database stays the default. All 12 migrations applied from this machine; 12 tables + history, the seed
-user exists, `Debits` empty. Code: `UseNpgsql(..., EnableRetryOnFailure(5, 15 s))`, and
-`Data/PostgresConnectionCheck.RequireTlsForRemoteHost` (a non-local host needs `SSL Mode`
-Require/VerifyCA/VerifyFull and no `Trust Server Certificate=true`; messages never carry a value),
-called by `AddGreedyNoseCore` and by the design-time factory. 576 backend tests (557 + 19), one review
-pass, no MUST FIX; three findings fixed (the migration path runs the check too, the trust-certificate
-hole, a test that pins the wiring). **Verified live:** after 6 minutes of idle the first `GET /debits`
-against Neon answered 200 with an empty list in 2.4 s (warm: 0.08 s); no key → 401; the log holds
-neither host nor password. Retry covers the resume, so point (1) of bead `gn-7h4` (a transient DB
-failure killing the consent restore) is handled for EF queries. Not done on purpose: running the
-migrations from the deployed app; the connection string goes to Key Vault in Story 2.6.
 
 ### Story 2.6: The backend is deployed to Azure
 
@@ -1194,20 +722,6 @@ an app setting — nothing secret in the repository or in plain logs
 **And** the cold start is measured and recorded; the deploy steps and the cloud address are
 written in `TRACER-03-GO-LIVE.md`
 
-**As built (2026-10-08):** Flex Consumption (Linux, dotnet-isolated 10.0, 512 MB) in Germany West Central,
-app `func-greedy-nose-611f0` in resource group `rg-greedy-nose`, storage reached through the app's own identity
-(no storage key anywhere), Application Insights, Key Vault `kv-greedynose-611f0` with six Key Vault references
-(all `Resolved`). Code: `EnableBanking:PrivateKey` (PEM text) and `Firebase:ServiceAccountJson` as inline
-alternatives to the file paths (quotes, `\n` and CRLF tolerated, no value in any message), and
-`QueueFirstSyncTrigger` resolves an identity-based queue target (`AzureWebJobsStorage__accountName`) with an
-explicit `Azure.Identity` reference — the review found it missing from the publish output, which would have broken
-the first-sync enqueue in Azure only. 601 backend tests (576 + 25), one review pass, one MUST FIX fixed.
-Tooling: `tools/az.sh` (Azure CLI in a container), `azure-setup.sh`, `azure-secret.sh`, `azure-deploy.sh`.
-**Verified live:** `http://` → 301 to https; no key / wrong key / unknown path → 401; right key → 200 with an
-empty list from Neon; all references resolved; `IngestionTick` run by hand → "No active consent; skipping this
-tick", no secrets in the logs; cold start 4.6 s after 12 min idle (warm 0.17 s). **Open:** cost check in Cost
-Analysis after 2–3 days; the Enable Banking application id and redirect URL are still the Sandbox ones until
-Story 2.7; the Neon password and the Brevo key were not rotated (owner's decision).
 
 ### Story 2.6a: The first sync is tried against the real N26, locally
 
@@ -1233,15 +747,6 @@ as counts only (answers `gn-xeq`, and the page-quota part of `gn-6k5`)
 **And** no PEM, IBAN, session id or raw bank data appears in logs or docs
 **And** the local secrets are set back to the Sandbox values and the container is removed afterwards
 
-**As run (2026-10-09):** local host on the Production application, N26 consent through a local TLS proxy (the
-Production application accepts only `https://localhost:5199/callback`). The dev database already knew the account, so
-the consent's own sync ran as a Reconnect (1 page, from 2026-09-29, one summary push). After the sync-state row was
-deleted by hand, the first-sync mode ran: **12 months → 422 `WRONG_TRANSACTIONS_PERIOD`; 180 days → 422; 90 days →
-200, 1 page, 108 transactions, oldest booking date 12 July, no push, no 429.** Decision: the first-sync window is
-**90 days for every bank** (R25 changed). Whether a second page counts against N26's daily fetches stays unmeasured
-(`gn-xeq`); with 90 days one page is the normal case. Code: `FirstSyncWindowDays = 90`, a log line with page,
-transaction count and oldest/newest booking date, Enable Banking's `message` in the exception text for 422/429 only
-(608 backend tests, one review pass, no MUST FIX).
 
 ### Story 2.7: N26 is connected through the cloud
 
@@ -1275,11 +780,6 @@ and the count is recorded
 **And** no raw bank data appears in logs or docs, only counts; the number of bank requests the
 first sync made is recorded as a finding
 
-**As run (2026-10-09):** Azure switched to the Production application (key in Key Vault, application id and the
-`https://func-greedy-nose-611f0.azurewebsites.net/callback` redirect), N26 consent approved in the browser; the first
-sync ran a minute later: 1 bank request / 1 page, 108 transactions, 101 debits and 55 payees in Neon, no push, no 429;
-`/debits` answers 200 from the database. No raw bank data in logs or docs, counts only. Details and the Entra
-"security defaults" detour: `TRACER-03-GO-LIVE.md`, "Findings: N26 through the cloud".
 
 ### Story 2.8: The release app is on my phone and talks to the cloud
 
@@ -1389,23 +889,6 @@ tick (the once-per-incident flag is set only after Brevo accepted the mail)
 **And** the sender sits behind an interface; tests use a fake and cover the three-in-a-row rule,
 once per incident, the follow-up and a failing sender
 
-**As built (2026-10-08):** `Alerts/` holds `IAlertMailSender`, `BrevoAlertMailSender` (POST
-`/v3/smtp/email`, failures are results, never exceptions), `PushFailureMail` (the texts as pure
-functions: counts, ages, outcome names and the bank name only) and `PushFailureWatch`. State lives
-in the new `PushHealth` table (one row per user; migration `AddPushHealth`). `IngestionRunner` calls
-`RecordAttemptAsync` after each debit push, summary push and retry, and `EvaluateAsync` once per tick
-in the `finally` after the retry stage; both have their own budget and never throw. The expiry push
-(R19) does not count. Config is mandatory at startup: `Brevo:ApiKey`, `Brevo:SenderEmail`,
-`Brevo:SenderName`, `Alerts:RecipientEmail` (user secrets; Key Vault / app settings in Azure). 557
-backend tests (536 + 21), one review pass, no MUST FIX. **Decisions and gaps:** every push attempt
-counts, so three failing pushes inside one tick already mail (bead for per-tick counting); failing
-again between the failure mail and the follow-up is the same incident (no second mail); the banks
-line shows the active consent's bank only (Epic 3 makes it multi-bank); if Brevo accepts the mail but
-the flag save then fails, the next tick mails again (at-least-once, bead). **Verified live:** with the
-device token removed and one owed mark, three ticks gave exactly one failure mail, further failures
-no second one; after the token came back the push was sent and exactly one follow-up arrived; both
-mails read correctly. The Brevo IP block ("Authorized IPs") has to stay off — home and Azure
-addresses are not fixed.
 
 ### Story 2.11: A real charge produces a push on my phone
 
@@ -1547,6 +1030,8 @@ As the owner,
 I want my DKB account connected to the cloud backend,
 So that its charges are watched too (FR1, FR2, AR11).
 
+> **Dropped 2026-10-13:** the owner decided two banks (N26, DKB) are enough. Nothing prevents adding ING-DiBa later.
+
 **Owner step:** real bank data and real quota — not for an unattended run.
 
 **Acceptance Criteria:**
@@ -1625,6 +1110,8 @@ a real reconnect only happens when a real consent expires
 As the owner,
 I want to see all three banks on one list and be alerted from each,
 So that I know the whole go-live works (FR1; the tracer's definition of done for all three banks).
+
+> **Done 2026-10-13 for two banks** (ING-DiBa dropped, see Story 3.6).
 
 **Owner step:** real banks, real charges, the real phone.
 

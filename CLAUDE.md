@@ -10,8 +10,9 @@ Last cleaned up 2026-10-19. This section stays short on purpose: the state of th
 - **Where we are:** Tracer 3 (go-live) is closed (2026-10-19). The backend runs in Azure (Functions + Neon), N26 and DKB
   are connected, the release app is on the owner's phone, a real charge gives one push, the week check found no 429.
   ING-DiBa is deliberately not connected.
-- **What is next:** `bd ready`. The order is `gn-hkx` (choose the account in the app), then `gn-tn2`
-  (finish the documentation cleanup), then the resilience beads.
+- **What is next:** the documentation cleanup (`gn-tn2`) is done (2026-10-19). Next is planning with BMAD
+  (`bmad-create-epics-and-stories`): `gn-hkx` (choose the account in the app), the remaining screens and onboarding, the
+  resilience beads (`gn-emh`, `gn-a64`, `gn-ftd`). `bd ready` shows what is unblocked.
 - **Live document:** `TRACER-03-GO-LIVE.md`, read its Progress first. Older history: `git log` and the two earlier
   tracer documents.
 - **Where things are written down:** what the app does `REQUIREMENTS.md`; design `ARCHITECTURE.md`; stories and

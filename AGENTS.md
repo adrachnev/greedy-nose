@@ -231,10 +231,10 @@ and built with the process in Policy.
     bead** (`bd update <id> --append-notes`) and the commit message; a decision that changes the design also goes into
     `ARCHITECTURE.md`; operating knowledge goes into `AGENTS.md`;
   - state and order of work: Beads. `CLAUDE.md` Status stays a few lines.
-- **Before the next epic is planned** (bead `gn-tn2`): `ARCHITECTURE.md` must be correct again (it still describes the
-  in-process worker, the consumption plan, the Key Vault role and the Health Monitor), and the 20 "As built" blocks of
-  `epics.md` are moved into the bead notes or `TRACER-03-GO-LIVE.md` and removed from `epics.md`. BMAD plans from these
-  documents, so stale ones produce stories on wrong assumptions.
+- **Done 2026-10-19** (bead `gn-tn2`): `ARCHITECTURE.md` matches the as-built system again, and the "As built" blocks of
+  `epics.md` (13 stories) were moved into the notes of their beads and removed (the file also held a stale second copy of
+  Epic 1, now gone). BMAD plans from these documents; keep them this way: no history in `epics.md`, no stale design in
+  `ARCHITECTURE.md`.
 - **First planning step after Tracer 3:** turn the next topics into epics and stories (`bmad-create-epics-and-stories`):
   choosing the account in the app (`gn-hkx`), the remaining screens and onboarding, the resilience beads. Each story
   then gets a bead as before.
