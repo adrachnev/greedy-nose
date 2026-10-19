@@ -75,38 +75,19 @@ verified against the sandbox/N26; go-live must keep it true on the cloud and acr
 
 ### NonFunctional Requirements
 
-- NFR1 (R1, R3b, R10b): **Never miss a genuinely new bad charge.** Where identity or de-duplication
-  is uncertain: split rather than merge for payees, risk the duplicate alert rather than the missed
-  one.
-- NFR2 (Cost): The whole deployment stays at **zero cost** — Azure consumption/free tiers
-  (Functions or equivalent, storage, Key Vault), a free Postgres tier (Supabase/Neon), Enable
-  Banking Restricted Production, Firebase, Brevo for operator mail.
-- NFR3 (Cost, Enable Banking Terms): **Owner's accounts only.** Every account must be linked in the
-  Enable Banking Control Panel by the owner first; no third party may be given access to the API;
-  family accounts need a contract and KYB and are out of scope.
-- NFR4 (Transaction ingestion): Respect the bank's background-fetch cap (~4 per day per bank).
-  Poll cadence is **configuration per ASPSP** (default 6 h); `ASPSP_RATE_LIMIT_EXCEEDED` is a normal
-  backoff signal; the app never triggers a fresh bank fetch; the one exception is the first sync
-  right after consent. The push retry (AR18) works from stored data and never calls the bank.
-- NFR5 (Latency): Same-day notification is acceptable; worst case ≈ one poll interval (6 h) plus
-  booking delay.
-- NFR6 (Isolation): One bank's failure (error, quota, dead consent) must not stop ingestion or
-  alerts for the other banks.
-- NFR7 (Secrets): The Enable Banking `.pem`, the Firebase Admin SDK key, the live consent and bank
-  data are never committed, printed or logged; configuration lives in a secrets store (user
-  secrets locally, Key Vault / app settings in Azure), never `appsettings.json`. Secrets in
-  Tracer 3: the Enable Banking key, the Firebase Admin key, the API key (AR2), the APK signing
-  key, the Neon connection string, the Brevo key. The consent session id reads the real account:
-  it may live only **encrypted** in `BankConsents` (Key Vault key, AR3); anywhere else in the
-  database only its SHA-256 hash; never logged. **Decided 2026-10-01: Key Vault** holds the
-  Enable Banking private key (one per application, shared by all banks and users) and the
-  encryption key for the sessions (one session per user and bank); plain settings (and Key Vault
-  references) go in app settings; locally everything stays in `dotnet user-secrets`.
-- NFR8 (Security): No endpoint is reachable unauthenticated once deployed; no debug endpoint ships.
-- NFR9 (Data safety): Free-tier Postgres may pause or cold-start but never loses data; the worker's
-  cadence keeps it awake; the worst case is one slow request, never a missed alert.
-- NFR10 (Platform): Backend targets net10.0; if the worker becomes an Azure Function it must use
-  the **isolated worker model** (in-process retires 10 Nov 2026). Client target: Android.
+The texts live in `REQUIREMENTS.md` (since 2026-10-19, section "Constraints and qualities") and `ARCHITECTURE.md`; this
+list only says which is which.
+
+- NFR1 (never miss a new bad charge) = R1, R3b, R10b
+- NFR2 (zero cost) = R27; the services: `ARCHITECTURE.md`, "Cost"
+- NFR3 (owner's accounts only) = R28
+- NFR4 (the bank's fetch cap) = R29; the design: `ARCHITECTURE.md`, "Transaction ingestion"
+- NFR5 (latency, same day is enough) = R30
+- NFR6 (one bank's failure is isolated) = R31
+- NFR7 (secrets and bank data) = R32; the design: `ARCHITECTURE.md`, "Authentication and secrets"
+- NFR8 (nothing open to the public) = R33
+- NFR9 (free-tier Postgres never loses data): `ARCHITECTURE.md`, "Cost"
+- NFR10 (platform): Android only = R34; backend on net10.0 with the isolated worker model: `ARCHITECTURE.md`, "Hosting, as built"
 
 ### Additional Requirements
 

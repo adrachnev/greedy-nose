@@ -3,7 +3,7 @@
 
 ## Greedy Nose
 
-A mobile app (iOS + Android) that connects one European bank account and notifies the user the
+A mobile app (Android in v1, R34) that connects one European bank account and notifies the user the
 moment a payee flagged "Bad" charges them — deliberately not a general finance app. React Native
 client in `app/`, ASP.NET Core / Azure Functions (C#) backend in `backend/`. `REQUIREMENTS.md` is
 the single source of truth for product behavior; where anything else disagrees, it wins.

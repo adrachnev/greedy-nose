@@ -283,14 +283,14 @@ the payee good again and the previous limit is back.
 
 **R22 — The app is bank-agnostic** (settled 2026-08-14). Any ASPSP reachable through Enable
 Banking is a valid target; **N26 is simply the first one integrated**, chosen for its free tier,
-with ING-DiBa and DKB as likely next. Nothing in the product — copy, data model, or rule logic —
+with DKB integrated next to it (live since 2026-10-13); ING-DiBa was considered and dropped by the owner. Nothing in the product — copy, data model, or rule logic —
 may assume a particular bank. **This currently assumes a eurozone ASPSP**: R15 hard-assumes EUR,
 so a non-EUR bank is out of scope until a currency model exists (see `CLAUDE.md`'s Open/deferred)
 — not yet a contradiction in practice since every bank named above is in the eurozone, but R22 as
 written does not itself carve that out.
 
 **R22a** — v1 connects **one account per bank, and several banks at once** (settled 2026-09-29;
-the owner's own three banks are N26, DKB and ING-DiBa). The debit list shows all of them together,
+the owner's banks in use are N26 and DKB; ING-DiBa was dropped on 2026-10-13, nothing prevents adding it). The debit list shows all of them together,
 with no per-account filter yet. Labelling which bank a debit came from stays deferred (see
 `CLAUDE.md`), and so do several accounts *within* one bank. Each bank is its own consent (R18–R20
 apply per bank), so a connection that ends or reconnects only ever affects its own bank's debits
@@ -387,6 +387,44 @@ Monitoring"); a payee they didn't get to simply has no rule, which R4b/R5 alread
 payee's **next** new charge — after the first sync, not any of the historical debits it pulled —
 notifies normally (R10), worded per R12a's "no rule" case. Onboarding only ever suppresses alerts
 for the history R25 pulled, never for anything that arrives afterward.
+
+## Constraints and qualities
+
+Rules about how the product must behave, not about a screen. Added 2026-10-19 (they used to live only in the
+`NonFunctional Requirements` list of `epics.md`). How each is met is in `ARCHITECTURE.md`.
+
+**R27 — Zero running cost.** The whole deployment stays at zero cost: the free tiers of the cloud host, the database,
+the push service and the operator mail, and Enable Banking's Restricted Production. A choice that adds a recurring cost
+needs an explicit decision by the owner. (See `ARCHITECTURE.md`, "Cost".)
+
+**R28 — The owner's own accounts only.** Enable Banking's Restricted Production allows only accounts that belong to the
+Control Panel user, and forbids making the API available to third parties. So every account must be linked in the
+Control Panel by the owner first, no other person may be given access, and family members' accounts are out of scope
+(they would need a contract and a company check, KYB, with Enable Banking). This is an external condition that sets
+the scope of v1, not a choice of ours. Read from the Terms on 2026-09-29 via a summarizer: re-read the Terms before
+relying on it for anything beyond a personal deployment.
+
+**R29 — The bank's fetch cap is respected.** Most banks allow only about 4 background fetches a day. The poll cadence
+is configuration per bank (default 6 h); `ASPSP_RATE_LIMIT_EXCEEDED` is a normal reason to back off, not a bug. The app
+never triggers a fresh bank fetch; the one exception is the first sync right after consent (R25). Retrying a failed
+push (R11a) works from stored data and never calls the bank.
+
+**R30 — Same-day is fast enough.** A new bad debit may be notified up to about one poll interval (6 h) plus the
+bank's booking delay (R10c) after the charge. Instant notification is not a goal.
+
+**R31 — One bank's failure never stops the others.** An error, an exhausted quota or a dead consent at one bank must
+not stop ingestion or alerts for any other bank (R22a).
+
+**R32 — Secrets and bank data are protected.** The Enable Banking key, the push service key, the API key, the live
+consent and bank data are never committed, printed or logged. Configuration lives in a secrets store, never in a
+settings file in the repository. The consent's session id reads the real account, so it is kept only encrypted;
+elsewhere only a hash of it is stored. A log line never carries a session id, an account uid, an IBAN, a payee or an
+amount. (See `ARCHITECTURE.md`, "Authentication and secrets".)
+
+**R33 — Nothing is open to the public.** Once deployed, every endpoint needs either authentication or a one-time
+secret (the two browser pages of the consent flow); no debug endpoint ships.
+
+**R34 — v1 is Android.** The client of v1 is the Android app. iOS is not part of v1.
 
 ## Open points
 
