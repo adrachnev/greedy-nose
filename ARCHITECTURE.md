@@ -1,9 +1,10 @@
 # Architecture
 
-Status: decided at a high level; not yet implemented. Written after the mocks settled, per the
-project's mocks-first ordering, then **reconciled with `REQUIREMENTS.md` on 2026-08-17** — all
-`A1`–`A10` divergences are closed; see "Reconciliation with `REQUIREMENTS.md`" near the end for
-the map.
+Status: **built and running** (Tracer 3 closed 2026-10-19): the backend runs on Azure for the owner, with N26 and DKB
+connected. Written after the mocks settled, **reconciled with `REQUIREMENTS.md` on 2026-08-17** (all `A1`–`A10`
+divergences are closed; see "Reconciliation with `REQUIREMENTS.md`") and **brought up to date with the
+as-built system on 2026-10-19** (bead `gn-tn2`). Where a section says "not built", it is a design that is still open.
+Names, commands and measured numbers of the Azure setup live in `TRACER-03-GO-LIVE.md`; this file holds the decisions.
 
 ## Component diagram
 
@@ -20,9 +21,12 @@ React Native"]
 ASP.NET Core / Functions"]
         Ingest["Ingestion
 Worker
-Timer Function"]
+Timer + Queue Function"]
         Health["Health Monitor
-Timer Function"]
+Timer Function
+(not built)"]
+        Queue["first-sync queue
+Azure Storage"]
         Rules["Rule Engine"]
         Notify["Notification
 Dispatcher"]
@@ -31,14 +35,14 @@ Dispatcher"]
 
     subgraph ThirdParty["Third-Party Services"]
         DB[("Data Store
-Postgres, e.g. Supabase/Neon")]
+Postgres, Neon")]
         EB["Enable Banking API"]
         Bank["Connected ASPSP
 any bank EB reaches"]
         FCM["Firebase Cloud
 Messaging"]
         Email["Email Alerts
-e.g. SendGrid"]
+Brevo"]
     end
 
     App -- "auth, CRUD,
@@ -49,7 +53,8 @@ consent tokens" --> KV
     API -- "start consent" --> EB
     Ingest -- "poll 6h" --> EB
     API -- "first sync:
-trigger one run" --> Ingest
+one message" --> Queue
+    Queue -- "triggers one run" --> Ingest
     EB --> Bank
     Ingest -- "new debits
 DBIT only" --> Rules
@@ -64,6 +69,8 @@ gap summary (N/M)" --> Notify
     FCM -- push --> App
     Health -- "checks staleness,
 writes consent state" --> DB
+    Ingest -- "3 failed pushes
+in a row" --> Email
     Health -- "bug: alert operator" --> Email
     Health -- "expired consent:
 one push" --> Notify
@@ -73,40 +80,59 @@ one push" --> Notify
 |---|---|---|---|
 | Mobile App | React Native | Mobile device | UI (debit list/detail, rules, settings), receives push, in-app classification |
 | API | ASP.NET Core / Azure Functions (HTTP), C# | Cloud backend | Auth, payee/rule CRUD, debit history, brokers Enable Banking consent flow |
-| Ingestion Worker | Azure Functions (Timer), C# | Cloud backend | Polls every 6h per consent (retries transient failures); also invoked once, immediately, by the API right after a consent is granted (the one-time first-sync exception — see "Transaction ingestion"). No other on-demand trigger; records success/failure per consent. Drops credits (R2a). Runs in one of three modes — see "Ingestion modes" |
-| Health Monitor | Azure Functions (Timer), C# | Cloud backend | Daily check for consents stuck failing 20h+; everything that isn't an expired consent gets an email alert to the operator. **Not built.** The user-facing half of an expired consent (the one push, R19) is already done by the Ingestion Worker itself on every tick, so this component is now only the operator-email path (see "Consent lifecycle") |
+| Ingestion Worker | Azure Functions (Timer + Queue), C# | Cloud backend | Walks every connected bank on a 6 h timer (one bank's failure does not stop the others); also run once, right after a consent is granted, by a queue message the API puts there (the one-time first-sync exception — see "Transaction ingestion"). No other on-demand trigger; records success/failure per bank. Drops credits (R2a). Runs in one of three modes — see "Ingestion modes" |
+| Health Monitor | Azure Functions (Timer), C# | Cloud backend | Daily check for consents stuck failing 20h+, with an email to the operator. **Not built.** Its two halves exist elsewhere: the user-facing half of an expired consent (the one push, R19) is done by the Ingestion Worker on every tick, and the operator email for failing pushes is sent by the push-failure watch (see "Reliability"). What is missing is the staleness check and any alert for a failing tick (beads `gn-r1d`, `gn-7el`, `gn-emh`) |
 | Rule Engine | C# | Cloud backend | Resolves payee → applies that payee's rule (R5) → returns each debit's good/bad result **with the reason** (R12a). Mode-agnostic: it classifies the same way regardless of which ingestion mode the tick is running — it does not decide whether or how anything gets sent |
 | Notification Dispatcher | C# | Cloud backend | Sends via FCM. In the built code this is `INotificationSender` taking a plain `PushMessage(Token, Title, Body)`: the runner supplies R12a's reason text for one bad debit (Steady state) or R20's summary text with N/M counts (Reconnect, built by `ReconnectSummary`); the sender never decides which to send, only delivers what it's given |
-| Key Vault | Azure Key Vault | Cloud backend | Holds the encryption key for BankConsent tokens |
-| Data Store | Postgres (free tier, e.g. Supabase/Neon — both idle-pause on their free tier, see "Cost") | Third party | Users, BankConsents (encrypted), Payees, Rules, Debits, NotificationLog, DeviceTokens, poll status per consent |
+| Key Vault | Azure Key Vault (RBAC) | Cloud backend | Holds every secret of the app: the API key, the consent encryption key, the database connection string, the Brevo key, the Enable Banking private key and the Firebase service account (six references in app settings; see "Authentication and secrets") |
+| Data Store | Postgres on Neon (free tier, eu-central-1; it suspends after 5 min idle, see "Cost") | Third party | Users, BankConsents (encrypted, with the poll status per bank), PendingConsents, Payees, Rules, Debits, AccountSyncStates, NotificationLog, PendingPushes, PushHealth, DeviceTokens |
 | Enable Banking API | PSD2/XS2A aggregator | Third party | Consent flow, transaction feed |
 | Connected ASPSP | Any bank Enable Banking reaches | Third party | Source of truth for the account's transactions. N26 is the first one integrated, not a fixed dependency (R22) |
 | Firebase Cloud Messaging | Push service | Third party | Push delivery to APNs + Android |
-| Email Alerts | e.g. Brevo (free, 300/day forever, no card — verified 2026-09-28; SendGrid's free tier ended May 2025) | Third party | Notifies the operator when ingestion is failing for a non-consent reason |
+| Email Alerts | Brevo (free, 300/day forever, no card — verified 2026-09-28; SendGrid's free tier ended May 2025) | Third party | Notifies the operator after 3 failed push attempts in a row, and again when pushes work afterwards. Brevo's "Authorized IPs" blocking must stay off |
 
-**Current state vs. this table (2026-09-23, notification bullet step 7):** the Ingestion Worker
-row above is the target design. What actually runs today, built and device-verified in the
-notification tracer bullet's step 6, is a `BackgroundService`/`PeriodicTimer` **in-process inside
-the same ASP.NET Core host as the API** — not a separate Azure Function. Deliberate and scoped
-("the worker stays in-process for this bullet," `TRACER-02-NOTIFICATIONS.md` step 6): moving it
-to its own Azure Function is deferred, not decided against. **When that migration happens, it must
-use the isolated worker model** (verified 2026-09-28): Azure retires support for the in-process
-.NET model on 10 November 2026, and the isolated model is the only one that supports .NET 9/10/11
-— since the backend already targets net10.0, in-process was never actually an option here anyway.
+**Hosting, as built (decided 2026-10-01, running since 2026-10-09; names and numbers in `TRACER-03-GO-LIVE.md`,
+"Azure deployment").** There is **one** host, `GreedyNose.Functions` (Azure Functions, isolated worker model;
+in-process support ends 10 November 2026 and only isolated runs .NET 10). `GreedyNose.Api` is only a library of
+endpoints, domain and data code. The host has:
 
-**Decided 2026-10-01 (go-live, `TRACER-03-GO-LIVE.md`): hosting is Azure Functions, isolated
-worker model.** The `BackgroundService` loop becomes a **timer trigger** (every 6 h) that runs one
-existing `IngestionRunner` tick — the tick logic is unchanged; the API runs in the same Functions
-host (ASP.NET Core integration) or separately, settled in the story. Free at this scale
-(Consumption: 1M executions / 400k GB-s per month; Flex: 250k / 100k). Accepted cost: a cold start
-of roughly 2–7 s on the first request after a quiet period; pushes are not affected, they come
-from the worker. Rejected: App Service F1 (60 CPU min/day, no Always On); Container Apps with one
-always-on replica (~$1–3/month) stays as the fallback.
+- **the HTTP functions** of the API (same paths, no route prefix), with the API key checked by Functions middleware;
+- **`IngestionTick`**, a timer trigger on the app setting `IngestionSchedule` (every 6 h, UTC). It runs one
+  `IIngestionTick` and keeps no state between runs. `RunOnStartup = false` and `UseMonitor = false` on purpose: a
+  cold start, a scale-out or a restart after downtime must not cost a bank fetch (N26 allows about 4 a day), so a
+  missed run is skipped and the next scheduled one runs. A schedule shorter than 6 h is refused at startup unless
+  `Ingestion:AllowShortInterval=true` (local tests only). One tick has a 120 s deadline; one bank's turn inside it
+  40 s (`Ingestion:BankTimeout`), after which that bank records an error and the walk goes on;
+- **`FirstSync`**, a queue trigger on the queue `first-sync` of the Functions storage account. The consent callback
+  puts one message there (a fixed word, no secret, no IBAN, no session) and the function runs the same tick. It
+  does not swallow a failure: three dequeues, then the message lands in `first-sync-poison` and the next scheduled
+  tick does the same sync. Nothing watches that poison queue yet (bead `gn-a64`).
+
+Both entry points run the same tick, `ConsentRestoringTick` wrapped in `SerializedTick`. The first reloads the
+consents from the database before every tick (the database is the source of truth, so a bank connected or
+reconnected is seen without a restart; a failing restore, e.g. a wrong key, skips the tick and is logged at Error with
+the exception type only, which no alert picks up yet, bead `gn-emh`). The second lets one tick run at a time per
+process, so the timer and the queue function cannot both find the same new debit; several instances at once are not
+covered (bead `gn-w4l`).
+
+The plan is **Flex Consumption** (Linux, Germany West Central), chosen because .NET 10 runs on Linux only there. It
+is free at this scale (250,000 executions and 100,000 GB-s a month per subscription). Accepted cost: a cold start
+of about 5 s on the first request after a quiet period (measured 4.6 s); pushes are not affected, they come from
+the timer. Rejected: App Service F1 (60 CPU min/day, no Always On); Container Apps with one always-on replica
+(~$1–3/month) stays as the fallback. The Functions storage account is reached through the app's own identity, with no
+storage key in any setting. Migrations are never applied by the app (several instances can start): they run by hand
+from the owner's machine before each deploy that needs one.
+
+Logging follows the same privacy rule as everything else: **a log line never carries a session id, an account uid, an
+IBAN, a payee or an amount.** The default HTTP-client logging is removed for every client; the one Enable Banking
+client logs `Enable Banking {Method} {PathTemplate} -> {StatusCode}`, with every path segment outside a fixed
+allowlist replaced by `{id}` (it fails closed). That line is also how the daily fetch count against a bank's quota and
+a `429` are read from Application Insights.
 
 ## Data model — tables and relationships
 
-Read from the real schema (`backend/GreedyNose.Api/Data/`, EF Core, 6 migrations as of
-2026-09-29) — this reflects what's built, not just designed. Column-by-column detail stays in the
+Read from the real schema (`backend/GreedyNose.Api/Data/`, EF Core, 17 migrations as of
+2026-10-16) — this reflects what's built, not just designed. Column-by-column detail stays in the
 entity classes, which are the single source of truth; this is only the shape a caller can't safely
 guess from one table's own columns.
 
@@ -118,6 +144,10 @@ erDiagram
     USERS ||--o{ DEBITS : ""
     USERS ||--o{ NOTIFICATION_LOG : ""
     USERS ||--o{ ACCOUNT_SYNC_STATES : ""
+    USERS ||--o{ BANK_CONSENTS : "one per bank"
+    USERS ||--o{ PENDING_CONSENTS : ""
+    USERS ||--o{ PENDING_PUSHES : ""
+    USERS ||--o| PUSH_HEALTH : ""
     PAYEES ||--o| RULES : "at most one, R4"
     PAYEES ||--o{ DEBITS : ""
     DEBITS ||--o| NOTIFICATION_LOG : "at most one, R11"
@@ -125,13 +155,17 @@ erDiagram
 
 | Table | Key | What it holds |
 |---|---|---|
-| Users | `Id` | Anchor for every other table's `UserId`. No auth fields yet — one seeded row, single-user (R22a) |
+| Users | `Id` | Anchor for every other table's `UserId`. No auth fields — one seeded row, single-user (R22a); the API key authenticates the owner, see "Authentication and secrets" |
 | DeviceTokens | `Id`, unique on `Token` | One FCM token per install; re-registering the same token upserts, never duplicates |
 | Payees | `(UserId, Id)` | `Id` is R3a's resolved payee key, stored verbatim — not a generated id |
 | Rules | `(UserId, PayeeId)` | The key **is** the composite FK to Payees — a payee has at most one rule by construction (R4), not by application logic |
 | Debits | `(UserId, Id)`, indexed on `(UserId, AccountKey)` | `Id` is R10b's resolved debit identity (`entry_reference` or the composite fallback), stored verbatim. The `AccountKey` index backs the per-account dedup read in the ingestion tick — it is no longer the mode signal (see AccountSyncStates) |
 | AccountSyncStates | `(UserId, AccountKey)` | One row per connected account, and it **exists only once that account's first sync has finished**: `FirstSyncCompletedAt` says when. A missing row means "first sync still to do" — the Ingestion Worker's mode signal (see "Ingestion modes"). The second field, nullable `LastSessionIdHash`, is the SHA-256 of the consent session the last completed tick used — a **hash, never the session id**, which reads the real account and so is not something to add to the database; equality is all the reconnect check needs. `null` means "written before this field existed" and is adopted silently. `AccountKey` is the IBAN, never the per-consent `uid`, so a reconnect finds its own row. Keyed per account, not per user, so several accounts per user need no re-keying later (v1 is one account per bank, R22a) |
 | NotificationLog | `Id`, unique on `(UserId, DebitId)` | R11's guard **at the database level**: the unique index makes a second send fail on insert, not just on an application-level check-then-insert that could race |
+| BankConsents | `(UserId, AspspName)` | The live consent of one bank — see below |
+| PendingConsents | `Id` | A consent the owner is in the middle of starting: the bank, and the **SHA-256 hashes** of the one-time link token and of the OAuth `state` — the database never holds a value that can start or finish a consent. Each is consumed once; "single use" is made atomic by an app-managed `Version` (two requests with the same secret both read version N, one UPDATE wins). A hard deadline of 30 minutes from creation |
+| PendingPushes | `Id`, unique on the debit | R11a's **push owed** mark: written in the same save as the debit it belongs to when the first send fails, retried every tick for 24 h, then ended `Sent` or `GaveUp` (kept for diagnosis). Holds the reason text frozen at creation (or N and M for a reconnect summary), the attempts and the last outcome name. Never inferred from "bad debit without a NotificationLog row" |
+| PushHealth | `UserId` | One row per user behind the operator mail: failed push attempts in a row, where the incident stands (first/last failure, mail sent, recovery mail owed). Outcome names only — nothing about payees, amounts or tokens |
 
 **Every table but Users is keyed with a composite `(UserId, …)`**, not a bare id — deliberate, so a
 real multi-user login later needs no re-keying (R22a's single-user scope is a v1 limit, not a
@@ -146,24 +180,25 @@ wipe the user's rule if this weren't enforced, and deleting a debit could otherw
 `NotificationLog` row — which would make the next fetch see that debit as new and re-notify,
 breaking R11.
 
-**Built 2026-10-07 (Story 1.7): `BankConsents` is a real table.** Until then the consent lived in a
-gitignored file (`consent.local.json`); that file is no longer read or written (an old one is just
-ignored, nothing was migrated — a consent is re-done once with `tools/connect-bank.sh`). Each row
-is `(UserId, AspspName)` with the session id and the rest of the consent as **AES-256-GCM**
-ciphertext (`ConsentCipher`; row and column bound as associated data; key = `Consent:EncryptionKey`,
-base64 of 32 bytes, from user secrets locally and Key Vault in Epic 2). The backend refuses to start
-without the key, and also stops if a stored consent cannot be decrypted (wrong key) — never a
-silently empty store. The migration is not applied automatically: run it before the first start.
-`ConsentStore` still keeps one live consent in memory (the most recently connected row); walking
-several banks is Epic 3.
+**`BankConsents` holds the live consent of each bank (built 2026-10-07, Story 1.7; walked per bank since Story
+3.2).** One row per `(UserId, AspspName)`: reconnecting a bank **replaces** its row and never touches another
+bank's. The session id and the rest of the consent (accounts, connected-at, expiry) are **AES-256-GCM** ciphertext
+(`ConsentCipher`; row and column bound as associated data; key = `Consent:EncryptionKey`, base64 of 32 bytes, from
+user secrets locally and Key Vault in Azure). Elsewhere in the database the session appears only as a hash, and it
+is never logged. The backend refuses to start without the key and stops if a stored consent cannot be decrypted
+(wrong key) — never a silently empty store. Rotating the key means re-consent: a row carries a version byte but no key
+id, so a new key cannot read old rows.
 
-**Decided 2026-10-01: for the go-live it becomes a real table.** `BankConsents` holds one row per
-`(UserId, bank)` — today's file has no user at all. The session id (it reads the real account) is
-stored only **encrypted** with a Key Vault key; elsewhere in the database only its hash, and it
-is never logged. A repeat `/connect` for a bank that already has a consent **replaces** it (the
-reconnect path), and the old session is closed with `DELETE /sessions/{id}`. The Ingestion Worker
-takes the user from each consent row, not from the hardcoded `SeedData.UserId` (about 25 uses
-today); new code adds no new `SeedData.UserId`.
+The plaintext columns carry no account data, only what the worker and `GET /status` need: `UpdatedAt`, the **poll
+bookkeeping** (`LastAttemptAt`, `LastSuccessAt`, a short `LastError` made of an exception type and a code, never a
+message; `PollIntervalMinutes`, null = 6 h) and `ExpiryNotifiedSessionHash` (who was already told the session died, see
+"Consent lifecycle"). The worker writes the bookkeeping after each bank; a reconnect leaves it alone. A repeat
+`/connect` for a bank that already has a consent replaces it, and then the old session is closed with
+`DELETE /sessions/{id}` (5 s, best effort; "already closed" counts as fine; checked at DKB: the new session keeps
+fetching). Nothing stops a second consent from being *started* for a bank that has an active one (bead `gn-4b3`).
+
+The Ingestion Worker takes the user from each consent row, not from the hardcoded `SeedData.UserId`; new code adds no
+new `SeedData.UserId`.
 
 ## Client
 
@@ -401,8 +436,7 @@ anything fails before that write (the fetch, a timeout, a shutdown), nothing is 
 tick simply starts the first sync again — safe to repeat because debits already stored are skipped
 by R10b's dedup key. The cost is one more fetch against the bank's daily quota after an interrupted
 first sync, which is a rare, single-user event. Consequence for the fetcher: it must return the
-**complete** history or throw, never a silent partial page (relevant once pagination is turned on,
-see `TODO.md`).
+**complete** history or throw, never a silent partial page (pagination is on, `continuation_key`).
 
 Reconnect is the mode that did not exist before 2026-08-17 (`A8`). Without it, a user coming back
 after two weeks gets one push per bad charge in a single burst — R20 exists precisely to prevent
@@ -428,9 +462,9 @@ M > 0 — **before** saving — and then commits every new debit, any token prun
 hash in **one** write. Sending first is deliberate: a tick that dies between send and save leaves
 nothing stored and the hash old, so the retry finds the same debits and counts the same N/M — worst
 case one duplicate summary, never a lost one and never a wrong count. A failed send (`Rejected`/
-`Transient`) or a missing device token still commits (owner's decision, 2026-09-29; the alert is
-then lost, the same gap the per-debit path has, see `TODO.md`). There are no `NotificationLog`
-rows for the summary — that log is per debit. A repeated debit id within one fetch is skipped and
+`Transient`) or a missing device token still commits (owner's decision, 2026-09-29); since 2026-10-01 the
+summary is then **not lost**: it is retried from a push-owed mark like a debit push, with N and M frozen (R11a, see
+"Reliability"). There are no `NotificationLog` rows for the summary — that log is per debit. A repeated debit id within one fetch is skipped and
 counted once in every mode, since in the all-or-nothing modes one duplicate would otherwise fail the
 whole tick on every retry. There is no separate Dispatcher class: the runner sends a `PushMessage`,
 and the summary is that same message with R20's text (`ReconnectSummary`).
@@ -532,55 +566,70 @@ real debits). The key is `(account, day, amount, payee, ordinal)`, with every fi
 ## Reliability: poll health monitoring
 
 The product's core promise — never miss a genuinely new bad charge — depends entirely on the
-6h poll actually running for every user every cycle. A silently failing poll would break that
+6h poll actually running for every bank every cycle. A silently failing poll would break that
 promise without anyone noticing, so this gets explicit handling rather than being left to
-chance:
+chance. **What is built, and what is still only a design:**
 
-1. The Ingestion Worker retries transient failures automatically (a few attempts with
-   backoff) before giving up on a given run.
-2. Every poll attempt — success or failure — is recorded per consent (`LastAttemptAt`,
-   `LastSuccessAt`, `LastError`).
-3. A separate daily Health Monitor job looks for any consent whose last successful poll is
-   more than 20h old (a one-cycle buffer over the 6h cadence) and branches on why:
-   - **Expired/revoked consent** — user-fixable, not a bug. It reaches the user two ways
-     (R19), and no operator alert: the consent state is written to the data store, which the
-     app reads to show the persistent banner over the debit list
-     (`01d-connection-expired.html`), **and** one push goes out. As built (2026-09-29) the push is
-     sent by the Ingestion Worker as soon as it sees the dead consent, not by this job; see
-     "Consent lifecycle".
-   - **Anything else** (API error, unexpected exception) — this means monitoring is broken
-     for reasons the user can't fix themselves, so it emails the operator directly.
-
-This keeps operator alerts limited to the failures that actually need a human to intervene.
+1. **Built.** A failed fetch is *not* retried inside the tick — every fetch counts against the bank's ~4 a day, so a
+   retry would spend the budget the next scheduled tick needs. The bank is tried again at its next poll. One bank's
+   failure, or timeout, is isolated from the others.
+2. **Built.** Every poll attempt of a bank — success or failure — is recorded on its `BankConsents` row
+   (`LastAttemptAt`, `LastSuccessAt`, `LastError`). `GET /status` (API key) shows per bank the state (connected,
+   expired, dead, first sync pending), valid-until, last success/attempt, a short sanitised last error and the number of
+   debits still owed a push — never a session id, IBAN, amount or payee. `GET /health` is only liveness plus the worst
+   real state. The poll interval per bank is a column (`PollIntervalMinutes`), skipping a bank polled within it.
+3. **Built.** The user-facing half of a dead consent (R19): the Ingestion Worker pushes once per session as soon as
+   it sees the consent dead, see "Consent lifecycle". No operator alert, and none is needed — the user can fix it.
+4. **Built.** A failed push is retried and watched (R11a, below).
+5. **Not built.** The separate daily **Health Monitor** job: it would look for any bank whose last successful poll is
+   more than 20h old (a one-cycle buffer over the 6h cadence) and email the operator when the reason is not an
+   expired or revoked consent. Today a tick that fails silently is found by reading `/status` or the logs — nothing
+   alerts on it. Open beads: `gn-7el` (nothing monitors dispatch failure, only ingestion staleness), `gn-r1d` (its
+   staleness query must exclude a user-initiated Disconnect), `gn-emh` (a consent restore that fails every tick is
+   only logged), `gn-a64` (nothing watches the first-sync poison queue). This keeps operator alerts limited to the
+   failures that need a human, once built.
 
 **A failed push is retried, not lost (R11a, decided 2026-10-01).** The per-debit path used to
 commit a bad debit as seen even when its push failed (`Rejected`/`Transient`/no token), so the
 alert was never retried. Now the debit is saved and listed, and carries an explicit **push owed**
-mark set when the first send fails — never inferred from "bad and no `NotificationLog` row", since
-a debit that turns bad through a rule edit has no row either and must not notify (R10a). Every
+mark (a `PendingPushes` row) set when the first send fails — never inferred from "bad and no `NotificationLog` row",
+since a debit that turns bad through a rule edit has no row either and must not notify (R10a). Every
 tick the worker, besides fetching, retries every marked debit from stored data (never calling the
-bank), for at most 24 h, then gives up and logs it; failed attempts are logged per debit. After
-three failed attempts in a row, one email goes to the owner (once per incident) through Brevo —
-a small slice of the Health Monitor pulled into the go-live; the daily staleness job itself stays
-unbuilt. The reconnect summary push (R20) is retried the same way, its counts N and M frozen at
-creation. Only `TokenNoLongerValid` prunes a token; `Rejected` means a human must look.
+bank) within a 60 s budget, for at most 24 h, then gives up and logs it; failed attempts are logged per debit. The
+reconnect summary push (R20) is retried the same way, its counts N and M frozen at creation. Only
+`TokenNoLongerValid` prunes a token; `Rejected` means a human must look.
+
+**The operator mail** (Story 2.10, `PushFailureWatch`, state in `PushHealth`): a send to all of a user's tokens is one
+attempt; after **three failed attempts in a row** one email goes to the owner through Brevo, once per incident. The
+flag is set only after Brevo accepted the mail, so a failed mail is retried at the next evaluation. When a push works
+again after a mail was sent, one follow-up mail says so; a success before any mail closes the incident silently. The
+expiry push does not count as an attempt. The watch is an observer: it never throws into the tick and has its own time
+budget and database context. It is the one slice of the Health Monitor that exists.
 
 ## Authentication and secrets (go-live, decided 2026-10-01)
 
-**A single static API key**, sent by the app with every request, over HTTPS only — no endpoint is
-reachable without it, and `/raw` and `/aspsps` are removed (done in Story 1.3); `/connect` and `/callback` are protected by one-time secrets stored in `PendingConsents` (done in Story 1.4). Owner-only for
-now. All endpoints get the user from **one "current user" seam** (today it returns the owner), so
-a later move to per-user sign-in (OAuth/OIDC) touches that seam plus the app's sign-in, not every
-endpoint; the schema is already keyed `(UserId, …)`. Before real multi-user, the payee key still
-has to be scoped per user (`TODO.md`). Rotating the key: change it on the server and ship a new
-APK. The browser pages (`/connect`, `/callback`) cannot send a header and need their own
-protection (e.g. a one-time `state`), settled in the story. The static key sits inside the
-sideloaded release APK — accepted for one owner.
+**A single static API key**, sent by the app with every request, over HTTPS only (the Function App refuses plain
+`http`). The key is checked by Functions middleware before any function runs; no endpoint is reachable without it
+except the two browser pages, and `/raw` and `/aspsps` are removed (Story 1.3). The backend refuses to start without
+`Api:Key` (at least 32 characters). `/connect` and `/callback` are browser pages that cannot send a header; each is
+protected by its own one-time secret in `PendingConsents` (Story 1.4): the owner asks `POST /connect-links` (API key) for a
+one-time link that works once and expires after 30 minutes, and the OAuth `state` is single use too. A failed or
+interrupted attempt needs a new link. Owner-only for now. All endpoints get the user from **one "current user" seam**
+(`ICurrentUser`, today it returns the owner), so a later move to per-user sign-in (OAuth/OIDC) touches that seam plus
+the app's sign-in, not every endpoint; the schema is already keyed `(UserId, …)`. Before real multi-user, the payee key
+still has to be scoped per user (bead `gn-2op`). Rotating the key: change it on the server and ship a new APK. The
+static key sits inside the sideloaded release APK — accepted for one owner. Known weak spots, accepted for now: the
+link token travels in a query string (`gn-76g`), `/connect` and `/callback` have no rate limit (`gn-rw1`).
 
-**Secrets:** Key Vault holds the Enable Banking private key (one per application, shared by all
-banks and users) and the encryption key for the consent sessions (one session per user and bank);
-plain settings, and Key Vault references, live in app settings; locally everything stays in
-`dotnet user-secrets`.
+**Secrets:** Key Vault (RBAC; the Function App's system identity has "Key Vault Secrets User") holds six values, which
+app settings reference as Key Vault references: the API key, the consent encryption key (one session per user and bank),
+the database connection string, the Brevo key, the Enable Banking private key (one per application, shared by all banks
+and users) and the Firebase service account. Plain settings hold the rest (schedule, mail addresses, the Enable Banking
+application id and redirect URL). The Functions storage account has no key at all: the app reaches it through its own
+identity. Locally everything stays in `dotnet user-secrets`. Secrets are never committed, printed or logged.
+
+**Azure access for the operator** is a service principal with the Contributor role on the one resource group only; Entra
+security defaults (MFA for people) are on. How it is used is an operating matter — see `AGENTS.md`, "Cloud and release operations".
 
 ## Consent lifecycle
 
@@ -610,7 +659,7 @@ per session:
   together count. A 401 *without* `error` (our own bad signature), a 429, a 500, a timeout or a
   failed status check rethrow the original exception and never push, so a fault in our own
   credentials cannot produce a false "expired" alert.
-- **Once per session, not per failure.** `AccountSyncStates.ExpiryNotifiedSessionHash` holds the
+- **Once per session, not per failure.** `BankConsents.ExpiryNotifiedSessionHash` holds the
   hash of the session the push was accepted for; the push fires only when it differs from the dead
   session's hash. A reconnect brings a new session hash, so a later death pushes again — nothing
   to reset. It is set **only if at least one token returned `Sent`**; `Rejected`/`Transient`, no
@@ -618,8 +667,9 @@ per session:
   deliberately different from the per-debit push (which commits anyway): here nothing sits behind
   the retry, the connection is dead and there are no debits to block. A stale token
   (`TokenNoLongerValid`) is pruned regardless. Send happens before the single save.
-- **A consent that dies before the first sync finishes** has no `AccountSyncStates` row to hold
-  the guard, so it only logs (a push would repeat every tick); see `TODO.md`.
+- **A consent that dies before the first sync finishes** is told the same way (Story 4.1): the guard lives on the
+  `BankConsents` row, which exists from the moment of consent, not on `AccountSyncStates`, which exists only after
+  the first sync. Both death signals work in first-sync mode.
 - `ConsentStore.Restore` no longer drops an expired consent — it loads it as `Expired`, otherwise
   nobody would know after a restart which session died and the push would be lost.
 
@@ -666,10 +716,12 @@ R18's table applies unchanged (see `REQUIREMENTS.md`) — the three ways a conne
 
 R22: any ASPSP Enable Banking reaches is a valid target. **N26 is the first bank integrated, not
 a dependency** — nothing in the data model, rule logic or copy may assume it. v1 connects one
-account per bank and several banks at once (R22a, changed 2026-09-29 for the owner's N26 + DKB +
-ING-DiBa): the consent store must hold one consent per bank and the Ingestion Worker must walk all
-of them, isolating a failure in one bank from the others. The go-live can start with N26 alone,
-but the model is built for several from the start. **This currently
+account per bank and several banks at once (R22a, changed 2026-09-29): the consent store holds one
+consent per bank and the Ingestion Worker walks all of them, isolating a failure in one bank from the
+others. Built and live with N26 and DKB (2026-10-13); ING-DiBa was dropped by the owner but nothing
+prevents adding it. With several accounts *within* one bank (DKB returned five), a chosen-by-rule account
+is stored: only an account typed `CACC` with the exact product "Girokonto" is taken, zero or several
+matches choose nothing and close the new session; choosing it in the app is bead `gn-hkx`. **This currently
 assumes a eurozone ASPSP** (R15 hard-assumes EUR); a non-EUR bank needs a currency model that
 doesn't exist yet, and is out of scope until one does (see `CLAUDE.md`'s Open/deferred).
 
@@ -703,9 +755,9 @@ company check (KYB) with Enable Banking. The owner's own several accounts are fi
 must be linked in the Control Panel** first. (Read from the pages via a summarizer — re-read the
 Terms themselves before relying on this for anything beyond a personal deployment.)
 
-On Azure: Functions (consumption plan), the storage account behind them, and Key Vault are
-all effectively free at this scale, independent of the in-process-vs-isolated worker choice
-above. Azure SQL serverless does auto-pause too, so "a real baseline cost even serverless" is a
+On Azure: Functions (Flex Consumption), the storage account behind them, Key Vault and Application Insights are
+all effectively free at this scale (a budget alert at 5 € a month guards it; the first Cost Analysis check is bead
+`gn-euz`). Azure SQL serverless does auto-pause too, so "a real baseline cost even serverless" is a
 softer claim than the doc originally made — the actual reason for moving to Postgres was avoiding
 Azure SQL's ecosystem/tooling weight at this project's tiny scale, not an unavoidable cost Postgres
 uniquely lacks.
@@ -714,8 +766,8 @@ uniquely lacks.
 pauses a free project after **7 days with no DB activity** (10–30s cold start on the next request
 to un-pause); Neon suspends compute after just **5 minutes idle** (same cold-start behavior, no
 pause action needed — it resumes automatically). Neither loses data, ever. In practice neither
-matters here: the Ingestion Worker polls every 6h and the Health Monitor runs daily, both touching
-the DB far more often than Supabase's 7-day threshold, so a deployed project stays awake on its own
+matters here: the Ingestion Worker polls every 6h, touching
+the DB far more often than Supabase's 7-day threshold; Neon, chosen, suspends after 5 minutes idle and resumes by itself (the connection retries cover the wait), so a deployed project stays awake on its own
 without any keep-alive hack. Worst case either way is one slow request, never a missed alert.
 
 **Decided 2026-10-01 for the go-live: Neon free tier**, with the EF migrations applied manually
@@ -737,10 +789,10 @@ alerts, and keeps the whole backend actually at zero cost, not just assumed to b
 
 - **First-sync cold start**: narrowed 2026-09-28 along with removing the repeating on-demand
   fetch (see "Transaction ingestion") — this tradeoff now applies only to the one remaining
-  API-triggered immediate run, right after consent. It runs on Azure Functions' consumption plan,
-  which can take a few seconds to wake up if idle. Accepted as-is (no Premium plan, to keep costs
-  at zero) — the syncing screen's UI should be designed to feel intentional during this wait
-  rather than stuck.
+  API-triggered immediate run, right after consent. It runs on Azure Functions' Flex Consumption plan,
+  which can take a few seconds to wake up if idle (measured 4.6 s for the first request). Accepted
+  as-is (no always-ready instance, to keep costs at zero) — the syncing screen's UI should be designed to
+  feel intentional during this wait rather than stuck.
 
 ## Reconciliation with `REQUIREMENTS.md`
 
@@ -775,10 +827,12 @@ that field turned out to be unusable as an identifier.
 
 - ~~Confirm the "4x/day background" limit **per bank**~~ — confirmed for N26 2026-09-16: three
   `/debits` calls in quick succession during tracer-bullet device work returned
-  `429 ASPSP_RATE_LIMIT_EXCEEDED`, matching Enable Banking's FAQ exactly. Still unconfirmed for
-  ING-DiBa or DKB, and still only proves a real cap exists — not that it is precisely 4/day rather
+  `429 ASPSP_RATE_LIMIT_EXCEEDED`, matching Enable Banking's FAQ exactly. DKB never showed one; see below. It
+  still only proves a real cap exists — not that it is precisely 4/day rather
   than, say, a burst limit that a well-spaced 6h timer would clear either way. See
-  `TRACER-01-BANK-DATA.md`'s Findings.
+  `TRACER-01-BANK-DATA.md`'s Findings. **Live since 2026-10-13 at N26 and DKB:** 4 transaction requests per bank per
+  day from the 6 h timer, all answered 200, no 429 in the first week (checked 2026-10-19). The real risk is a
+  fifth fetch in a UTC day — a manual tick or a reconnect — not paging.
 - ~~Does the on-demand "app is open" fetch actually get exempted from this cap on real N26?~~ —
   **answered 2026-09-28: no.** A real device test called the actual on-demand code path with PSU
   headers against real N26 and still hit `ASPSP_RATE_LIMIT_EXCEEDED` — every call counts the same,
