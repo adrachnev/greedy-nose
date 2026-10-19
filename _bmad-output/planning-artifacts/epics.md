@@ -42,36 +42,19 @@ bead (`bd show <id>`, the bead's `--spec-id` points back to its section) and in 
 
 ### Functional Requirements
 
-Only the requirements Tracer 3 must deliver or newly depends on. "Baseline" = already built and
-verified against the sandbox/N26; go-live must keep it true on the cloud and across several banks.
+The texts live in `REQUIREMENTS.md`; this list only says which requirements each FR stands for. "Baseline" = already
+built and verified against the sandbox/N26; go-live had to keep it true on the cloud and across several banks.
 
-- FR1 (R22a): The app connects **one account per bank, several banks at once** — N26, DKB and
-  ING-DiBa — and the debit list shows all of them together. Each bank is its own consent; a
-  connection that ends, fails or reconnects affects only its own bank's debits and alerts.
-  **Decided 2026-10-01: all three banks are in Tracer 3** — go-live is not done with N26 alone.
-- FR2 (R25, R20b): Granting consent to a bank starts a **first sync** of that account's available
-  history, stored as already-seen; none of it notifies. It is all-or-nothing; an interrupted first
-  sync restarts and is still a first sync. Must work for each of the three banks.
-- FR3 (R9, R2a): The debit list shows debits newest first, each marked good or bad, and **comes
-  from stored data** (what the worker has pulled), not from a live bank call. Incoming money never
-  appears.
-- FR4 (R10, R10a, R10b, R10c, R11): A new, **booked**, bad debit triggers exactly one push;
-  "new" means an unseen identifier `(account, entry_reference | composite fallback)`, never a
-  recent date. Baseline — must hold unchanged for every bank.
-- FR5 (R12a): The push carries the payee and amount as title and one of three reasons (no rule /
-  marked bad / over limit) as body; no minus sign (R17a). Baseline.
-- FR6 (R4–R7, R13, R14, R21): The user's rules decide good/bad; a rule edit re-labels existing
-  debits and never notifies for them; rules stay editable while disconnected. **Go-live addition:**
-  because the backend classifies when it sends a push, a rule saved in the app must reliably reach
-  the backend.
-- FR7 (R19): A dead connection is never silent. The **one push** (`Bank connection expired` /
-  `Reconnect to keep getting alerts.`) when a consent dies, once per session, per bank. Baseline
-  (built). The in-app banner half is out of scope.
-- FR8 (R20, R20a): Reconnecting a bank after a gap sends **one summary push** (only if at least one
-  bad debit), never a burst. Baseline (built) — per bank.
-- FR9 (R15, R16): Amounts use the account currency (EUR); a foreign-currency charge is never
-  compared to a EUR limit — non-EUR charges are skipped and logged. Baseline.
-- FR10 (R22): Nothing hardcodes a bank — copy, data model and rule logic stay bank-agnostic.
+- FR1 = R22a (one account per bank, several banks at once; N26 and DKB, ING-DiBa dropped)
+- FR2 = R25, R20b (first sync, silent); all-or-nothing: `ARCHITECTURE.md`, "Ingestion modes"
+- FR3 = R9, R2a (the list comes from stored data, no incoming money)
+- FR4 = R10, R10a, R10b, R10c, R11 (baseline)
+- FR5 = R12a, R17a (baseline)
+- FR6 = R4–R7, R13, R14, R21, and R35 (a saved rule reaches the backend; the go-live addition)
+- FR7 = R19; once per session: `ARCHITECTURE.md`, "Consent lifecycle". The in-app banner half was out of the tracer.
+- FR8 = R20, R20a (baseline, per bank)
+- FR9 = R15, R16 (baseline). The skipped non-EUR charge is a known gap, see "Currently open" in `REQUIREMENTS.md`
+- FR10 = R22
 
 ### NonFunctional Requirements
 

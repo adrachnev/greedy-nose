@@ -134,7 +134,8 @@ same rule and are edited independently.
 
 ## List
 
-**R9** — The debit list shows debits, newest first, each marked good or bad.
+**R9** — The debit list shows debits, newest first, each marked good or bad. It is read from the stored debits and
+never triggers a bank fetch (R29).
 
 **R23 — Both list screens are searchable** (settled 2026-08-17). The debit list matches on the
 **payee's name or the debit's amount**; the rules list matches on the payee's name. Matching is
@@ -278,6 +279,11 @@ general per-field save path alongside Save.
 **R14** — The amount field is **hidden while the payee is marked bad**, since it has no effect
 there (R5). It appears when the payee is good. A hidden amount is kept, not wiped (R8a) — mark
 the payee good again and the previous limit is back.
+
+**R35 — A saved rule reaches the backend.** The backend decides whether to notify, from the rules it holds. A rule
+saved in the app must therefore get there reliably, also after an error or while there is no connection, otherwise a
+charge is classified with an old or missing rule. The app sends a rule when it is saved and resends all rules when it starts, so a send that failed is made up
+for at the next start.
 
 ## Banks
 
@@ -445,6 +451,9 @@ the post-deletion reconnect routing (R20b), so those three no longer read exactl
   carve out the exception. Needs a currency model before a non-EUR ASPSP is connected (see
   `CLAUDE.md`'s Open/deferred).
 - The Settings screen's contents, including whether amounts may show on the lock screen.
+- **Known gap, not a decision:** a charge whose booked amount is not in EUR is not compared with a limit (R15/R16) but
+  skipped and logged, so it produces **no alert**. That is a hole against R1 until a currency model exists (see R22).
+  To be re-judged when the first real case turns up; none has been seen at N26 or DKB.
 
 ## Follow-ups — bringing the code in line
 
