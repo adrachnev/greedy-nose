@@ -64,8 +64,9 @@ Source is `mocks/` and `REQUIREMENTS.md` ("Known mock gaps"); there is no `DESIG
 
 ### Coverage Map (Tracer 3)
 
-Which epic delivers which requirements. This is the map of the finished Tracer 3; the full table with one row per R,
-including "baseline" and "deferred", is made at the next planning round (`AGENTS.md`, "Work after Tracer 3").
+Which epic delivered which requirements. This is the map of the finished Tracer 3, kept as history. There is no full
+table per R: each story names the R it delivers, and the other direction is checked by search at every planning round
+(`AGENTS.md`, "Work after Tracer 3").
 
 R22a: Epic 3 (Epic 2 for the N26 part) — several banks at once, one consent each, one merged list
 R25, R20b: Epic 1 (first sync: 90 days, all pages), verified live in Epic 2 (N26) and Epic 3 (DKB)
@@ -110,6 +111,20 @@ All three banks feed one debit list, and one bank failing never stops the others
 A dead connection is noticed, not silent, and each bank's state can be seen.
 **Delivers:** R19
 **Architecture:** A: "Reliability", "Consent lifecycle", "Data model"
+
+Planned 2026-10-21 (after Tracer 3), in this order:
+
+### Epic 5: Connect a bank from the app
+Search a bank, approve at the bank, choose the account, watch the first sync, sort the payees once. (Stories 5.1–5.9.)
+**Delivers:** R36, R25, R26, R26a, R22a
+
+### Epic 6: Delete a bank
+Remove a bank for good, here and at the bank; the rules stay. (Stories 6.1–6.2.)
+**Delivers:** R18, R36, R20b
+
+### Epic 7: Reconnect an expired bank
+One tap on the card or the banner brings an expired bank back. (Stories 7.1–7.3.)
+**Delivers:** R36, R19, R20, R20a, R21
 
 ## Epic 1: A backend I can trust to deploy
 
@@ -1038,3 +1053,557 @@ only in the sandbox)
 
 **And** tests cover close after reconnect, a failing close, the already-closed case, and the
 skipped calls for a dead session
+
+## Epic 5: Connect a bank from the app
+
+The owner connects a bank in the app: search it by name, approve at the bank, choose the account if there are several,
+and watch the first sync run. Connecting and the first sync are two separate steps; neither undoes the other
+(decided 2026-10-21). The logic lives in the backend; the app asks and shows.
+**Delivers:** R36 (connect, bank states in Settings), R25, R26, R26a, R22a (choice of the account)
+**Architecture:** A: "Consent lifecycle", "Ingestion modes", "Transaction ingestion", "Data model", "Bank-agnostic design"
+
+### Story 5.1: Spike — the way back from the bank's app
+
+As the owner,
+I want to know where my phone lands after I approve at my bank,
+So that the connect flow in the app is built on what really happens and not on a guess
+(R36; A: "Consent lifecycle").
+
+**Acceptance Criteria:**
+
+**Given** a one-time link from `POST /connect-links`, opened in the browser of the owner's phone, for DKB and for N26
+**When** the owner approves at the bank
+**Then** it is written down for each bank where the phone lands (browser, bank app, Greedy Nose), whether the
+"Connected" page shows, and what the owner has to do by hand to get back to Greedy Nose
+
+**Given** the measurements
+**Then** `ARCHITECTURE.md`, "Consent lifecycle", step 2, states the decision with its reason: (A) the owner switches
+back by hand and the app reads the state of the connection when it comes to the foreground, or (B) the "Connected" page
+opens the app by a link — B only if it works every time at both banks, and A stays the fallback either way
+
+**Given** the decision
+**Then** the notes of the bead for this story and of `gn-hkx` carry the measurements (no session id, IBAN or account
+name in them)
+
+**And** no app or backend code is written in this story; the reconnect it causes at DKB and N26 may send one summary
+push (R20), which the owner has accepted
+
+### Story 5.2: Search for my bank by name
+
+As the owner,
+I want to type part of my bank's name and see the matching banks with their country,
+So that I can pick my bank without the app knowing any bank in advance (R36, R22; A: "Bank-agnostic design",
+"Consent lifecycle").
+
+**Acceptance Criteria:**
+
+**Given** a search text of at least 2 characters
+**When** the app sends it with the API key
+**Then** the answer lists up to 20 banks from Enable Banking's list, sorted by name, each with name, country and
+whether it is already connected; without the key the answer is 401
+
+**Given** a search text shorter than 2 characters
+**Then** it is refused with a clear message
+
+**Given** no bank matches
+**Then** the list is empty, which is not an error
+
+**Given** Enable Banking's list cannot be read
+**Then** the answer is its own error (502), so the app can say "couldn't load banks" and not "no bank found"
+(`01-select-bank#failed`)
+
+**Given** a bank that has a card in Settings (connected, syncing, sync failed or expired)
+**Then** it is marked as connected in the hits
+
+**Given** a bank whose connection is not expired
+**When** a consent link is requested for it
+**Then** `POST /connect-links` refuses it (`gn-4b3`); a bank whose connection is expired is still allowed, because that
+is the reconnect (Epic 7 adds the check of the stored account)
+
+**Given** the search text, the answer and the logs
+**Then** the answer holds only name, country and the connected mark, and the search text is not logged
+
+**And** the bank list is kept in memory for about 10 minutes for the search only; starting a consent still reads it
+fresh, as today
+
+**And** tests cover the hits, the minimum length, the empty list, the unreadable list, the connected mark, the refused
+second consent, the allowed reconnect of an expired bank and the 401
+
+### Story 5.3: Start a consent from the app and follow it
+
+As the owner,
+I want to start the bank's consent from the app and see how far it is,
+So that I do not need a laptop or a script to connect a bank (R36, R25, R22a; A: "Consent lifecycle", "Data model").
+
+**Acceptance Criteria:**
+
+**Given** a bank from the search (Story 5.2)
+**When** the app asks for a consent link
+**Then** the answer holds the one-time URL and an id of this attempt, which the app uses to ask for its state
+
+**Given** the owner approved and the bank offers exactly one account in euro (R15)
+**When** the callback is handled
+**Then** the bank is saved with that account (kept by IBAN), the first sync is queued (R25), and the state of the
+attempt is "saved"
+
+**Given** the bank offers several accounts in euro
+**When** the callback is handled
+**Then** nothing is saved as a connection yet; the session and the list of accounts wait encrypted on the attempt with
+a short deadline from the callback (15 minutes), and the state is "choose account"
+
+**Given** the bank offers no account in euro
+**Then** the session is closed at Enable Banking (best effort), nothing is stored, and the state is "failed" with the
+reason "no supported account" (`01ba-select-account#failed`)
+
+**Given** the bank reports an error or the owner cancelled, or the code cannot be traded
+**Then** the state is "failed" with a short reason; nothing of the bank's text is shown or logged
+
+**Given** the app asks for the state of an attempt
+**Then** the answer is one of: waiting for the bank, choose account, saved, failed (with reason), expired; it needs the
+API key, an unknown id answers 404, and it never holds a session id, IBAN, account name or account list
+
+**Given** the deadline passes without a choice
+**Then** the state is "expired", the waiting session is closed and the stored list is deleted
+
+**Given** the rule-based account choice (`AccountSelector`, type `CACC` and product "Girokonto")
+**Then** it is removed; the owner chooses, and `AGENTS.md` notes that `tools/connect-bank.sh` cannot finish a choice
+between several accounts
+
+**Given** a bank that had an older session (a reconnect)
+**Then** the old session is closed after the new one is stored, as in Story 4.3
+
+**And** tests cover one account, several accounts, none, a bank error, the state answers (including 404 and 401), the
+deadline, and that no log line or answer holds an id, IBAN or account name
+
+### Story 5.4: Choose the account
+
+As the owner,
+I want to pick the account to watch when my bank has several,
+So that Greedy Nose watches the account I pay with (R36, R22a; A: "Consent lifecycle", "Data model").
+
+**Acceptance Criteria:**
+
+**Given** an attempt in the state "choose account" (Story 5.3)
+**When** the app asks for the accounts
+**Then** each row holds an id of the row, the account's name (else its product, else "Account"), its kind and the last
+four digits of its IBAN — never the full IBAN, the uid or anything else of the bank's answer
+
+**Given** the list
+**Then** the first current account the bank offered carries the mark "suggested"; it is only a hint
+
+**Given** the app sends the id of a row
+**Then** the bank is saved with that account (kept by IBAN, not by product text), the first sync is queued (R25), the
+waiting list is deleted and the state of the attempt is "saved"
+
+**Given** the owner cancels (or leaves the choice)
+**Then** the session is closed at Enable Banking (best effort), the waiting list is deleted and nothing is saved
+
+**Given** an id that is not in the list, a choice for an attempt that is not in the state "choose account", or a second
+choice
+**Then** it is refused and nothing changes
+
+**Given** any of these calls
+**Then** they need the API key, and no log line holds an IBAN, an account name or an id of the bank
+
+**And** tests cover the list, the mark, the choice, the cancel, the refusals and the 401
+
+### Story 5.5: My banks with their state, and try the first sync again
+
+As the owner,
+I want to see my banks and their state, and to repeat a first sync that failed,
+So that I know what each bank is doing and can fix a failed start without connecting again
+(R36, R25, R29; A: "Transaction ingestion", "Reliability", "Data model").
+
+**Acceptance Criteria:**
+
+**Given** the API key
+**When** the app asks for my banks
+**Then** there is one entry per saved bank with its name, country, account name, valid-until date and one state:
+connected, syncing, sync failed or expired; without the key the answer is 401
+
+**Given** a bank whose first sync is not finished and has not failed
+**Then** its state is "syncing"; when the sync has failed (or its queue message was given up) the state is "sync failed"
+with a short reason, among them "the bank's daily limit is used up"
+
+**Given** the list
+**Then** it holds no session id, IBAN, token, payee or amount, and answering it never calls the bank (it reads stored
+data only, so the app may ask for it every few seconds)
+
+**Given** a bank in the state "sync failed"
+**When** the app asks to try again
+**Then** the first sync is queued again and no new consent is asked of the bank
+
+**Given** a bank whose daily fetch limit is used up (R29)
+**When** the app asks to try again
+**Then** it is refused with the message to try again tomorrow and no call is made to the bank
+
+**Given** a bank in any other state, or an unknown bank
+**When** the app asks to try again
+**Then** it is refused and nothing is queued
+
+**And** tests cover each state, the 401, the repeat, the refusal at the limit, the refusal in other states, and that the
+list never calls the bank
+
+### Story 5.6: Settings shows my banks, and the search finds a bank
+
+As the owner,
+I want Settings to list my banks with their state and to let me search for a new bank,
+So that I see what is connected and can start connecting another (R36, R22; mocks `06`, `01`, `01a`, `02b`, `04c`).
+
+**Acceptance Criteria:**
+
+**Given** saved banks
+**When** I open Settings
+**Then** each bank has a card with its name, account name and one state: connected, syncing, sync failed or expired
+(Story 5.5), as in `06-settings`
+
+**Given** a bank in the state "syncing"
+**Then** its card asks the backend again every few seconds and changes to its new state by itself; the asking stops
+when no bank is syncing or the screen is left
+
+**Given** no bank is connected (first start, or after the last bank is gone)
+**Then** the app opens on Settings with one sentence about what it does and "Connect a bank" as the main action
+(`06-settings#no-bank`); the empty debit list and the empty rule list point to it too (`02b`, `04c`)
+
+**Given** I tap "Connect a bank"
+**Then** I see the search (`01-select-bank`), with the field empty and no list until I type
+
+**Given** I type at least 2 characters
+**Then** the app asks the backend after a short pause, not on every key, and shows name and country of each hit; a bank
+marked as connected shows "Connected" and cannot be tapped
+
+**Given** no bank matches
+**Then** the screen of `01a-select-bank-no-match` shows; **given** the list could not be loaded, it says
+"Couldn't load banks" and never "No bank found" (`01-select-bank#failed`)
+
+**Given** a bank in the hits that is not connected
+**When** I tap it
+**Then** the next step is Story 5.7; until it is built, the tap leads nowhere yet
+
+**Given** the screens
+**Then** no literal bank name is in the app's own words (R22), amounts and dates follow the device locale (R17), and the
+cards carry no delete or reconnect action yet (Epics 6 and 7)
+
+**And** the three checks of `AGENTS.md` ("Running and verifying") pass, and tests cover the cards for each state, the
+polling stopping, the first-start state, the search with its pause and minimum length, and the three search results
+
+### Story 5.7: Approve at the bank, come back, choose the account
+
+As the owner,
+I want to approve at my bank and, if there are several accounts, pick the one to watch,
+So that my bank is connected without leaving anything half done (R36, R22a, R15; A: "Consent lifecycle"; mocks `01ba`,
+`01e`).
+
+**Acceptance Criteria:**
+
+**Given** a bank I tapped in the search (Story 5.6)
+**When** the app has asked the backend for the consent link (Story 5.3)
+**Then** the link opens in the phone's browser and the bank's own screen takes over; the app builds nothing of the
+bank's consent screen (`01b` only shows what the bank shows)
+
+**Given** I am back in the app (on my own, or by the way the spike chose, Story 5.1)
+**Then** the app asks the backend for the state of the attempt as soon as it is in the foreground, and shows a waiting
+screen while the state is "waiting for the bank"
+
+**Given** the state "saved"
+**Then** the app goes on to the first sync (Story 5.8)
+
+**Given** the state "choose account"
+**Then** the app shows the accounts as in `01ba-select-account`: name, kind, last four digits, "Suggested" on one row;
+tapping a row saves the choice and goes on to the first sync
+
+**Given** I tap Cancel (or go back) on the account choice
+**Then** the attempt is cancelled at the backend, nothing is saved, and the app is back on Settings
+
+**Given** the state "failed"
+**Then** the screen of `01e-connect-error` shows with "Try Again" (a new consent for the same bank) and "Choose a
+different bank"; the reason "no supported account" shows the text of `01ba-select-account#failed`
+
+**Given** the state "expired", or no answer from the backend
+**Then** the app says so plainly and offers to start again; it never shows a spinner without end
+
+**Given** the screens
+**Then** no literal bank name is in the app's own words (R22), and no IBAN is ever shown in full
+
+**And** the three checks of `AGENTS.md` pass, and tests cover each state of the attempt, the cancel, the return to the
+foreground, and the retry from the error screen
+
+### Story 5.8: Watch the first sync, and try it again
+
+As the owner,
+I want to see my first sync run and to repeat it if it failed,
+So that a connected bank is never left in an unknown state (R25, R36, R29; A: "Transaction ingestion"; mock `01bb`).
+
+**Acceptance Criteria:**
+
+**Given** a bank was just saved (Story 5.7)
+**Then** the app shows "Fetching your debits" with a spinner (`01bb-syncing`) and asks the backend for the bank's state
+every few seconds
+
+**Given** I tap "Settings", go back or close the app
+**Then** nothing is undone: the sync runs on in the backend and the card in Settings shows its state
+
+**Given** the sync is done
+**Then** the app goes on to the onboarding offer (Story 5.9) when payees without a rule were found, otherwise to the
+debit list
+
+**Given** the sync has failed
+**Then** the screen shows "Couldn't fetch your debits" (`01bb-syncing#failed`), the bank stays connected, and "Try
+again" repeats only the pull (Story 5.5)
+
+**Given** the bank's daily limit is used up
+**Then** the screen says to try again tomorrow and "Try again" is not offered
+
+**Given** the sync is still running after 2 minutes
+**Then** the screen stops waiting and points to Settings, where the card shows the state; the sync is not stopped
+
+**Given** a card in Settings with the state "sync failed"
+**Then** it offers "Try again" with the same effect as on this screen
+
+**Given** the screens
+**Then** nothing fetched here can notify (R25), no literal bank name is in the app's own words (R22), and the polling
+stops when the screen is left
+
+**And** the three checks of `AGENTS.md` pass, and tests cover running, done (with and without payees to review),
+failed, the limit, the 2-minute stop, leaving the screen, and "Try again" on the screen and on the card
+
+### Story 5.9: Sort the payees once, or leave them Bad
+
+As the owner,
+I want to mark all payees of my history Good in one tap, or leave them all Bad,
+So that a new bank does not start with a list of payees I have to sort one by one (R26, R26a, R35; mock `01c`).
+
+**Acceptance Criteria:**
+
+**Given** the first sync is done and I am still in the connect flow
+**Then** the app lists the payees of that sync that have no rule, as in `01c-classify-payees`: name, amount, number of
+charges, with no control per payee
+
+**Given** the list
+**When** I tap "Mark all Good and start"
+**Then** a Good rule without a limit is written for every payee in the list, the rules reach the backend (R35), and
+the debit list opens
+
+**Given** the list
+**When** I tap "Keep all Bad and start"
+**Then** no rule is written (a payee without a rule is Bad, R5) and the debit list opens
+
+**Given** I tap Skip, go back or close the app
+**Then** no rule is written, the bank stays connected, it counts as "Keep all Bad" (R26a), and the offer does not come
+back
+
+**Given** the rules cannot be saved (no network)
+**Then** I stay on the list with "Couldn't save", and no rule is half written
+
+**Given** no payee is left without a rule, or the sync found no debits
+**Then** the list is skipped and the debit list opens at once
+
+**Given** the history of the sync
+**Then** none of it notifies (R25); only a charge that arrives after the sync does (R26a)
+
+**Given** the build of this story
+**Then** it is checked whether writing and sending all rules at once is atomic at the backend (R35); if it is not,
+that gap becomes a backend bead before this story is built
+
+**And** the three checks of `AGENTS.md` pass, and tests cover both buttons, Skip and back, the failed save, the
+skipped list, and that a payee with a rule is not in the list
+
+## Epic 6: Delete a bank
+
+The owner removes a bank for good: its connection ends here and at the bank, its debits go, his rules stay. Together with
+Epic 5 this closes the loop of adding and removing a bank from the app. (Epic 7, reconnecting an expired bank, follows.)
+**Delivers:** R18 (delete), R36 (delete on the card), R20b (connect again after a delete)
+**Architecture:** A: "Data lifecycle", "Data model", "Consent lifecycle"
+
+### Story 6.1: Delete a bank in the backend
+
+As the owner,
+I want one call that removes a bank and everything that belongs only to it,
+So that no access stays open at the bank and no debit of it stays behind, while my rules are kept
+(R18, R20b; A: "Data lifecycle", "Data model").
+
+**Acceptance Criteria:**
+
+**Given** the API key and a saved bank
+**When** the app asks to delete it
+**Then** the access is revoked at Enable Banking first; a session that is already closed, expired or unknown there
+counts as done (as in Story 4.3)
+
+**Given** the revoke fails in any other way (no answer, an error from the bank's side)
+**Then** the delete is refused with a clear message, the bank and all its data stay, and the app may try again
+
+**Given** the revoke worked
+**Then**, in one database change, the bank's consent, its sync state, its debits, their notification records and its
+pushes still owed (including a reconnect summary) are deleted
+
+**Given** the delete
+**Then** payees and rules stay (R3a, R18), and no other bank's data, and not the device token, is touched
+
+**Given** a tick or a retried push for that bank is running while it is deleted (`gn-8j5`)
+**Then** it writes nothing for the deleted bank afterwards
+
+**Given** the last bank is deleted
+**Then** the backend simply has nothing to poll; rules and device token stay
+
+**Given** the same bank is connected again after a delete
+**Then** it starts as a first sync with no push and no summary (R20b), and the onboarding offer lists only payees
+without a rule
+
+**Given** an unknown bank, or no API key
+**Then** the answers are 404 and 401
+
+**Given** the logs and the answers
+**Then** they hold no session id, IBAN, payee or amount
+
+**And** tests cover the order (revoke before delete), the tolerated answers, the refusal with nothing changed, what is
+deleted and what stays, the race with a tick, the last bank, and connecting again
+
+### Story 6.2: Delete a bank from Settings
+
+As the owner,
+I want to delete a bank from its card after a clear warning,
+So that I never remove a bank by accident and know what is kept (R18, R36; mock `06c`).
+
+**Acceptance Criteria:**
+
+**Given** a card in Settings, in any state (connected, syncing, sync failed, expired)
+**Then** it has "Delete"
+
+**Given** I tap "Delete"
+**Then** a confirmation names the bank and says that the connection and its debit history are deleted for good, that the
+access at the bank ends, that my rules are kept, and that it cannot be undone (`06c-delete-confirm`)
+
+**Given** it is my last bank
+**Then** the confirmation also says that no alert comes until a bank is connected (`06c-delete-confirm#last-bank`)
+
+**Given** I confirm
+**Then** the app asks the backend (Story 6.1) and "Delete" cannot be tapped twice while it waits
+
+**Given** the delete worked
+**Then** the card is gone, the debits of that bank are gone from the debit list without restarting the app, the rules
+are unchanged, and after the last bank the app shows Settings with no bank (`06-settings#no-bank`)
+
+**Given** the delete is refused or there is no network
+**Then** the bank stays and a message says that it could not be deleted and that I can try again; nothing is half done
+
+**Given** I tap Cancel
+**Then** nothing changes
+
+**Given** the screens
+**Then** no literal bank name is in the app's own words (R22) except the bank's own name from the data
+
+**And** the three checks of `AGENTS.md` pass, and tests cover the dialog (normal and last bank), the confirm, the
+cancel, the failed delete, and the screens after the last bank
+
+## Epic 7: Reconnect an expired bank
+
+The owner brings an expired bank back with one tap on its card or on the banner, and sees at once which bank is not
+being watched. Rules and debits are kept; the gap is told as one summary push.
+**Delivers:** R36 (reconnect), R19 (banner per bank), R20, R20a, R21
+**Architecture:** A: "Consent lifecycle", "Ingestion modes", "Data lifecycle"
+
+### Story 7.1: Reconnect an expired bank in the backend
+
+As the owner,
+I want to reconnect an expired bank to the same account,
+So that alerts resume without a new first sync and without losing rules or debits
+(R36, R20, R20a; A: "Consent lifecycle", "Ingestion modes").
+
+**Acceptance Criteria:**
+
+**Given** a bank whose connection is expired
+**When** the app asks for a reconnect link for it
+**Then** the answer holds the one-time URL and an id of the attempt; for a bank that is not expired, or an unknown bank,
+it is refused
+
+**Given** the owner approved and the bank offers the stored account (found by its IBAN)
+**When** the callback is handled
+**Then** the new session replaces the old one, the old one is closed after the new one is stored (Story 4.3), no
+account choice is asked and no first sync is started
+
+**Given** the next tick after a reconnect
+**Then** it runs in reconnect mode: the gap goes through the rules and, if at least one debit in it is bad, one summary
+push is sent (R20), otherwise none (R20a)
+
+**Given** the bank does not offer the stored IBAN
+**Then** the reconnect is refused with a clear reason, the new session is closed at Enable Banking (best effort), and the
+old connection, rules and debits stay as they were
+
+**Given** the app asks for the state of a reconnect attempt
+**Then** the answer is one of: waiting for the bank, saved, failed (with reason), expired — with the same rules as in
+Story 5.3 (API key, 404 for an unknown id, no session id, IBAN or account name)
+
+**Given** the reconnect worked
+**Then** the bank's state is "connected" again and the expiry push for the old session is not repeated
+
+**Given** the logs and the answers
+**Then** they hold no session id, IBAN, payee or amount
+
+**And** tests cover the refused link, the stored account found, the account missing (old data untouched), the mode and
+the summary of the next tick, the closed old session, and the state answers
+
+### Story 7.2: Reconnect from the bank's card
+
+As the owner,
+I want a "Reconnect" button on the card of an expired bank,
+So that I get my alerts back in a few taps (R36, R19; mocks `01b#reconnect`, `01e#reconnect`).
+
+**Acceptance Criteria:**
+
+**Given** a card in the state "expired"
+**Then** it has "Reconnect" next to "Delete"; no other state has it
+
+**Given** I tap "Reconnect"
+**Then** the app asks for the link of Story 7.1 and opens it at once in the browser — no bank search, no account choice
+and no sync screen follow
+
+**Given** I am back in the app (way and wait as in Story 5.7)
+**When** the state is "saved"
+**Then** Settings shows the bank as connected and I need to do nothing more
+
+**Given** the state is "failed" (the login was cancelled, it timed out, or the bank did not offer my account)
+**Then** the screen of `01e-connect-error#reconnect` shows: "Couldn't reconnect …", the bank stays expired, rules and
+debits are kept, with "Try Again" (a new link for the same bank) and "Back to Settings"
+
+**Given** the state "expired", or no answer from the backend
+**Then** the app says so plainly and offers to start again; it never shows a spinner without end
+
+**Given** the screens
+**Then** no literal bank name is in the app's own words (R22), and no IBAN is ever shown in full
+
+**And** the three checks of `AGENTS.md` pass, and tests cover the button only on an expired card, the way back, the
+success, each failure, and the retry
+
+### Story 7.3: A banner on the debit list for each expired bank
+
+As the owner,
+I want the debit list to tell me loudly which bank is not being watched,
+So that silence is never mistaken for "nothing bad happened" (R19, R21, R22a; mock `01d`).
+
+**Acceptance Criteria:**
+
+**Given** a bank in the state "expired"
+**Then** the debit list shows a banner for it above the list, naming the bank ("«Bank»: connection expired"), with the
+text of `01d-connection-expired` and a "Reconnect «Bank»" button
+
+**Given** two banks are expired
+**Then** there is one banner for each, each naming its bank
+
+**Given** I tap the button on a banner
+**Then** the reconnect of Story 7.2 starts for that bank
+
+**Given** the bank is connected again
+**Then** its banner is gone
+
+**Given** the banner
+**Then** the list below it stays visible and searchable, the history is kept, and rules stay editable (R21); the
+"Last seen" header shows only when no other bank is still live
+
+**Given** the app is opened, or comes to the foreground
+**Then** the banners follow the real states of the banks (Story 5.5) and do not need a restart
+
+**Given** the screens
+**Then** no literal bank name is in the app's own words (R22)
+
+**And** the three checks of `AGENTS.md` pass, and tests cover no banner, one, two, the button, the banner going away
+after a reconnect, and the "Last seen" header

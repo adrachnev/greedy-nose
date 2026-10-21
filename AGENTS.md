@@ -244,17 +244,18 @@ and built with the process in Policy.
     `ARCHITECTURE.md` (for example `ARCHITECTURE.md, "Ingestion modes"`), not a number. The acceptance criteria are
     testable behaviour (Given/When/Then); they may be concrete but do not repeat a rule's wording or its numbers
     ("at the pace of R29", not "every 6 h").
-  - **Coverage map:** `epics.md` holds one table with a row per R: the epic that delivers it, or "baseline" (already
-    built) or "deferred". A row without any of these is a gap in the plan; check the table at every planning round.
+  - **No coverage table** (decided 2026-10-21): the stories already name the R they deliver, so no second list is kept.
+    At every planning round, check the other direction by search: for each R that changed or is touched, `grep` its
+    number in `epics.md`. An R that is neither named by a story nor already built (baseline) nor deferred is a gap.
   - **A story needs behaviour no R states?** First write the R in `REQUIREMENTS.md`, then the story. A design decision
     made while building goes into `ARCHITECTURE.md`; if the title of an A section changes, search `epics.md` for it.
   - **State:** the stories of Tracer 3 cite R numbers and A section titles (the old FR/NFR/AR numbers are gone from
     `epics.md`; `git show 28e4587:_bmad-output/planning-artifacts/epics.md` has the lists). The three UX-DR were left
-    as they were. `epics.md` holds a coverage map of Tracer 3 only; the full table per R does not exist yet and is made
-    in the next planning round (`bmad-create-epics-and-stories`).
-- **First planning step after Tracer 3:** turn the next topics into epics and stories (`bmad-create-epics-and-stories`):
-  choosing the account in the app (`gn-hkx`), the remaining screens and onboarding, the resilience beads. Each story
-  then gets a bead as before.
+    as they were.
+- **Planned 2026-10-21** (`bmad-create-epics-and-stories`): Epic 5 (connect a bank from the app, `gn-hkx`), Epic 6
+  (delete a bank), Epic 7 (reconnect an expired bank), in that order; each story has a bead. Epic 7 should be built
+  before the DKB and N26 consents run out (about mid-January 2027); until then the shell tool reconnects them. Still to
+  plan: the resilience beads (`gn-emh`, `gn-a64`, `gn-ftd`) and any further screens.
 - BMAD plans only. Building and reviewing stays as in Policy (plan mode, `coder-*`, `coder-reviewer`); do not use
   `bmad-build`.
 

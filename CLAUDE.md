@@ -4,15 +4,16 @@
 
 ## Status
 
-Last cleaned up 2026-10-19. This section stays short on purpose: the state of the work lives in Beads, not here
+Last cleaned up 2026-10-21. This section stays short on purpose: the state of the work lives in Beads, not here
 (see `AGENTS.md`, "Work tracking with Beads"). Do not write session diaries into this file.
 
 - **Where we are:** Tracer 3 (go-live) is closed (2026-10-19). The backend runs in Azure (Functions + Neon), N26 and DKB
   are connected, the release app is on the owner's phone, a real charge gives one push, the week check found no 429.
   ING-DiBa is deliberately not connected.
-- **What is next:** the documentation cleanup (`gn-tn2`) is done (2026-10-19). Next is planning with BMAD
-  (`bmad-create-epics-and-stories`): `gn-hkx` (choose the account in the app), the remaining screens and onboarding, the
-  resilience beads (`gn-emh`, `gn-a64`, `gn-ftd`). `bd ready` shows what is unblocked.
+- **What is next:** planned 2026-10-21 (`bmad-create-epics-and-stories`): Epic 5 connect a bank from the app (`gn-1u1`,
+  starts with the spike `gn-1u1.1`), then Epic 6 delete a bank (`gn-dib`), then Epic 7 reconnect (`gn-9oc`, before the
+  consents run out in mid-January). Still to plan: the resilience beads (`gn-emh`, `gn-a64`, `gn-ftd`). `bd ready` shows
+  what is unblocked.
 - **Live document:** `TRACER-03-GO-LIVE.md`, read its Progress first. Older history: `git log` and the two earlier
   tracer documents.
 - **Where things are written down:** what the app does `REQUIREMENTS.md`; design `ARCHITECTURE.md`; stories and
