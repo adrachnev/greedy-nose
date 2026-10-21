@@ -254,7 +254,7 @@ and built with the process in Policy.
     as they were.
 - **Planned 2026-10-21** (`bmad-create-epics-and-stories`): Epic 5 (connect a bank from the app, `gn-hkx`), Epic 6
   (delete a bank), Epic 7 (reconnect an expired bank), in that order; each story has a bead. Epic 7 should be built
-  before the DKB and N26 consents run out (about mid-January 2027); until then the shell tool reconnects them. Still to
+  before the DKB and N26 consents run out (valid until 2027-01-19); until then the shell tool reconnects them. Still to
   plan: the resilience beads (`gn-emh`, `gn-a64`, `gn-ftd`) and any further screens.
 - BMAD plans only. Building and reviewing stays as in Policy (plan mode, `coder-*`, `coder-reviewer`); do not use
   `bmad-build`.

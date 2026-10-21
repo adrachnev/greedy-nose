@@ -12,7 +12,7 @@ Last cleaned up 2026-10-21. This section stays short on purpose: the state of th
   ING-DiBa is deliberately not connected.
 - **What is next:** planned 2026-10-21 (`bmad-create-epics-and-stories`): Epic 5 connect a bank from the app (`gn-1u1`,
   starts with the spike `gn-1u1.1`), then Epic 6 delete a bank (`gn-dib`), then Epic 7 reconnect (`gn-9oc`, before the
-  consents run out in mid-January). Still to plan: the resilience beads (`gn-emh`, `gn-a64`, `gn-ftd`). `bd ready` shows
+  consents run out on 2027-01-19). Still to plan: the resilience beads (`gn-emh`, `gn-a64`, `gn-ftd`). `bd ready` shows
   what is unblocked.
 - **Live document:** `TRACER-03-GO-LIVE.md`, read its Progress first. Older history: `git log` and the two earlier
   tracer documents.

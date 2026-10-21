@@ -661,10 +661,21 @@ backend holds the logic, the app asks and shows. Connecting and the first sync a
 1. **Search.** The app asks the backend for banks by name (`AspspResolver` reads Enable Banking's list). Each hit has
    name and country and a flag "already connected"; the backend also refuses a second consent for a bank that has an
    active one (`gn-4b3`).
-2. **Consent.** The app asks `POST /connect-links` and opens the one-time URL in the system browser; the bank's own app
-   takes over. The callback still arrives at the backend, which trades the code for the session. How the user gets back
-   into the app (deep link or not) is decided by a spike with browser and bank app on the same phone (DKB and ING
-   switch into their own apps; until now only the laptop path was seen, with DKB).
+2. **Consent.** The app asks `POST /connect-links` and opens the one-time URL in a browser (the system browser; a
+   Chrome Custom Tab is tried in Story 5.7, not a WebView, which Enable Banking advises against). The callback arrives at
+   the backend, which trades the code for the session. **The way back (Spike 5.1, measured 2026-10-21 on the owner's
+   phone with DKB and N26, default browser DuckDuckGo):** nothing returns to Greedy Nose by itself. At DKB, Enable
+   Banking asks for the login, then waits ("Waiting for completion"); the DKB app does not open by itself and the
+   approval has to be found there by hand. At N26, an information page of Enable Banking comes first, then N26's own web
+   login, then an approval message of the N26 app. In both cases the user goes back to the browser by hand. A tab of the
+   browser can be lost when the user leaves it for another app (a password manager). Decision: **the callback page
+   (after the code is traded) opens the app itself** with the link `greedynose://connected` (the app registers the
+   scheme; no secret is in the link, the app reads the state from the backend with its API key). Tested: the page
+   tries it on its own, DuckDuckGo asks once whether to open the app, and "yes" opens Greedy Nose; "no" leaves the page
+   as it is. The page therefore also carries a visible button "Open Greedy Nose", and its text is neutral ("you can
+   close this page"), because a second call of the callback with a spent code looks like a failure although the first
+   one worked. The app does not rely on the page: whenever it comes to the foreground it reads the state of the
+   attempt (Story 5.3) and offers "Try again". A verified App Link (no browser question) is a later option.
 3. **Account.** With one account the backend saves the bank at once. With several it keeps the session id and the
    account list **encrypted** (same key as `BankConsents`) on the pending consent, with a short deadline from the
    callback (set in the story), and the app fetches the list and sends the choice. The list holds a handle, the account

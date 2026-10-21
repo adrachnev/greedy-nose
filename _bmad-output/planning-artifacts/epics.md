@@ -1088,6 +1088,58 @@ name in them)
 **And** no app or backend code is written in this story; the reconnect it causes at DKB and N26 may send one summary
 push (R20), which the owner has accepted
 
+### Story 5.1a: Signing in at the bank feels smooth, from start to finish
+
+As the owner,
+I want the whole way of signing in at my bank — from tapping the bank in the app to being back in the app with the result
+— to feel like a normal banking app,
+So that I trust the app with my bank connection (R36; A: "Consent lifecycle", step 2; measured by Spike 5.1).
+
+Scope: only the sign-in at the bank. The choice of the account, the first sync and the onboarding are other stories.
+The spike showed what feels wrong today: a bare browser page, no word about what to do next, a bank app that does not
+open by itself (DKB), a page that can vanish when the user leaves for a password manager, a "Connected" or "Connection
+failed" page that does not lead back to the app. This story researches how established apps do it and builds a usable
+solution. It is a thin but real slice, not throwaway code: the callback page and the parts of the app built here stay.
+It is built with the usual process (plan mode, `coder-backend` for the page, `coder-mobile` for the app, a
+`coder-reviewer` for each, the owner deploys). The temporary entry in the app is replaced by Stories 5.6 and 5.7.
+
+**Acceptance Criteria:**
+
+**Given** how other apps solve this (Custom Tabs or the browser, the return by a link, the wait for an approval in the
+bank's app, a password manager in between)
+**Then** the research and its sources are written down in `ARCHITECTURE.md`, "Consent lifecycle", with the chosen
+solution and why; what could not be confirmed (for example, whether Enable Banking accepts anything but https as
+redirect URL) is named, not guessed
+
+**Given** the whole way, from tapping the bank to being back in the app
+**Then** at every step the user knows what to do next (a short plain explanation before the bank, a clear waiting text
+while the bank asks for the approval, the way back), no step shows a bare technical page, and there is no dead end if the
+user comes back by hand, the page is gone, or the bank's app did not open
+
+**Given** the page the browser shows after the code is traded (success or failure)
+**Then** its text is neutral ("you can close this page, Greedy Nose shows the result"), it tries to open the app with
+`greedynose://connected`, it shows a visible button "Open Greedy Nose", and a second call with a spent code shows the
+same neutral text; the link carries no secret and no state
+
+**Given** a temporary entry in Settings where I type the name of a bank
+**When** I tap it
+**Then** the app asks `POST /connect-links` and opens the link in the way the research chose — Chrome Custom Tab
+compared on my phone with the plain browser (DuckDuckGo); the one that keeps the page when I leave for another app wins
+
+**Given** I come back, by the link `greedynose://connected` or by hand
+**Then** the app closes the tab if it can, reads `/status` and shows either "«bank» is connected, valid until «date»"
+or a failure with "Try again"
+
+**Given** I try it with DKB and with N26 on my phone
+**Then** I judge that the whole sign-in feels right, and what I found (what felt wrong, what was fixed) is written into
+the notes of the bead; the story is not done before I say so
+
+**Given** the screens and the logs
+**Then** no session id, IBAN or account name is shown or logged, and no literal bank name is in the app's own words (R22)
+
+**And** the three checks of `AGENTS.md` pass, the backend tests pass, and tests cover the page for success, failure and
+a spent code, and the app's handling of the link, of the foreground and of the failure
+
 ### Story 5.2: Search for my bank by name
 
 As the owner,
@@ -1171,6 +1223,9 @@ between several accounts
 
 **Given** a bank that had an older session (a reconnect)
 **Then** the old session is closed after the new one is stored, as in Story 4.3
+
+**Given** the callback page the browser shows after the code is traded
+**Then** it is the page built in Story 5.1a and shows the result of this story's states in its neutral way
 
 **And** tests cover one account, several accounts, none, a bank error, the state answers (including 404 and 401), the
 deadline, and that no log line or answer holds an id, IBAN or account name
@@ -1324,6 +1379,10 @@ different bank"; the reason "no supported account" shows the text of `01ba-selec
 
 **Given** the screens
 **Then** no literal bank name is in the app's own words (R22), and no IBAN is ever shown in full
+
+**Given** the way to the bank and back
+**Then** it is the one built and judged in Story 5.1a (Custom Tab or browser, the link `greedynose://connected`, the
+plain waiting text); this story adds the state of the attempt of Story 5.3 and the account choice to it
 
 **And** the three checks of `AGENTS.md` pass, and tests cover each state of the attempt, the cancel, the return to the
 foreground, and the retry from the error screen

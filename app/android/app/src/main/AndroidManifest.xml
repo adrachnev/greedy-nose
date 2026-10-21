@@ -26,6 +26,13 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
+        <!-- Spike 5.1: the way back from the bank's browser flow (greedynose://connected). -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="greedynose" />
+        </intent-filter>
       </activity>
       <!-- Story 2.2: fallback for FCM messages without per-message channel/icon. The backend
            (FirebaseNotificationSender.BuildMessage) sets the same values per message: channel
