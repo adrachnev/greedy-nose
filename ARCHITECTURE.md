@@ -163,7 +163,7 @@ erDiagram
 | AccountSyncStates | `(UserId, AccountKey)` | One row per connected account, and it **exists only once that account's first sync has finished**: `FirstSyncCompletedAt` says when. A missing row means "first sync still to do" — the Ingestion Worker's mode signal (see "Ingestion modes"). The second field, nullable `LastSessionIdHash`, is the SHA-256 of the consent session the last completed tick used — a **hash, never the session id**, which reads the real account and so is not something to add to the database; equality is all the reconnect check needs. `null` means "written before this field existed" and is adopted silently. `AccountKey` is the IBAN, never the per-consent `uid`, so a reconnect finds its own row. Keyed per account, not per user, so several accounts per user need no re-keying later (v1 is one account per bank, R22a) |
 | NotificationLog | `Id`, unique on `(UserId, DebitId)` | R11's guard **at the database level**: the unique index makes a second send fail on insert, not just on an application-level check-then-insert that could race |
 | BankConsents | `(UserId, AspspName)` | The live consent of one bank — see below |
-| PendingConsents | `Id` | A consent the owner is in the middle of starting: the bank, and the **SHA-256 hashes** of the one-time link token and of the OAuth `state` — the database never holds a value that can start or finish a consent. Each is consumed once; "single use" is made atomic by an app-managed `Version` (two requests with the same secret both read version N, one UPDATE wins). A hard deadline of 30 minutes from creation |
+| PendingConsents | `Id` | A consent the owner is in the middle of starting: the bank, and the **SHA-256 hashes** of the one-time link token and of the OAuth `state` — the database never holds a value that can start or finish a consent. Each is consumed once; "single use" is made atomic by an app-managed `Version` (two requests with the same secret both read version N, one UPDATE wins). A hard deadline of 30 minutes from creation. Decided 2026-10-21, not built yet: for a bank with several accounts the row also holds the session id and the account list, encrypted, with a shorter deadline from the callback |
 | PendingPushes | `Id`, unique on the debit | R11a's **push owed** mark: written in the same save as the debit it belongs to when the first send fails, retried every tick for 24 h, then ended `Sent` or `GaveUp` (kept for diagnosis). Holds the reason text frozen at creation (or N and M for a reconnect summary), the attempts and the last outcome name. Never inferred from "bad debit without a NotificationLog row" |
 | PushHealth | `UserId` | One row per user behind the operator mail: failed push attempts in a row, where the incident stands (first/last failure, mail sent, recovery mail owed). Outcome names only — nothing about payees, amounts or tokens |
 
@@ -172,7 +172,7 @@ real multi-user login later needs no re-keying (R22a's single-user scope is a v1
 schema one).
 
 **Delete behavior is asymmetric on purpose, and it's the one thing worth knowing before touching
-any of this:** `UserId → Users` cascades (account deletion, R18, must empty every table). Every
+any of this:** `UserId → Users` cascades (removing a user must empty every table; deleting a bank, R18, is a narrower delete, see "Data lifecycle"). Every
 other cross-table FK — Rule→Payee, Debit→Payee, NotificationLog→Debit — is `NoAction`, refusing a
 lone parent delete instead of silently taking its children along. Two consequences that aren't
 obvious from either table alone: a payee "upsert" written as delete-and-reinsert would silently
@@ -375,14 +375,19 @@ Given the product owner's call that same-day notification is an acceptable user 
   headers and still hit `ASPSP_RATE_LIMIT_EXCEEDED`. Repeating on-demand fetches would silently
   eat the same 4x/day budget as the timer poll — closes the open question below. The app now only
   ever reads whatever the backend already has; it cannot trigger a fresh Enable Banking call.
-- **One narrow, one-time exception: the first sync (R25).** Right after a consent is granted, the
-  **API** triggers the Ingestion Worker's pipeline to run **once, immediately**, synchronously as
-  part of handling the consent callback — the fetch logic itself still lives in exactly one place
-  (the Ingestion Worker), never duplicated into the API. This is deliberately not "the app is open"
-  in general — it fires exactly once per connection, tied to the user's own just-completed consent
-  action, not a repeating background signal — so it's a different case from the disproven exemption
-  above, not a re-opening of it. Without this exception, onboarding's "mark your payees" screen
-  (R26) would have to wait up to 6h after consent for any data to review.
+- **One narrow exception: the first sync (R25).** Right after the account is chosen, the **API** puts one message in
+  the first-sync queue and the Ingestion Worker's pipeline runs **once, immediately** — the fetch logic itself still
+  lives in exactly one place (the Ingestion Worker), never duplicated into the API. This is deliberately not "the app
+  is open" in general — it fires once per connection, tied to the user's own just-completed consent action, not a
+  repeating background signal — so it's a different case from the disproven exemption above, not a re-opening of it.
+  Without this exception, onboarding's "mark your payees" screen (R26) would have to wait up to 6h after consent for
+  any data to review.
+- **The same exception on request (decided 2026-10-21, not built yet).** "Try again" on a bank whose first sync failed
+  (R25, R36) puts the same message in the queue again, through one backend call per bank. It is the only way the user
+  starts a fetch, and it is refused while the bank's daily fetch cap is used up (R29), so the user is told to try
+  tomorrow instead of spending a call that fails. The sync state the app shows (syncing, failed, done) is read from
+  the bank's existing fields (no `AccountSyncStates` row yet, the last attempt and its error); the exact derivation is
+  decided in the story.
 
 **The first sync pulls a fixed window of the last 90 days** (R25, changed 2026-10-09 from 12 months: real N26
 answered 422 `WRONG_TRANSACTIONS_PERIOD` to a 12-month `date_from`): the
@@ -414,9 +419,9 @@ notify.
 
 | Mode | When | What happens to the debits |
 |---|---|---|
-| **First run** | The account has no `AccountSyncStates` row yet, i.e. `FirstSyncCompletedAt` is unset | Full available history, stored as **already seen**, routed to the onboarding classify screen (`01c-classify-payees.html`) — never to the Rule Engine. No notifications (R10b). All debits and the `AccountSyncStates` row are committed in **one** write, so the flag exists only if the whole pull was stored |
+| **First run** | The account has no `AccountSyncStates` row yet, i.e. `FirstSyncCompletedAt` is unset | Full available history, stored as **already seen** — never to the Rule Engine. No notifications (R10b). The onboarding list (`01c-classify-payees.html`, R26) is read from these debits afterwards. All debits and the `AccountSyncStates` row are committed in **one** write, so the flag exists only if the whole pull was stored |
 | **Steady state** | `FirstSyncCompletedAt` is set, and the poll follows the normal cadence | Incremental diff → Rule Engine → one push per bad **booked** debit (R10, R11, R10c) |
-| **Reconnect** | The account's row exists, but the current consent session's hash differs from `LastSessionIdHash` — the user authorized again (expired consent re-authorized, or reconnect after Disconnect). A gap while the *same* session stays valid (e.g. a backend outage) is deliberately not this mode: it is Steady state, one late push per bad debit. Verified 2026-09-29: every authorization returns a new `session_id` (UUID4, Enable Banking docs), and two sandbox re-authorizations of one IBAN gave a new session id **and** a new account `uid`. The hash is updated only after a tick fully completes, so a tick that dies midway is detected as a Reconnect again | Everything from the gap goes through the Rule Engine, but the dispatcher sends **one summary push**: "12 new charges while you were disconnected, 3 bad" (R20), suppressed entirely when the gap has zero bad debits (R20a) |
+| **Reconnect** | The account's row exists, but the current consent session's hash differs from `LastSessionIdHash` — the user authorized again (an expired consent re-authorized, R36 reconnect). A gap while the *same* session stays valid (e.g. a backend outage) is deliberately not this mode: it is Steady state, one late push per bad debit. Verified 2026-09-29: every authorization returns a new `session_id` (UUID4, Enable Banking docs), and two sandbox re-authorizations of one IBAN gave a new session id **and** a new account `uid`. The hash is updated only after a tick fully completes, so a tick that dies midway is detected as a Reconnect again | Everything from the gap goes through the Rule Engine, but the dispatcher sends **one summary push**: "12 new charges while you were disconnected, 3 bad" (R20), suppressed entirely when the gap has zero bad debits (R20a) |
 
 **The Reconnect summary is owned by the Ingestion Worker, not the Rule Engine or the Dispatcher.**
 The Rule Engine stays mode-agnostic — it classifies every debit in the gap exactly as it would in
@@ -591,7 +596,7 @@ chance. **What is built, and what is still only a design:**
    more than 20h old (a one-cycle buffer over the 6h cadence) and email the operator when the reason is not an
    expired or revoked consent. Today a tick that fails silently is found by reading `/status` or the logs — nothing
    alerts on it. Open beads: `gn-7el` (nothing monitors dispatch failure, only ingestion staleness), `gn-r1d` (its
-   staleness query must exclude a user-initiated Disconnect), `gn-emh` (a consent restore that fails every tick is
+   staleness query must exclude a bank the user deleted), `gn-emh` (a consent restore that fails every tick is
    only logged), `gn-a64` (nothing watches the first-sync poison queue). This keeps operator alerts limited to the
    failures that need a human, once built.
 
@@ -650,18 +655,34 @@ security defaults (MFA for people) are on. How it is used is an operating matter
 PSD2 access consents expire periodically (commonly ~90 days) and need re-authorization. This
 needs its own check/notification path, independent of the transaction poller.
 
-**The way back into the app after a consent (decided 2026-10-01).** A consent is finished **in the browser**: the owner
-starts it from a browser (`tools/connect-bank.sh`), approves in the bank's own app, and the `/callback` page only says
-"Connected" (it shows no session id or IBAN); the owner opens Greedy Nose afterwards. There is no deep link back into
-the app — later, if ever. At DKB the approval happened in the DKB app on the phone while the browser on the laptop moved
-on by itself; the same-device path (phone only) is untested. Starting a consent from inside the app is bead `gn-hkx`.
+**Connecting a bank from the app (decided 2026-10-21, not built yet; replaces the browser flow of 2026-10-01).** The
+backend holds the logic, the app asks and shows. Connecting and the first sync are two separate steps (R25):
+
+1. **Search.** The app asks the backend for banks by name (`AspspResolver` reads Enable Banking's list). Each hit has
+   name and country and a flag "already connected"; the backend also refuses a second consent for a bank that has an
+   active one (`gn-4b3`).
+2. **Consent.** The app asks `POST /connect-links` and opens the one-time URL in the system browser; the bank's own app
+   takes over. The callback still arrives at the backend, which trades the code for the session. How the user gets back
+   into the app (deep link or not) is decided by a spike with browser and bank app on the same phone (DKB and ING
+   switch into their own apps; until now only the laptop path was seen, with DKB).
+3. **Account.** With one account the backend saves the bank at once. With several it keeps the session id and the
+   account list **encrypted** (same key as `BankConsents`) on the pending consent, with a short deadline from the
+   callback (set in the story), and the app fetches the list and sends the choice. The list holds a handle, the account
+   name, the product and the last four IBAN digits — never the full IBAN, and none of it is logged. The choice is stored
+   by **IBAN**, not by product text, so a bank renaming a product breaks nothing. Cancelling, or no answer before the
+   deadline, closes the session at Enable Banking and saves nothing.
+4. **First sync.** Saving the bank puts one message in the first-sync queue (see "Ingestion modes"); the app reads the
+   bank's state and shows syncing, failed or done.
+
+The rule-based `AccountSelector` (type `CACC` and product "Girokonto") goes away: the user chooses. The shell tool
+`tools/connect-bank.sh` is no second way any more. The backend stays free of any bank name (R22).
 
 **A dead connection is never silent (R19).** No alerts arriving looks exactly like "nothing bad
 happened" — the one failure mode that breaks R1 while appearing to work perfectly. So expiry
 gets both channels:
 
-- **A persistent in-app banner** over the debit list for as long as the connection is expired or
-  disconnected (`01d-connection-expired.html`). The list stays visible underneath it.
+- **A persistent in-app banner** over the debit list, per bank, for as long as the connection is expired
+  (`01d-connection-expired.html`). The list stays visible underneath it.
 - **One push**, when the consent expires by itself. This is the half that was ruled out here
   until 2026-08-17 (`A2`): the banner only reaches a user who opens the app, and a user who has
   not opened it in a week is exactly the one who needs telling. It is sent once per expiry, not
@@ -717,20 +738,24 @@ writes while a consent is dead.
 R18's table applies unchanged (see `REQUIREMENTS.md`) — the three ways a connection ends are
 **not** the same operation underneath. Consequences for the backend:
 
-- **Expiry and Disconnect differ only in intent**, not in data: both revoke the consent and stop
-  polling, and both leave Payees, Rules and Debits intact. Disconnect additionally means "do not
-  nag me" — no expiry push for a connection the user switched off themselves.
-- **Account deletion is a real delete**, not a soft-delete flag: Users, BankConsents (and their
-  Key Vault-encrypted tokens), Payees, Rules, Debits, NotificationLog and DeviceTokens entries
-  all go. The mock (`06c`) states it is not undoable, so there is no recovery path to design and
-  no orphaned consent to leave behind at Enable Banking — revoke there too, before deleting
-  locally.
-- **Reconnecting after a deletion is deliberately routed to First run, never Reconnect (R20b).**
-  A fresh consent right after deletion finds `FirstSyncCompletedAt` unset (deletion removed the
-  BankConsent row entirely), so it satisfies "Ingestion modes"'s First run condition on its own —
-  identical to a brand-new install, with no gap for a Reconnect summary to diff against. Stated
+- **Expiry keeps everything.** An expired consent stops polling but leaves Payees, Rules and Debits
+  intact; re-authorizing resumes (Reconnect mode). There is no Disconnect any more (R18, 2026-10-19).
+- **Deleting a bank (decided 2026-10-21, not built yet)** is a real delete of **that bank** only, not a soft-delete
+  flag, and it is not undoable (`06c`). One backend call per bank does, in this order: revoke the session at Enable
+  Banking (`DELETE /sessions/{id}`), then delete that bank's `BankConsents` row (and its encrypted tokens), its
+  `AccountSyncStates`, its Debits, its `NotificationLog` rows and its `PendingPushes`. **Payees and Rules stay** (R3a,
+  R18): they belong to the payee, not to a bank. **If the revoke at Enable Banking fails** (no answer, an error from the
+  bank's side) the delete is **refused**: the bank and all its data stay and the user may try again (decided 2026-10-21,
+  `gn-b0h`); a session that is already closed, expired or unknown there counts as done, as in Story 4.3. A tick or push in flight for that bank must not write after
+  the delete (`gn-8j5`). Deleting the last bank leaves the device token and the rules; the app opens on Settings (R36).
+- **Connecting a deleted bank again is deliberately routed to First run, never Reconnect (R20b).**
+  A fresh consent finds `FirstSyncCompletedAt` unset (deletion removed the BankConsent and
+  AccountSyncStates rows), so it satisfies "Ingestion modes"'s First run condition on its own —
+  identical to a brand-new connection, with no gap for a Reconnect summary to diff against. Stated
   here so this reads as the deliberate consequence R20b requires, not an accident of the mode
   table's ordering.
+- **Deleting the user** (`UserId → Users` cascades) is not a feature of the app; it exists so that a later multi-user
+  version can remove an account without orphans.
 
 ## Bank-agnostic design
 
@@ -739,9 +764,9 @@ a dependency** — nothing in the data model, rule logic or copy may assume it. 
 account per bank and several banks at once (R22a, changed 2026-09-29): the consent store holds one
 consent per bank and the Ingestion Worker walks all of them, isolating a failure in one bank from the
 others. Built and live with N26 and DKB (2026-10-13); ING-DiBa was dropped by the owner but nothing
-prevents adding it. With several accounts *within* one bank (DKB returned five), a chosen-by-rule account
-is stored: only an account typed `CACC` with the exact product "Girokonto" is taken, zero or several
-matches choose nothing and close the new session; choosing it in the app is bead `gn-hkx`. **This currently
+prevents adding it. With several accounts *within* one bank (DKB returned five), the user chooses one in the app
+and only that account is stored (see "Consent lifecycle"); until that is built, the account is chosen by rule (type
+`CACC` and the exact product "Girokonto"; zero or several matches choose nothing and close the new session). **This currently
 assumes a eurozone ASPSP** (R15 hard-assumes EUR); a non-EUR bank needs a currency model that
 doesn't exist yet, and is out of scope until one does (see `CLAUDE.md`'s Open/deferred).
 
@@ -752,9 +777,8 @@ What this costs the design, concretely:
 - Neither key can rely on fields only some ASPSPs populate: the creditor account is missing for
   some banks and charge types ("Payee identity"), and `entry_reference` is omitted or duplicated
   by others ("Debit identity"). Both degrade per-bank instead of failing.
-- The consent flow is parameterized by ASPSP from the start. The app needs a bank-selection
-  screen that does not exist in the mocks yet; it is listed as known mock gap 4 in
-  `REQUIREMENTS.md`.
+- The consent flow is parameterized by ASPSP from the start. The bank-selection screen (`01-select-bank`) lists
+  whatever Enable Banking offers, so no bank is named in the app or the backend.
 
 ## Cost
 

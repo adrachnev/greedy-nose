@@ -12,7 +12,7 @@
     <!--
       R36 — the connection did not complete: the login at the bank was cancelled, the session timed out or the bank
       was unavailable. A first connection (this frame) can be tried again or aimed at another bank; Cancel leaves to
-      Settings, so there is always a way out. Nothing of the attempt is kept (R25).
+      Settings, so there is always a way out. No bank is saved by a failed connect (R25).
 
       01e-connect-error.html#reconnect: the same failure while reconnecting an expired bank. The bank is known, so
       "Choose a different bank" is gone; Try again returns to the consent of that bank and the bank stays expired.

@@ -45,7 +45,7 @@
 
   <div class="group">
     <h2>1 · Connecting a bank</h2>
-    <p>Started from Settings (R36), for every bank. Search the bank by name, grant access, pick the account if the bank has several, wait for the silent first sync, then end with one of two choices for the payees that have no rule yet (R26). Nothing is saved before that (R25): going back or closing the app discards the attempt.</p>
+    <p>Started from Settings (R36), for every bank. Search the bank by name, grant access, pick the account if the bank has several, and the bank is saved. The first sync then runs on its own (R25); if the user stays, it ends with one of two choices for the payees that have no rule yet (R26). Leaving earlier changes nothing: the bank stays connected and its payees stay Bad. Only a connect that is cancelled before the account is chosen saves nothing.</p>
   </div>
 
   <div class="frame-label">
@@ -95,7 +95,7 @@
   </div>
 
   <div class="frame-label">
-    <span>1c. Your Payees (onboarding, last step)</span>
+    <span>1c. Your Payees (onboarding, an offer after the sync)</span>
     <iframe src="01c-classify-payees.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
@@ -204,8 +204,13 @@
   </div>
 
   <div class="frame-label">
-    <span>6. Settings (two banks, two states)</span>
+    <span>6. Settings (four banks, four states)</span>
     <iframe src="06-settings.html" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
+  </div>
+
+  <div class="frame-label">
+    <span>6. Settings — first sync failed (state of 6; "Try again" repeats the pull)</span>
+    <iframe src="06-settings.html#sync-failed" width="375" height="812" style="border:0;border-radius:40px;box-shadow:0 20px 40px rgba(0,0,0,0.25);"></iframe>
   </div>
 
   <div class="frame-label">

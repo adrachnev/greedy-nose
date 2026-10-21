@@ -8,10 +8,11 @@
 <body>
   <div class="phone">
     <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
-    <div class="nav-bar"><h1>Your payees</h1><a class="nav-link" href="06-settings.html">Cancel</a></div>
+    <div class="nav-bar"><h1>Your payees</h1><a class="nav-link" href="02-debit-list.html">Skip</a></div>
     <!--
-      R26 — the last step of connecting a bank. Nothing of this connection is saved until one of the two buttons is
-      tapped (R25): Cancel, going back or closing the app discards the bank, its debits and the consent.
+      R26 — an offer after the first sync, shown only while the user is still in the connect flow. The bank is already
+      saved (R25). Skip, going back or closing the app writes no rule and leaves the bank connected — the same as
+      "Keep all Bad and start" (R26a). The offer does not come back; payees are classified on the Rules tab.
 
       The list is read-only on purpose: it is what protects "Mark all Good" (R26) — the user reads the names before
       agreeing. A payee that needs a closer look is classified one at a time on the Rules tab afterwards (R13a).
@@ -20,12 +21,12 @@
 
       Nothing here notifies: everything pulled during the first sync is stored as already-seen (R25).
 
-      01c-classify-payees.html#failed: saving did not work (no network). The user stays here, nothing is half saved.
+      01c-classify-payees.html#failed: saving did not work (no network). The user stays here, no rule is half written.
     -->
     <div class="screen">
       <div class="content">
         <span id="failed"></span>
-        <p class="hint">Example Bank: we found 5 payees without a rule in your last 90 days. Nothing is saved until you choose.</p>
+        <p class="hint">Example Bank: we found 5 payees without a rule in your last 90 days. Until you choose, they stay Bad.</p>
 
         <div class="tx-row">
           <div class="avatar">SP</div>
@@ -66,7 +67,7 @@
         <div class="state-extra">
           <div class="card" style="background:var(--bad-bg);gap:4px;border-left:3px solid var(--bad);">
             <div class="tx-name" style="color:var(--bad);">Couldn't save</div>
-            <p class="hint" style="color:var(--bad);opacity:0.85;">Check your connection and try again. Nothing has been saved.</p>
+            <p class="hint" style="color:var(--bad);opacity:0.85;">Check your connection and try again. No rule was saved.</p>
           </div>
         </div>
 

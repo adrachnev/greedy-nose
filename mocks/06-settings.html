@@ -4,19 +4,24 @@
 <meta charset="UTF-8">
 <title>Settings</title>
 <link rel="stylesheet" href="style.css">
+<style>#sync-failed:target ~ .state-main .bank-other { display: none; }</style>
 </head>
 <body>
   <div class="phone">
     <div class="status-bar"><span>9:41</span><span>••• 5G 🔋</span></div>
     <div class="nav-bar"><h1>Settings</h1><span></span></div>
     <!--
-      R36 — banks are managed here, one card per connected bank, state first. The two cards show two states side by
+      R36 — banks are managed here, one card per connected bank, state first. The four cards show four states side by
       side; a real list has whatever the user connected. Every card has Delete (per bank, R18; there is no
       delete-everything action). The other action depends on the state:
         Active        no action but Delete
+        Syncing       no action but Delete — the first sync runs on its own (R25)
+        Sync failed   Try again (R25): repeats only the pull, no new consent
         Expired       Reconnect (R19)
       Reconnect opens the same consent screen (01b#reconnect): no bank search, no account
       choice, no first sync.
+
+      06-settings.html#sync-failed shows only the card of the bank whose first sync failed, so that state is easy to see.
 
       Settings.html#no-bank is the same screen with no bank connected — where the app opens on first start, and where
       it lands after the last bank is deleted. One sentence says what the app is for; "Connect a bank" is the only way on.
@@ -24,11 +29,12 @@
     <div class="screen">
       <div class="content">
         <span id="no-bank"></span>
+        <span id="sync-failed"></span>
 
         <div class="state-main">
           <div class="section-label">Banks</div>
 
-        <div class="card" style="gap:10px;">
+        <div class="card bank-other" style="gap:10px;">
           <div style="display:flex;align-items:center;gap:10px;">
             <div class="bank-logo" style="background:var(--neutral-bg);color:var(--text-muted);">EB</div>
             <div class="tx-info" style="flex:1;">
@@ -43,7 +49,38 @@
           </div>
         </div>
 
+        <div class="card bank-other" style="gap:10px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div class="bank-logo" style="background:var(--neutral-bg);color:var(--text-muted);">ED</div>
+            <div class="tx-info" style="flex:1;">
+              <div class="tx-name">Example Direct</div>
+              <div class="tx-date">Main account · fetching your debits</div>
+            </div>
+            <span class="pill pill-neutral">Syncing</span>
+          </div>
+          <div class="divider"></div>
+          <div style="display:flex;gap:20px;font-size:14px;">
+            <a class="nav-link" href="06c-delete-confirm.html" style="font-size:14px;color:var(--bad);margin-left:auto;">Delete</a>
+          </div>
+        </div>
+
         <div class="card" style="gap:10px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div class="bank-logo" style="background:var(--neutral-bg);color:var(--text-muted);">EB</div>
+            <div class="tx-info" style="flex:1;">
+              <div class="tx-name">Example Bank Austria</div>
+              <div class="tx-date">Main account · couldn't fetch your debits</div>
+            </div>
+            <span class="pill pill-bad">Sync failed</span>
+          </div>
+          <div class="divider"></div>
+          <div style="display:flex;gap:20px;font-size:14px;">
+            <a class="nav-link" href="01bb-syncing.html" style="font-size:14px;font-weight:600;">Try again</a>
+            <a class="nav-link" href="06c-delete-confirm.html" style="font-size:14px;color:var(--bad);margin-left:auto;">Delete</a>
+          </div>
+        </div>
+
+        <div class="card bank-other" style="gap:10px;">
           <div style="display:flex;align-items:center;gap:10px;">
             <div class="bank-logo" style="background:var(--neutral-bg);color:var(--text-muted);">EB</div>
             <div class="tx-info" style="flex:1;">
