@@ -40,8 +40,10 @@ next run needs a new explicit start. Work that is not named stays in normal mode
    database, no real pushes, no reserved ports, never print secrets.
 5. **Fix round:** send the same coder every MUST FIX and SHOULD FIX, plus every CONSIDER/NIT that
    is cheap (comment- or test-only, or ≤ ~10 lines). Everything else becomes a bead
-   (`-l review-finding`, related to the step's bead) with its reason. (Whether SHOULD FIX may be left
-   out of the loop is still open, decided by the owner later.)
+   (`-l review-finding`, related to the step's bead) with its reason. SHOULD FIX stays in the loop (decided by
+   the owner 2026-10-22): in the run of Stories 5.6 to 5.9 it caught real errors, among them a finished screen left
+   on the navigation stack, a payee snapshot that would have silenced the payees of older banks, and a batch
+   that fails for a blank payee name.)
 6. **Review loop (decided 2026-10-22):** after every fix round, verify (step 3) and start the
    `coder-reviewer` again. Repeat until the reviewer has no finding left or says it is satisfied. The
    safety cap is **3 rounds**: with a finding still open after the third, stop and tell the owner (see below).
@@ -52,13 +54,15 @@ next run needs a new explicit start. Work that is not named stays in normal mode
    is a stop. A "no side effects / zero requests" check needs a **positive control**, and the thing under test
    must be confirmed running first. Deploy and the migration on Neon are **not** done by the run and are no
    stop: they are the owner's step after the run (see "After the run"). The phone, a real bank or consent and
-   a permission dialog are a stop (see below).
+   a permission dialog are a stop (see below), except the phone check when the owner said "phone check at the
+   end".
 8. Docs in the same pass, as after Tracer 3 (`AGENTS.md`, "Work after Tracer 3"): measured results,
    decisions and deferred items go into the **notes of the step's bead** and the commit message, a
    design decision into `ARCHITECTURE.md`, operating knowledge into `AGENTS.md`; `epics.md` stays a plan
    with no "As built" blocks. A step that has to be deployed gets the label `deploy-pending` and its bead
    **stays open** (`bd update <id> --add-label deploy-pending`, the commit hash goes into the notes); a step
-   that needs no deploy is closed with the commit hash. Refresh `.beads/issues.jsonl`. A step of an older
+   whose check needs the phone, when the owner started the run with "phone check at the end" (see stop 2), gets
+   the label `phone-pending` the same way; a step that needs neither is closed with the commit hash. Refresh `.beads/issues.jsonl`. A step of an older
    tracer also updates that tracer document's Progress table. `CLAUDE.md`'s Status is not touched.
 9. **Commit** on `main`, once per step, **right after the review loop ended clean and every check of the
    step passed here** — pre-authorized inside the run. A step that ended in a stop is not committed. Stage files explicitly (never `git add -A`; the tree holds gitignored secrets),
@@ -76,7 +80,13 @@ recommended option and record it and why in the bead's notes. Outside the scope:
    anything a "live" check on the device needs (Story 5.1a showed that green tests and clean reviews do not
    find what the phone finds). The code stays uncommitted; the report says what is ready and what the owner
    has to do. The run does not go on to a later step. (Deploy and the migration on Neon are not part of this:
-   they come after the run.)
+   they come after the run.) **Exception, by the owner's word at the start** ("phone check at the end", used and
+   judged good in the run of Stories 5.6 to 5.9, 2026-10-22): the phone check is then not a stop. The steps are
+   built, reviewed, checked here and committed one after the other, each gets the label `phone-pending` and stays
+   open, and the final report lists what the owner has to look at on the phone. This does not cover a real bank or
+   consent or a permission dialog inside the run itself (those stay stops), and nothing is closed before the owner
+   has checked on the phone. The risk is that a fault in the live path shows only at the end; a story with such a
+   path (5.1a showed one) is better run alone.
 3. **A question of the plan has no answer** inside the step's scope and the documents (the run takes its
    own recommended answer to every other question).
 

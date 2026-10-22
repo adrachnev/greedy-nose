@@ -4,16 +4,19 @@
 
 ## Status
 
-Last cleaned up 2026-10-21. This section stays short on purpose: the state of the work lives in Beads, not here
+Last cleaned up 2026-10-22. This section stays short on purpose: the state of the work lives in Beads, not here
 (see `AGENTS.md`, "Work tracking with Beads"). Do not write session diaries into this file.
 
 - **Where we are:** Tracer 3 (go-live) is closed (2026-10-19). The backend runs in Azure (Functions + Neon), N26 and DKB
   are connected, the release app is on the owner's phone, a real charge gives one push, the week check found no 429.
   ING-DiBa is deliberately not connected.
-- **What is next:** planned 2026-10-21 (`bmad-create-epics-and-stories`): Epic 5 connect a bank from the app (`gn-1u1`,
-  starts with the spike `gn-1u1.1`), then Epic 6 delete a bank (`gn-dib`), then Epic 7 reconnect (`gn-9oc`, before the
-  consents run out on 2027-01-19). Still to plan: the resilience beads (`gn-emh`, `gn-a64`, `gn-ftd`). `bd ready` shows
-  what is unblocked.
+- **What is next:** Epic 5 (connect a bank from the app, `gn-1u1`) is built, deployed and checked on the owner's phone
+  (2026-10-22; N26 and DKB were connected again through it, consents valid until 2027-01-20). Next, in this order: talk
+  through the three owner findings from that test (`gn-os0` the account suggestion, `gn-a1w` opening the bank's app,
+  `gn-2h5` the DKB sign-in page), then the story `gn-yqe` (the backend as the only store of rules and debits, the phone
+  keeps them in memory only; changes R6 and R35), then Epic 6 delete a bank (`gn-dib`, blocked on those four), then
+  Epic 7 reconnect (`gn-9oc`, before the consents run out). Still to plan: the resilience beads (`gn-emh`, `gn-a64`,
+  `gn-ftd`). `bd ready` shows what is unblocked.
 - **Live document:** `TRACER-03-GO-LIVE.md`, read its Progress first. Older history: `git log` and the two earlier
   tracer documents.
 - **Where things are written down:** what the app does `REQUIREMENTS.md`; design `ARCHITECTURE.md`; stories and
@@ -40,7 +43,7 @@ Last cleaned up 2026-10-21. This section stays short on purpose: the state of th
 - App-level lock (Face ID/passcode) before opening the app.
 - Telling the banks apart in the debit list (a per-account filter or a bank label), and several
   accounts *within* one bank. v1 (`R22a`) connects **one account per bank and several banks at once**
-  (the owner's N26 and DKB, merged list). Choosing the account in the app is bead `gn-hkx`.
+  (the owner's N26 and DKB, merged list). Choosing the account in the app is built (Epic 5, Stories 5.4 and 5.7).
 - Offline state handling for the main list (only the initial-connect error state exists).
 - Notification grouping/bundling (a "Group multiple alerts" toggle exists in the Settings mock
   but defaults Off — one notification per charge is the current decision).
