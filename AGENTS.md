@@ -150,6 +150,9 @@ Names, settings and findings: `TRACER-03-GO-LIVE.md`, "Azure deployment". Only t
 - Deploy: migrations on Neon first (`DB=neon bash tools/ef-container.sh database update`), then
   `bash tools/azure-deploy.sh`; afterwards `bash tools/status.sh https://func-greedy-nose-611f0.azurewebsites.net`.
   Code that is already running does not need a redeploy for a migration that only drops a dead column.
+- Deploy is always the owner's step. After an automated run (`AUTOMATED-RUN.md`) the committed stories wait with the
+  label `deploy-pending` (`bd list --label deploy-pending`); one migration on Neon and one deploy serve all of them, and
+  the beads are closed only after the owner has deployed and checked.
 - The permission classifier blocks a production deploy, a migration on Neon and the creation of credentials when
   Claude runs them. Do not work around it: prepare everything, then ask the owner to run the command themselves
   in the session with `! <command>`, and verify the result afterwards.
