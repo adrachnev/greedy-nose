@@ -14,6 +14,7 @@ import {
   getPayees,
   getState,
   refresh,
+  refreshFresh,
   subscribe,
 } from '../backendFeed';
 
@@ -154,6 +155,60 @@ describe('refresh', () => {
  * and cheap to close now: the backend's fallback id restarts its ordinal per
  * page, so the collision arrives with pagination rather than as a freak event.
  */
+describe('refreshFresh', () => {
+  const answer = (body: unknown, ok = true) => ({
+    ok,
+    status: ok ? 200 : 500,
+    statusText: ok ? 'OK' : 'Internal Server Error',
+    json: async () => body,
+  });
+
+  it('starts one load when none is running', async () => {
+    respondWith({ payees: [PAYEE], debits: [DEBIT] });
+    await refreshFresh();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(getState().status).toBe('ready');
+  });
+
+  it('waits for a running load, then runs exactly one more', async () => {
+    let release!: (value: unknown) => void;
+    fetchMock.mockReturnValueOnce(new Promise(resolve => (release = resolve)));
+    respondWith({ payees: [PAYEE], debits: [DEBIT] });
+    const running = refresh();
+    let done = false;
+    const fresh = refreshFresh().then(() => {
+      done = true;
+    });
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(done).toBe(false);
+    release(answer({ payees: [], debits: [] }));
+    await running;
+    await fresh;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(getDebits()).toHaveLength(1);
+  });
+
+  it('returns after a failed load without looping, and the state says error', async () => {
+    respondWith({}, false, 500);
+    await refreshFresh();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(getState().status).toBe('error');
+  });
+
+  it('does not start a load beyond the fresh one when the running load fails', async () => {
+    let release!: (value: unknown) => void;
+    fetchMock.mockReturnValueOnce(new Promise(resolve => (release = resolve)));
+    respondWith({}, false, 500);
+    const running = refresh();
+    const fresh = refreshFresh();
+    release(answer({}, false));
+    await running;
+    await fresh;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('duplicate debit ids', () => {
   it('keeps both charges by renaming the second, rather than losing one to a key clash', async () => {
     respondWith({ payees: [PAYEE], debits: [DEBIT, { ...DEBIT, amountEUR: 31 }] });

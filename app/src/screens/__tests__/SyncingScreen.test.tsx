@@ -8,6 +8,7 @@ import React from 'react';
 import { ActivityIndicator, Text } from 'react-native';
 import ReactTestRenderer, { act } from 'react-test-renderer';
 import { __resetMyBanksStoreForTests, SYNC_POLL_MS } from '../../data/myBanksStore';
+import { __resetOnboardingOfferForTests, getOffer, rememberPayeesBeforeAttempt } from '../../data/onboardingOffer';
 import SyncingScreen, { SYNC_WATCH_MS } from '../SyncingScreen';
 
 jest.mock('react-native-safe-area-context', () => ({
@@ -23,9 +24,16 @@ jest.mock('../../data/backendAuth', () => ({
   backendHeaders: (extra: Record<string, string> = {}) => ({ Authorization: 'Bearer test', ...extra }),
 }));
 const mockRefreshFeed = jest.fn();
+let mockFeedState = { status: 'ready', dropped: 0, skipped: 0 };
+let mockPayees: unknown[] = [];
+let mockDebits: unknown[] = [];
 jest.mock('../../data/backendFeed', () => ({
   ...jest.requireActual('../../data/backendFeed'),
   refresh: () => mockRefreshFeed(),
+  refreshFresh: () => mockRefreshFeed(),
+  getState: () => mockFeedState,
+  getPayees: () => mockPayees,
+  getDebits: () => mockDebits,
 }));
 
 const BASE = 'http://backend.test';
@@ -81,6 +89,10 @@ beforeEach(() => {
   resetStack.mockReset();
   tabNavigate.mockReset();
   mockRefreshFeed.mockReset();
+  mockPayees = [];
+  mockDebits = [];
+  mockFeedState = { status: 'ready', dropped: 0, skipped: 0 };
+  __resetOnboardingOfferForTests();
   (globalThis as unknown as { fetch: unknown }).fetch = fetchMock;
   jest.spyOn(console, 'warn').mockImplementation(() => {});
 });
@@ -186,6 +198,89 @@ describe('done', () => {
     expect(resetStack).toHaveBeenCalledWith({ index: 0, routes: [{ name: 'SettingsHome' }] });
     await tick(SYNC_POLL_MS * 3);
     expect(tabNavigate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('done with payees to review (Story 5.9)', () => {
+  const found = (id: string) => ({ id, name: `Shop ${id}`, initials: 'SH', iban: '' });
+  const charge = (payeeId: string) => ({
+    id: `d-${payeeId}`,
+    payeeId,
+    amountEUR: 5,
+    timestamp: '2026-10-01T00:00:00Z',
+    hasTime: false,
+    paymentType: 'Card payment',
+    reference: '',
+  });
+
+  it('shows the offer, after the feed has loaded, instead of the debit list; payees from before are not in it', async () => {
+    mockPayees = [found('new'), found('old')];
+    mockDebits = [charge('new'), charge('old')];
+    rememberPayeesBeforeAttempt(['old']);
+    backend([row('connected')]);
+    await render();
+    expect(mockRefreshFeed).toHaveBeenCalledTimes(1);
+    expect(resetStack).toHaveBeenCalledWith({
+      index: 1,
+      routes: [{ name: 'SettingsHome' }, { name: 'ClassifyPayees', params: { bank: 'Example Bank' } }],
+    });
+    expect(tabNavigate).not.toHaveBeenCalled();
+    expect(getOffer().map(r => r.payee.id)).toEqual(['new']);
+  });
+
+  it('goes straight to the debit list when every payee is known or the sync found no debits', async () => {
+    mockPayees = [found('old')];
+    mockDebits = [charge('old')];
+    rememberPayeesBeforeAttempt(['old']);
+    backend([row('connected')]);
+    await render();
+    expect(resetStack).toHaveBeenCalledWith({ index: 0, routes: [{ name: 'SettingsHome' }] });
+    expect(tabNavigate).toHaveBeenCalledWith('Debits');
+    expect(getOffer()).toEqual([]);
+  });
+
+  it('offers nothing when the app was restarted since the attempt began (no snapshot)', async () => {
+    mockPayees = [found('new')];
+    mockDebits = [charge('new')];
+    backend([row('connected')]);
+    await render();
+    expect(tabNavigate).toHaveBeenCalledWith('Debits');
+  });
+
+  it('offers nothing when the load after the sync failed (the feed may be older than the sync)', async () => {
+    mockPayees = [found('new')];
+    mockDebits = [charge('new')];
+    rememberPayeesBeforeAttempt([]);
+    mockRefreshFeed.mockImplementation(() => {
+      mockFeedState = { status: 'error', dropped: 0, skipped: 0 };
+    });
+    backend([row('connected')]);
+    await render();
+    expect(tabNavigate).toHaveBeenCalledWith('Debits');
+    expect(resetStack).toHaveBeenCalledWith({ index: 0, routes: [{ name: 'SettingsHome' }] });
+    expect(getOffer()).toEqual([]);
+  });
+
+  it('does nothing when the screen is left while the feed is loading', async () => {
+    mockPayees = [found('new')];
+    mockDebits = [charge('new')];
+    rememberPayeesBeforeAttempt([]);
+    let loaded!: () => void;
+    mockRefreshFeed.mockImplementation(
+      () =>
+        new Promise<void>(resolve => {
+          loaded = resolve;
+        }),
+    );
+    backend([row('connected')]);
+    await render();
+    act(() => mounted?.unmount());
+    mounted = undefined;
+    await act(async () => {
+      loaded();
+    });
+    expect(resetStack).not.toHaveBeenCalled();
+    expect(tabNavigate).not.toHaveBeenCalled();
   });
 });
 

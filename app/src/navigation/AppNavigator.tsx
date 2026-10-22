@@ -12,6 +12,7 @@ import RulesListScreen from '../screens/RulesListScreen';
 import ConnectAttemptScreen from '../screens/ConnectAttemptScreen';
 import SelectBankScreen from '../screens/SelectBankScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import ClassifyPayeesScreen from '../screens/ClassifyPayeesScreen';
 import SyncingScreen from '../screens/SyncingScreen';
 import StubScreen from '../screens/StubScreen';
 import { dark, light } from '../theme/colors';
@@ -98,7 +99,7 @@ function RulesNavigator() {
   );
 }
 
-/** Settings tab: the bank cards, the bank search, the attempt to connect one, the first sync of the new bank, so the tab bar stays visible. */
+/** Settings tab: the bank cards, the bank search, the attempt to connect one, the first sync of the new bank, the one-time payee offer, so the tab bar stays visible. */
 function SettingsNavigator() {
   return (
     <SettingsStack.Navigator screenOptions={{ headerShown: false }}>
@@ -106,6 +107,7 @@ function SettingsNavigator() {
       <SettingsStack.Screen name="SelectBank" component={SelectBankScreen} />
       <SettingsStack.Screen name="ConnectAttempt" component={ConnectAttemptScreen} />
       <SettingsStack.Screen name="Syncing" component={SyncingScreen} />
+      <SettingsStack.Screen name="ClassifyPayees" component={ClassifyPayeesScreen} />
     </SettingsStack.Navigator>
   );
 }

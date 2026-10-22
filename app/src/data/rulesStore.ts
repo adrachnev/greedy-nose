@@ -17,9 +17,10 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Payee, Rule, RuleDraft } from '../domain/model';
-import { createPayeeLookup } from '../domain/payees';
+import { createPayeeLookup, toInitials, UNKNOWN_PAYEE_NAME } from '../domain/payees';
 import { FIXTURE_SEED_RULES } from '../mocks/data';
 import { backendHeaders, hasApiKey } from './backendAuth';
+import { backendCall } from './backendCall';
 import { getPayees, getState as getFeedState, subscribe as subscribeToFeed } from './backendFeed';
 import { BACKEND_BASE_URL, BACKEND_TIMEOUT_MS, USE_BACKEND } from './config';
 
@@ -243,6 +244,82 @@ export function saveRule(payee: Payee, draft: RuleDraft): void {
   // Not awaited: sync reports through console.warn, same posture as
   // deviceStore.ts's postToken() — see syncRuleToBackend's own comment.
   syncRuleToBackend(payee, next);
+}
+
+// --- A set of rules at once (Story 5.9) ------------------------------------------
+
+/** A payee and the rule to give it; the payee carries what the backend's `Payees` row needs. */
+export type RuleEntry = { payee: Payee; draft: RuleDraft };
+
+/** What `POST /rules/batch` takes at most (RulesValidation.MaxBatchItems); more would be refused whole. */
+export const MAX_BATCH_RULES = 2000;
+
+/**
+ * Writes every entry locally with ONE reassignment, ONE notification and ONE
+ * persist, and sends nothing: the caller decides how the set reaches the backend
+ * (saveRulesBatch). An entry for a payee that already has a rule replaces it.
+ */
+export function saveRules(entries: RuleEntry[]): void {
+  if (entries.length === 0) {
+    return;
+  }
+  const incoming = new Map<string, Rule>();
+  for (const { payee, draft } of entries) {
+    const rule: Rule = { payeeId: payee.id, classification: draft.classification };
+    if (draft.amountEUR != null) {
+      rule.amountEUR = draft.amountEUR;
+    }
+    incoming.set(payee.id, rule);
+  }
+  const kept = rules.filter(r => !incoming.has(r.payeeId));
+  const nextRules = [...kept, ...incoming.values()];
+  setRules(nextRules);
+  persist(nextRules);
+}
+
+/**
+ * Saves a set of rules all or nothing: the backend takes them in ONE request
+ * (`POST /rules/batch`, 204, or 400 with nothing written), and only on its
+ * answer are they written locally. Any failure (refused, no network, timeout, no
+ * key) leaves the store untouched and resolves `false`, so the caller can show
+ * "Couldn't save" and nothing is half written. Fixture mode has no backend: the
+ * local write alone. A lost answer can leave the backend holding the rules while the
+ * app does not; the retry is safe, because the backend upserts. Never rejects. The start-up resync stays as it is.
+ */
+export async function saveRulesBatch(entries: RuleEntry[]): Promise<boolean> {
+  if (entries.length === 0) {
+    return true;
+  }
+  if (USE_BACKEND) {
+    if (entries.length > MAX_BATCH_RULES) {
+      return false; // the backend would refuse the whole set; nothing is sent
+    }
+    const reply = await backendCall('rulesStore', '/rules/batch', '/rules/batch', {
+      method: 'POST',
+      body: { rules: entries.map(toBatchItem) },
+    });
+    if (!reply.ok) {
+      return false;
+    }
+  }
+  saveRules(entries);
+  return true;
+}
+
+/** The single-rule body of syncRuleToBackend, per item. */
+function toBatchItem({ payee, draft }: RuleEntry): Record<string, unknown> {
+  const item: Record<string, unknown> = { payeeId: payee.id, classification: draft.classification };
+  if (draft.amountEUR != null) {
+    item.amountEUR = draft.amountEUR;
+  }
+  // The backend refuses a blank name or initials, and one such item would fail the whole set.
+  const name = payee.name.trim() || UNKNOWN_PAYEE_NAME;
+  item.name = name;
+  item.initials = payee.initials.trim() || toInitials(name);
+  if (payee.iban) {
+    item.iban = payee.iban;
+  }
+  return item;
 }
 
 /**

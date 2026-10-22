@@ -763,7 +763,13 @@ screen (the stack is reset to `SettingsHome` + `Syncing`), which reads the bank'
 name and country) until one read has succeeded since it opened, shows the state and stops waiting after 2 minutes (the
 backend sync runs on). `Try again` (screen and Settings card) posts `/my-banks/first-sync` and flips the row to syncing
 at once; it is not offered for the daily limit or an expired bank. When the sync is done the stack is reset and the debit
-list opens; the offer of Story 5.9 goes between those two steps.
+list opens. *Onboarding offer (Story 5.9):* between those two steps the app offers the payees that have debits, no rule
+and were not in the feed when the attempt started (the id snapshot is taken at start and only when the feed was ready;
+otherwise there is no offer, which is the same as keeping them Bad, R26a). "Mark all Good" is one awaited
+`POST /rules/batch` (all or nothing in one transaction; each item validated like `POST /rules`, at most 2000, a
+duplicate id or an invalid item refuses the whole set with 400) and only after its 204 the rules are written locally in
+one write; any failure writes nothing and the list stays. Skip, back, a tab switch or closing the app write nothing, and
+the offer exists only in memory, so it cannot come back. The start-up resync still resends rules one by one.
 
 **A dead connection is never silent (R19).** No alerts arriving looks exactly like "nothing bad
 happened" — the one failure mode that breaks R1 while appearing to work perfectly. So expiry

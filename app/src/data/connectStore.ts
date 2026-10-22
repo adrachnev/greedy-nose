@@ -13,7 +13,9 @@
 // or storage.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getPayees, getState as getFeedState } from './backendFeed';
 import { backendCall } from './backendCall';
+import { rememberPayeesBeforeAttempt } from './onboardingOffer';
 import { dismissConnectLink, openConnectLink } from './openConnectLink';
 
 const TAG = 'connectStore';
@@ -238,6 +240,9 @@ export async function startConnect(bankName: string, country: string): Promise<v
     return;
   }
   const run = ++startSeq;
+  // The payees known now are not new when the first sync is done (Story 5.9, onboardingOffer.ts).
+  // A feed that is not loaded cannot say what was known: then nothing is offered for this attempt.
+  rememberPayeesBeforeAttempt(getFeedState().status === 'ready' ? getPayees().map(payee => payee.id) : null);
   const target: Target = { bank, country };
   lastCheckEndedAt = 0;
   failedReads = 0;

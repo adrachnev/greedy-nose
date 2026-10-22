@@ -5,7 +5,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Button from '../components/Button';
 import { useDataSource, useFirstSyncRetry, useMyBanks, useMyBanksPolling } from '../data/hooks';
 import { canRetryFirstSync, findMyBank, MyBank, refreshMyBanks, SYNC_POLL_MS } from '../data/myBanksStore';
-import { openDebitList } from '../navigation/openDebitList';
+import { prepareOffer } from '../data/onboardingOffer';
+import { leaveSettingsForDebitList } from '../navigation/openDebitList';
 import { SettingsStackParamList } from '../navigation/types';
 import { dark, light, Theme } from '../theme/colors';
 
@@ -56,7 +57,7 @@ export default function SyncingScreen({ navigation, route }: Props) {
   const rowView = fresh ? viewOf(bank) : 'syncing';
   const view: Phase = rowView === 'syncing' && timedOut ? 'timeout' : rowView;
   const { retry, couldNot } = useFirstSyncRetry();
-  const { refresh } = useDataSource();
+  const { refreshFresh } = useDataSource();
 
   // Reads every few seconds while the row says syncing, or while no row has arrived yet; none after the stop.
   useMyBanksPolling({ enabled: view !== 'timeout', watch: fresh && rowView === 'syncing' });
@@ -98,19 +99,38 @@ export default function SyncingScreen({ navigation, route }: Props) {
     return () => clearTimeout(timer);
   }, [rowView]);
 
-  // Done: the debits the sync stored are fetched once, then the debit list opens. This screen is dropped from the
-  // Settings stack at the same time: it has nothing left to show, and coming back to the tab must not find it.
-  // TRACER-BULLET: Story 5.9 inserts "payees without a rule -> ClassifyPayees" here, before the debit list; the
-  // stack reset below stays part of whichever way this screen is left for good.
+  // Done: the debits the sync stored are fetched once. With payees that have no rule (Story 5.9) the stack becomes
+  // [SettingsHome, ClassifyPayees] and the offer is shown; otherwise the debit list opens. Either way this screen is
+  // dropped from the Settings stack: it has nothing left to show, and coming back to the tab must not find it.
+  // A user who left while the feed was loading chose nothing: no offer, no navigation (= Keep all Bad).
   const left = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   useEffect(() => {
     if (view === 'done' && !left.current) {
       left.current = true;
-      refresh();
-      navigation.reset({ index: 0, routes: [{ name: 'SettingsHome' }] });
-      openDebitList(navigation);
+      // A load already running may have begun before the sync finished; refreshFresh waits for it and loads again.
+      // If that load fails the feed may be older than the sync: no offer, the debit list opens.
+      refreshFresh().then(loaded => {
+        if (!mounted.current) {
+          return;
+        }
+        if (prepareOffer(loaded).length > 0) {
+          navigation.reset({
+            index: 1,
+            routes: [{ name: 'SettingsHome' }, { name: 'ClassifyPayees', params: { bank: bank?.name ?? bankName } }],
+          });
+        } else {
+          leaveSettingsForDebitList(navigation);
+        }
+      });
     }
-  }, [view, refresh, navigation]);
+  }, [view, refreshFresh, navigation, bank, bankName]);
 
   // Settings home is always under this screen (the hand-over resets the stack); a restart may have lost it.
   const toSettings = () => {

@@ -20,12 +20,22 @@ import {
   returnToApp,
   startConnect,
 } from '../connectStore';
+import { __resetOnboardingOfferForTests, prepareOffer } from '../onboardingOffer';
 import { dismissConnectLink, openConnectLink } from '../openConnectLink';
 
 jest.mock('../config', () => ({
   USE_BACKEND: true,
   BACKEND_BASE_URL: 'http://backend.test',
   BACKEND_TIMEOUT_MS: 1000,
+}));
+let mockFeedPayees: unknown[] = [];
+let mockFeedDebits: unknown[] = [];
+let mockFeedStatus = 'ready';
+jest.mock('../backendFeed', () => ({
+  ...jest.requireActual('../backendFeed'),
+  getPayees: () => mockFeedPayees,
+  getDebits: () => mockFeedDebits,
+  getState: () => ({ status: mockFeedStatus, dropped: 0, skipped: 0 }),
 }));
 jest.mock('../openConnectLink', () => ({
   openConnectLink: jest.fn(),
@@ -116,6 +126,10 @@ beforeEach(async () => {
   );
   await AsyncStorage.clear();
   __resetConnectStoreForTests();
+  __resetOnboardingOfferForTests();
+  mockFeedPayees = [];
+  mockFeedDebits = [];
+  mockFeedStatus = 'ready';
 });
 
 afterEach(() => {
@@ -175,6 +189,40 @@ describe('starting', () => {
     expect(openMock).toHaveBeenCalledWith(SECRET_LINK);
     expect(getConnectFlow()).toEqual({ step: 'waiting', noAnswer: false, bank: 'Example Bank', country: 'DE' });
   });
+
+  it('remembers the payees known at the start, so only later ones are offered (Story 5.9)', async () => {
+    const payee = (id: string) => ({ id, name: id, initials: 'XX', iban: '' });
+    const charge = (payeeId: string) => ({
+      id: payeeId,
+      payeeId,
+      amountEUR: 5,
+      timestamp: '2026-10-01T00:00:00Z',
+      hasTime: false,
+      paymentType: 'Card payment',
+      reference: '',
+    });
+    mockFeedPayees = [payee('before')];
+    await startWaiting();
+    mockFeedPayees = [payee('before'), payee('after')];
+    mockFeedDebits = [charge('before'), charge('after')];
+    expect(prepareOffer().map(r => r.payee.id)).toEqual(['after']);
+    // The snapshot is spent: the same sync cannot offer twice.
+    expect(prepareOffer()).toEqual([]);
+  });
+
+  it.each(['idle', 'loading', 'error'])(
+    'offers nothing for an attempt that began while the feed was %s (what was known is unknown)',
+    async status => {
+      mockFeedStatus = status;
+      await startWaiting();
+      mockFeedStatus = 'ready';
+      mockFeedPayees = [{ id: 'x', name: 'x', initials: 'XX', iban: '' }];
+      mockFeedDebits = [
+        { id: 'x', payeeId: 'x', amountEUR: 5, timestamp: '2026-10-01T00:00:00Z', hasTime: false, paymentType: 'Card payment', reference: '' },
+      ];
+      expect(prepareOffer()).toEqual([]);
+    },
+  );
 
   it('shows "opening" while the link is asked for', async () => {
     let release!: (value: unknown) => void;

@@ -27,4 +27,6 @@ export type SettingsStackParamList = {
   SelectBank: undefined;
   ConnectAttempt: undefined;
   Syncing: { bank: string; country: string };
+  /** Story 5.9: the one-time offer after the first sync; `bank` is the name to show, as data. */
+  ClassifyPayees: { bank: string };
 };

@@ -142,6 +142,18 @@ export function refresh(): Promise<void> {
   return inFlight;
 }
 
+/**
+ * A load that started AFTER the call: waits for any load already running (it may have begun
+ * before the data it should show was stored) and then runs one more. Resolves when that
+ * one has finished; read getState() for whether it worked.
+ */
+export async function refreshFresh(): Promise<void> {
+  while (state.status === 'loading' && inFlight) {
+    await inFlight;
+  }
+  await refresh();
+}
+
 async function load(): Promise<void> {
   if (!hasApiKey() || BACKEND_BASE_URL === '') {
     // Loud, not an empty list (UX-DR2): no request is sent, and the badge shows this.

@@ -27,6 +27,7 @@ import {
   getPayees,
   getState,
   refresh,
+  refreshFresh,
   subscribe as subscribeToFeed,
 } from './backendFeed';
 import { USE_BACKEND } from './config';
@@ -64,7 +65,14 @@ import {
   startDeviceRegistration,
   subscribeToRegistration,
 } from './deviceStore';
-import { getRules, saveRule, startRulesResync, subscribe as subscribeToRules } from './rulesStore';
+import {
+  getRules,
+  RuleEntry,
+  saveRule,
+  saveRulesBatch,
+  startRulesResync,
+  subscribe as subscribeToRules,
+} from './rulesStore';
 
 // Every collection is read through useSyncExternalStore, so screens re-render
 // when one changes elsewhere — e.g. navigating back to the debit list after
@@ -131,6 +139,15 @@ export function useSavePayeeRule(): (payee: Payee, draft: RuleDraft) => void {
   }, []);
 }
 
+/**
+ * Saves a set of rules all or nothing (Story 5.9): resolves `true` when the backend
+ * has them and they are written locally, `false` when nothing was written anywhere.
+ * See saveRulesBatch in src/data/rulesStore.ts.
+ */
+export function useSaveRulesBatch(): (entries: RuleEntry[]) => Promise<boolean> {
+  return saveRulesBatch;
+}
+
 // --- Where the data came from -----------------------------------------------
 
 export type DataSource = {
@@ -138,20 +155,31 @@ export type DataSource = {
   live: boolean;
   /** Meaningful only while `live`; the fixture source never loads or fails. */
   feed: FeedState;
-  /** Re-reads the feed. A no-op against fixtures, so callers need no branch. */
-  refresh: () => void;
+  /** Re-reads the feed; resolves when the data has landed. A no-op against fixtures, so callers need no branch. */
+  refresh: () => Promise<void>;
+  /**
+   * Waits for a load already running, then loads once more; `true` when that last load worked.
+   * For a caller that must not act on data older than its call (Story 5.9).
+   */
+  refreshFresh: () => Promise<boolean>;
 };
 
 // Nothing loads, nothing fails and nothing is refused on the way in, so both
 // counters are 0 by construction rather than by luck.
 const FIXTURE_FEED: FeedState = { status: 'ready', dropped: 0, skipped: 0 };
-const noopRefresh = () => {};
-// Not awaited: refresh() reports failure through the feed's own state, which is
-// what `feed` above carries to the badge.
+const noopRefresh = () => Promise.resolve();
+const noopRefreshFresh = () => Promise.resolve(true);
+// Most callers do not await: refresh() reports failure through the feed's own
+// state, which is what `feed` above carries to the badge.
+const feedRefreshFresh = async () => {
+  retryRegistration();
+  await refreshFresh();
+  return getState().status === 'ready';
+};
 const feedRefresh = () => {
   // A refresh is also the retry for a device token the backend never confirmed.
   retryRegistration();
-  refresh();
+  return refresh();
 };
 
 /**
@@ -169,6 +197,7 @@ export function useDataSource(): DataSource {
     live: USE_BACKEND,
     feed,
     refresh: USE_BACKEND ? feedRefresh : noopRefresh,
+    refreshFresh: USE_BACKEND ? feedRefreshFresh : noopRefreshFresh,
   };
 }
 
