@@ -81,4 +81,64 @@ public static class RulesValidation
         problems = errors;
         return true;
     }
+
+    /// <summary>The most rules one <c>POST /rules/batch</c> takes (bead gn-5g6); far above what the app holds.</summary>
+    public const int MaxBatchItems = 2000;
+
+    /// <summary>
+    /// A <c>POST /rules/batch</c> body: 1 to <see cref="MaxBatchItems"/> items, each valid by
+    /// <see cref="TryValidate"/>, no payee id twice. Problems are keyed by item (<c>rules[3].classification</c>),
+    /// and any one makes the whole batch invalid — nothing is applied.
+    /// </summary>
+    public static bool TryValidateBatch(
+        RulesBatchRequest? request,
+        [NotNullWhen(true)] out IReadOnlyList<ValidatedRule>? validated,
+        out IDictionary<string, string[]> problems)
+    {
+        var errors = new Dictionary<string, string[]>();
+        var items = request?.Rules;
+
+        if (items is null || items.Count == 0)
+        {
+            errors["rules"] = ["At least one rule is required."];
+        }
+        else if (items.Count > MaxBatchItems)
+        {
+            errors["rules"] = [$"At most {MaxBatchItems} rules per request."];
+        }
+        else
+        {
+            var result = new List<ValidatedRule>(items.Count);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            for (var i = 0; i < items.Count; i++)
+            {
+                if (!TryValidate(items[i], out var rule, out var itemProblems))
+                {
+                    foreach (var (field, messages) in itemProblems)
+                    {
+                        errors[$"rules[{i}].{field}"] = messages;
+                    }
+                }
+                else if (!seen.Add(rule.PayeeId))
+                {
+                    errors[$"rules[{i}].payeeId"] = ["The same payee id appears twice in one batch."];
+                }
+                else
+                {
+                    result.Add(rule);
+                }
+            }
+
+            if (errors.Count == 0)
+            {
+                validated = result;
+                problems = errors;
+                return true;
+            }
+        }
+
+        validated = null;
+        problems = errors;
+        return false;
+    }
 }

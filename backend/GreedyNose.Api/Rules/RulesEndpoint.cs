@@ -78,87 +78,11 @@ public static class RulesEndpoint
         var now = clock.GetUtcNow();
         var userId = user.UserId; // read once: the retry closure below must see one value
 
-        // Same normalization TransactionMapper.ResolvePayeeKey itself uses — R3a's normalized-name
-        // tier. Not validated.Name directly: this endpoint has no raw creditor name to offer the
-        // way IngestionRunner now does (PayeeDto.CreditorName) — validated.Name is whatever the app
-        // already had, which may itself be TransactionMapper.BuildPayee's own display fallback (the
-        // raw IBAN, or "Unknown payee") echoed straight back from a prior /debits response. Skipped
-        // rather than normalized when it looks like exactly that — see IsFallbackDisplayName's own
-        // doc comment (2026-09-28 review, Finding 1). This endpoint also has no creditor agent to
-        // offer (the app never sends one), so RecordSeen's third argument is always null below.
-        var isFallbackName = TransactionMapper.IsFallbackDisplayName(validated.Name, validated.Iban);
-        var normalizedName = isFallbackName
-            ? ""
-            : TransactionMapper.NormalizeName(validated.Name);
-
         // Local, not inline: a concurrent-update conflict on Payee (see the DbUpdateConcurrencyException
-        // catch below) re-reads and reapplies both writes from scratch. The Rule side has nothing to
-        // race on — Payee is the only entity here with a concurrency token — but its values come
-        // straight from the request, not from a stale read, so reapplying it on retry is trivially
-        // safe and keeps both writes in the one SaveChangesAsync call the ordering comment below
-        // still relies on.
-        async Task ApplyAsync()
-        {
-            var payee = await db.Payees.SingleOrDefaultAsync(
-                p => p.UserId == userId && p.Id == validated.PayeeId, ct);
+        // catch below) re-reads and reapplies both writes from scratch, through the same shared ApplyAsync.
+        Task Apply() => ApplyAsync(db, userId, now, validated, ct);
 
-            if (payee is null)
-            {
-                payee = new Payee
-                {
-                    UserId = userId,
-                    Id = validated.PayeeId,
-                    Name = validated.Name,
-                    Initials = validated.Initials,
-                    Iban = validated.Iban,
-                    FirstSeenAt = now,
-                };
-                payee.RecordSeen(validated.Iban, normalizedName, creditorAgent: null);
-                db.Payees.Add(payee);
-            }
-            else
-            {
-                // FirstSeenAt is never touched here — see the class summary. Name/Initials are refreshed
-                // only when the app sent a real name: a start-up resync of a rule whose payee the app
-                // no longer knows can only offer the placeholder (or the raw IBAN), and that must not
-                // replace a name we already hold. Likewise a blank IBAN never wipes a known one.
-                if (!isFallbackName)
-                {
-                    payee.Name = validated.Name;
-                    payee.Initials = validated.Initials;
-                }
-
-                if (!string.IsNullOrWhiteSpace(validated.Iban))
-                {
-                    payee.Iban = validated.Iban;
-                }
-
-                payee.RecordSeen(validated.Iban, normalizedName, creditorAgent: null);
-            }
-
-            var rule = await db.Rules.SingleOrDefaultAsync(
-                r => r.UserId == userId && r.PayeeId == validated.PayeeId, ct);
-
-            if (rule is null)
-            {
-                db.Rules.Add(new Rule
-                {
-                    UserId = userId,
-                    PayeeId = validated.PayeeId,
-                    Classification = validated.Classification,
-                    AmountEUR = validated.AmountEUR,
-                    UpdatedAt = now,
-                });
-            }
-            else
-            {
-                rule.Classification = validated.Classification;
-                rule.AmountEUR = validated.AmountEUR;
-                rule.UpdatedAt = now;
-            }
-        }
-
-        await ApplyAsync();
+        await Apply();
 
         try
         {
@@ -183,7 +107,7 @@ public static class RulesEndpoint
                 "Payee {PayeeId} changed underneath this request (concurrent ingestion tick); re-reading and retrying once.",
                 PayeeIdPreview(validated.PayeeId));
             db.ChangeTracker.Clear();
-            await ApplyAsync();
+            await Apply();
             await db.SaveChangesAsync(ct);
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException
@@ -218,11 +142,140 @@ public static class RulesEndpoint
     }
 
     /// <summary>
+    /// Stages one validated rule on <paramref name="db"/> — the payee upsert and the rule — without saving.
+    /// The one place the upsert rules live: <c>POST /rules</c> calls it once, <c>POST /rules/batch</c> once
+    /// per item, and each then saves once. It re-reads the rows, so a caller that clears the change tracker
+    /// and calls it again (the concurrent-update retry) works from current state.
+    ///
+    /// The Rule side has nothing to race on — Payee is the only entity here with a concurrency token — but
+    /// its values come straight from the request, not from a stale read, so reapplying it on retry is
+    /// trivially safe and keeps both writes in one SaveChangesAsync call (see the ordering comment in
+    /// <see cref="HandleAsync"/>).
+    /// </summary>
+    internal static async Task ApplyAsync(
+        GreedyNoseDbContext db, Guid userId, DateTimeOffset now, ValidatedRule validated, CancellationToken ct,
+        PrefetchedRows? prefetched = null)
+    {
+        // Same normalization TransactionMapper.ResolvePayeeKey itself uses — R3a's normalized-name
+        // tier. Not validated.Name directly: this endpoint has no raw creditor name to offer the
+        // way IngestionRunner now does (PayeeDto.CreditorName) — validated.Name is whatever the app
+        // already had, which may itself be TransactionMapper.BuildPayee's own display fallback (the
+        // raw IBAN, or "Unknown payee") echoed straight back from a prior /debits response. Skipped
+        // rather than normalized when it looks like exactly that — see IsFallbackDisplayName's own
+        // doc comment (2026-09-28 review, Finding 1). This endpoint also has no creditor agent to
+        // offer (the app never sends one), so RecordSeen's third argument is always null below.
+        var isFallbackName = TransactionMapper.IsFallbackDisplayName(validated.Name, validated.Iban);
+        var normalizedName = isFallbackName
+            ? ""
+            : TransactionMapper.NormalizeName(validated.Name);
+
+        var payee = prefetched is not null
+            ? prefetched.FindPayee(validated.PayeeId)
+            : await db.Payees.SingleOrDefaultAsync(
+                p => p.UserId == userId && p.Id == validated.PayeeId, ct);
+
+        if (payee is null)
+        {
+            payee = new Payee
+            {
+                UserId = userId,
+                Id = validated.PayeeId,
+                Name = validated.Name,
+                Initials = validated.Initials,
+                Iban = validated.Iban,
+                FirstSeenAt = now,
+            };
+            payee.RecordSeen(validated.Iban, normalizedName, creditorAgent: null);
+            db.Payees.Add(payee);
+        }
+        else
+        {
+            // FirstSeenAt is never touched here — see the class summary. Name/Initials are refreshed
+            // only when the app sent a real name: a start-up resync of a rule whose payee the app
+            // no longer knows can only offer the placeholder (or the raw IBAN), and that must not
+            // replace a name we already hold. Likewise a blank IBAN never wipes a known one.
+            if (!isFallbackName)
+            {
+                payee.Name = validated.Name;
+                payee.Initials = validated.Initials;
+            }
+
+            if (!string.IsNullOrWhiteSpace(validated.Iban))
+            {
+                payee.Iban = validated.Iban;
+            }
+
+            payee.RecordSeen(validated.Iban, normalizedName, creditorAgent: null);
+        }
+
+        var rule = prefetched is not null
+            ? prefetched.FindRule(validated.PayeeId)
+            : await db.Rules.SingleOrDefaultAsync(
+                r => r.UserId == userId && r.PayeeId == validated.PayeeId, ct);
+
+        if (rule is null)
+        {
+            db.Rules.Add(new Rule
+            {
+                UserId = userId,
+                PayeeId = validated.PayeeId,
+                Classification = validated.Classification,
+                AmountEUR = validated.AmountEUR,
+                UpdatedAt = now,
+            });
+        }
+        else
+        {
+            rule.Classification = validated.Classification;
+            rule.AmountEUR = validated.AmountEUR;
+            rule.UpdatedAt = now;
+        }
+    }
+
+    /// <summary>
     /// Never the whole payee id in a log line: <c>TransactionMapper</c>'s key format can be
     /// <c>iban:&lt;IBAN&gt;</c>, a real account number, not just an opaque identifier. Not a new
     /// exposure — the app already stores and shows it — but kept out of the server log anyway, for
     /// the same reason <c>TokenPreview</c> exists next to it: enough to correlate log lines, not the
     /// whole value.
     /// </summary>
-    private static string PayeeIdPreview(string payeeId) => payeeId.Length > 10 ? $"{payeeId[..10]}…" : payeeId;
+    internal static string PayeeIdPreview(string payeeId) => payeeId.Length > 10 ? $"{payeeId[..10]}…" : payeeId;
+}
+
+/// <summary>
+/// The existing Payee and Rule rows of one batch, read in a few queries instead of two per item
+/// (<see cref="RulesBatchEndpoint"/>). Tracked entities, so <see cref="RulesEndpoint.ApplyAsync"/> updates them
+/// in place; an id missing here means "no row yet". Built again after every <c>ChangeTracker.Clear()</c>.
+/// </summary>
+internal sealed class PrefetchedRows
+{
+    // Well below the parameter limits of Postgres and the query-size limits of EF.
+    private const int ChunkSize = 500;
+
+    private readonly Dictionary<string, Payee> _payees = [];
+    private readonly Dictionary<string, Rule> _rules = [];
+
+    public Payee? FindPayee(string payeeId) => _payees.GetValueOrDefault(payeeId);
+
+    public Rule? FindRule(string payeeId) => _rules.GetValueOrDefault(payeeId);
+
+    public static async Task<PrefetchedRows> LoadAsync(
+        GreedyNoseDbContext db, Guid userId, IReadOnlyList<string> payeeIds, CancellationToken ct)
+    {
+        var rows = new PrefetchedRows();
+        foreach (var chunk in payeeIds.Chunk(ChunkSize))
+        {
+            foreach (var payee in await db.Payees.Where(p => p.UserId == userId && chunk.Contains(p.Id)).ToListAsync(ct))
+            {
+                rows._payees[payee.Id] = payee;
+            }
+
+            foreach (var rule in await db.Rules.Where(r => r.UserId == userId && chunk.Contains(r.PayeeId)).ToListAsync(ct))
+            {
+                rows._rules[rule.PayeeId] = rule;
+            }
+        }
+
+        return rows;
+    }
 }
