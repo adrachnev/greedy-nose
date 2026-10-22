@@ -7,8 +7,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GreedyNose.Api.Consent;
 
-/// <summary>What waits encrypted on an attempt while the owner chooses an account (Story 5.3; read in Story 5.4).</summary>
-public sealed record WaitingChoice(string SessionId, IReadOnlyList<ConnectedAccount> Accounts);
+/// <summary>
+/// What waits encrypted on an attempt while the owner chooses an account (Story 5.3; read in Story 5.4).
+/// <paramref name="ValidUntil"/> is the end of the consent as the bank granted it. It is trailing and optional: a payload
+/// written before Story 5.4 has none and reads as null.
+/// </summary>
+public sealed record WaitingChoice(string SessionId, IReadOnlyList<ConnectedAccount> Accounts, DateTimeOffset? ValidUntil = null);
 
 /// <summary>
 /// Seals the session id and the euro accounts into <see cref="PendingConsent.WaitingPayload"/>. Same cipher as the

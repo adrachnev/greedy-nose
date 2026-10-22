@@ -385,7 +385,7 @@ public static class ConsentEndpoints
             // encrypted on the attempt until the deadline.
             try
             {
-                record.WaitingPayload = WaitingPayload.Seal(cipher, record.Id, new WaitingChoice(sessionId, euro));
+                record.WaitingPayload = WaitingPayload.Seal(cipher, record.Id, new WaitingChoice(sessionId, euro, ReadValidUntil(root)));
                 record.ChoiceDeadline = now + ConnectAttempts.ChoiceLifetime;
                 record.Outcome = ConnectOutcome.ChooseAccount;
                 record.Version = unchecked(record.Version + 1);
@@ -404,31 +404,59 @@ public static class ConsentEndpoints
             return CallbackPage(StatusCodes.Status200OK);
         }
 
-        List<ConnectedAccount> accounts = [euro[0]];
-
-        // Story 4.3: the session this bank had before (same user, same bank only), read from the database before it is replaced.
-        var oldSessionId = await consent.GetStoredSessionIdAsync(record.UserId, record.AspspName, ct);
-        try
+        var stored = await StoreConsentAsync(
+            record.UserId, record.AspspName, sessionId, euro[0], ReadValidUntil(root), now, consent, eb, logger);
+        if (!stored.Stored)
         {
-            // Persisted with CancellationToken.None: the code is already traded, so a dropped browser connection must not lose the consent.
-            await consent.CompleteAsync(record.UserId, sessionId, record.AspspName, accounts, now, ReadValidUntil(root), CancellationToken.None);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            // E.g. the database or the encryption fails. The code is already traded and the state spent,
-            // so the owner just requests a new link. Type only: a message can carry connection details.
-            logger.LogError("Could not store the consent: {ExceptionType}.", ex.GetType().Name);
-            // The code is traded, so the new session is open and nothing will ever use it: close it, best effort.
-            await ConnectAttempts.CloseSessionAsync(eb, sessionId, record.AspspName, logger, "The new session");
             await MarkAsync(db, record, ConnectOutcome.Failed, ConnectFailure.StoreFailed, logger);
             return CallbackPage(StatusCodes.Status502BadGateway);
         }
 
-        logger.LogInformation("Consent completed for {Aspsp}, {AccountCount} account(s).", record.AspspName, accounts.Count);
         await MarkAsync(db, record, ConnectOutcome.Saved, null, logger);
+        await AfterStoredAsync(stored.OldSessionId, sessionId, record.AspspName, eb, firstSync, logger);
 
-        // Only after the consent is stored, never on a failure above. Best effort: if the request fails
-        // the owner still has a working consent, and the next scheduled tick runs the same first sync.
+        return CallbackPage(StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// The one place a consent with its single chosen account is saved (the callback's one-account path and the owner's
+    /// choice in Story 5.4 both come here). Reads the bank's previous session from the database first (Story 4.3), then
+    /// stores. Never throws: on ANY failure (also a command timeout that surfaces as a cancellation, there is no request
+    /// token here) the new session is closed once, best effort (nothing will ever use it), and the result says not stored.
+    /// Everything runs with CancellationToken.None: the code is already traded, so a dropped client must not lose it.
+    /// </summary>
+    internal static async Task<StoreResult> StoreConsentAsync(
+        Guid userId, string aspspName, string sessionId, ConnectedAccount account, DateTimeOffset? validUntil, DateTimeOffset now,
+        ConsentStore consent, EnableBankingClient eb, ILogger logger)
+    {
+        string? oldSessionId;
+        try
+        {
+            oldSessionId = await consent.GetStoredSessionIdAsync(userId, aspspName, CancellationToken.None);
+            await consent.CompleteAsync(userId, sessionId, aspspName, [account], now, validUntil, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // E.g. the database or the encryption fails. Type only: a message can carry connection details.
+            logger.LogError("Could not store the consent: {ExceptionType}.", ex.GetType().Name);
+            await ConnectAttempts.CloseSessionAsync(eb, sessionId, aspspName, logger, "The new session");
+            return new StoreResult(false, null);
+        }
+
+        logger.LogInformation("Consent completed for {Aspsp}, 1 account(s).", aspspName);
+        return new StoreResult(true, oldSessionId);
+    }
+
+    internal readonly record struct StoreResult(bool Stored, string? OldSessionId);
+
+    /// <summary>
+    /// After the consent is stored, never on a failure: the first sync is requested (best effort: if the request fails
+    /// the owner still has a working consent, and the next scheduled tick runs the same first sync), then the bank's
+    /// previous session is closed.
+    /// </summary>
+    internal static async Task AfterStoredAsync(
+        string? oldSessionId, string newSessionId, string aspspName, EnableBankingClient eb, IFirstSyncTrigger firstSync, ILogger logger)
+    {
         try
         {
             using var enqueueTimeout = new CancellationTokenSource(FirstSyncRequestTimeout);
@@ -441,12 +469,10 @@ public static class ConsentEndpoints
                 "The first sync could not be requested ({ExceptionType}); the next scheduled tick will run it.", ex.GetType().Name);
         }
 
-        if (oldSessionId is not null && oldSessionId != sessionId)
+        if (oldSessionId is not null && oldSessionId != newSessionId)
         {
-            await CloseOldSessionAsync(eb, oldSessionId, record.AspspName, logger);
+            await CloseOldSessionAsync(eb, oldSessionId, aspspName, logger);
         }
-
-        return CallbackPage(StatusCodes.Status200OK);
     }
 
     /// <summary>
@@ -454,7 +480,7 @@ public static class ConsentEndpoints
     /// outcome of a failed write is that the app keeps reading "waiting" until the attempt expires. Only short codes
     /// are written; the exception type is the only thing logged.
     /// </summary>
-    private static async Task MarkAsync(
+    internal static async Task MarkAsync(
         GreedyNoseDbContext db, PendingConsent record, string outcome, string? reason, ILogger logger, DateTimeOffset? spentAt = null)
     {
         // The whole mutation, so the second try applies all of it again to a freshly read row: the spent state
@@ -551,7 +577,7 @@ public static class ConsentEndpoints
     /// can fail the reconnect. A tick holding a pre-reconnect snapshot may see CLOSED_SESSION: IngestionRunner
     /// re-reads the stored session before it pushes, so that race does not alert.
     /// </summary>
-    private static Task CloseOldSessionAsync(EnableBankingClient eb, string oldSessionId, string aspspName, ILogger logger) =>
+    internal static Task CloseOldSessionAsync(EnableBankingClient eb, string oldSessionId, string aspspName, ILogger logger) =>
         ConnectAttempts.CloseSessionAsync(eb, oldSessionId, aspspName, logger, "The old session");
 
     private static IResult Rejected(string title, string message, int status = StatusCodes.Status400BadRequest) =>

@@ -731,7 +731,13 @@ missing currency does not count) closes the session and fails with `no-supported
 failed trade fails with a code and never shows or logs the bank's text. A session that waits for a choice is closed at
 Enable Banking before its payload is deleted: on a state read, on a new link and on each ingestion tick; a failed close
 is retried (at most every 5 minutes per instance) until one day after the deadline. Known limit: the bank is compared
-by name only (`gn-gbv`).
+by name only (`gn-gbv`). *The choice* (Story 5.4): `GET /connect-attempts/{id}/accounts` lists the waiting accounts as
+rows (a position as id, name, kind, the last four IBAN digits, and a "suggested" hint on the first current account);
+`POST .../choice` saves the chosen account through the same code as the callback's one-account path; `POST .../cancel`
+closes the waiting session. A choice first claims the attempt (Outcome saved, payload deleted, one writer wins by the
+row's version) and only then stores the consent; if the store fails the new session is closed and the attempt reads
+`failed`. Known residual: a process that dies between the claim and the store leaves a "saved" attempt without a
+consent and an open session until the bank's own validity ends.
 
 **A dead connection is never silent (R19).** No alerts arriving looks exactly like "nothing bad
 happened" — the one failure mode that breaks R1 while appearing to work perfectly. So expiry

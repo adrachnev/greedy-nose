@@ -115,8 +115,9 @@ the single source of truth for product behavior; where anything else disagrees, 
   ambiguous bank is refused with a clear message and nothing is created) and `valid_until` follows the bank's
   own maximum. Since Story 5.3 the rule-based account choice is gone: a bank with **several euro accounts** (DKB
   offers five) ends the callback in the state "choose account" and nothing is saved, so `tools/connect-bank.sh`
-  **cannot finish a reconnect of such a bank** until the choice exists in the app (Story 5.4 backend, Story 5.7
-  app); a bank with one euro account (N26) works as before. Since Story 5.2 a link for a bank whose consent is
+  **cannot finish a reconnect of such a bank**: the choice is `GET /connect-attempts/{id}/accounts` and `POST
+  .../choice {"accountId":"<row id>"}` (Story 5.4, API key; the attempt id comes from `POST /connect-links`), and the
+  app screen follows in Story 5.7; a bank with one euro account (N26) works as before. Since Story 5.2 a link for a bank whose consent is
   not expired is refused with 409.
 - Connection status (Story 4.2): `bash tools/status.sh [base-url]` prints `GET /status` (API key, read with
   `curl`): per bank the state (connected, expired, dead, first sync pending), valid-until, last success, last
