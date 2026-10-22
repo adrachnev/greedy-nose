@@ -45,6 +45,7 @@ public static class ConsentEndpoints
         ConnectLinkRequest? request,
         GreedyNoseDbContext db,
         AspspResolver resolver,
+        ConsentStore consent,
         EnableBankingOptions options,
         PendingConsentOptions pending,
         TimeProvider clock,
@@ -105,6 +106,30 @@ public static class ConsentEndpoints
         }
 
         var now = clock.GetUtcNow();
+
+        // gn-4b3: a bank that is connected (or still has a live consent) is not started a second time. An expired
+        // or dead consent reads Expired here, and that is the reconnect. Read from the database first: another
+        // instance may have stored the consent.
+        try
+        {
+            await consent.RestoreAsync(now, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            loggers.CreateLogger(Category).LogError("Could not read the connections ({ExceptionType}).", ex.GetType().Name);
+            return Results.Problem(title: "The connections are unavailable.", statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
+        // LIMIT: compared by name only. BankConsent stores no country, so one name in several countries counts
+        // as the same bank until the country is stored.
+        if (consent.GetStates(now).Any(s => s.UserId == SeedData.UserId && s.Status != ConsentStatus.Expired
+            && string.Equals(s.AspspName, found.Name, StringComparison.OrdinalIgnoreCase)))
+        {
+            loggers.CreateLogger(Category).LogInformation("No consent link created for {Aspsp}: already connected.", found.Name);
+            return Results.Problem(
+                $"\"{found.Name}\" is already connected; nothing was started.",
+                statusCode: StatusCodes.Status409Conflict, title: "Bank already connected");
+        }
 
         // Expired rows are dead weight (nothing can use them); clearing them here keeps the table
         // small without a background job. Small table, so load-and-remove rather than a bulk delete.

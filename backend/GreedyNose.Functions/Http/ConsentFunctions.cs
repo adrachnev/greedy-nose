@@ -35,7 +35,7 @@ public sealed class ConsentFunctions(
             return body.Error.ToActionResult();
         }
 
-        return (await ConsentEndpoints.CreateLinkAsync(body.Value, db, resolver, options, pending, clock, loggers, ct)).ToActionResult();
+        return (await ConsentEndpoints.CreateLinkAsync(body.Value, db, resolver, consent, options, pending, clock, loggers, ct)).ToActionResult();
     }
 
     [Function("Connect")]

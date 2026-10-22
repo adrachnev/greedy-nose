@@ -232,6 +232,17 @@ public sealed class ConsentStore(IConsentPersistence persistence, TimeSpan conse
         }
     }
 
+    // Set once a restore from the database has succeeded on this instance.
+    private volatile bool _restored;
+
+    /// <summary>
+    /// Restores from the database only if this instance never did (a cold host). For frequent readers such as
+    /// the bank search, where a mark that is a little stale is harmless; the status page and the tick still call
+    /// <see cref="RestoreAsync"/> every time.
+    /// </summary>
+    public Task EnsureRestoredAsync(DateTimeOffset now, CancellationToken ct = default) =>
+        _restored ? Task.CompletedTask : RestoreAsync(now, ct);
+
     /// <summary>
     /// Replaces the in-memory set with every consent left by earlier runs. Call at startup and before
     /// each tick (the database is the truth).
@@ -262,6 +273,8 @@ public sealed class ConsentStore(IConsentPersistence persistence, TimeSpan conse
             {
                 _consents = restored;
             }
+
+            _restored = true;
         }
         finally
         {

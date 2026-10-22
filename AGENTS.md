@@ -95,6 +95,13 @@ the single source of truth for product behavior; where anything else disagrees, 
   `Ingestion__AllowShortInterval=true`; for local tests pass
   `-e "IngestionSchedule=*/30 * * * * *" -e Ingestion__AllowShortInterval=true` (Sandbox only — N26
   allows ~4 fetches a day). Verified live 2026-10-07.
+- Local check of a backend step (automated run, since 2026-10-22), without touching the dev data or Enable Banking:
+  a throwaway database `gn_scratch` in the dev Postgres (`docker exec greedy-nose-postgres psql -U greedynose -d
+  greedynose -c "CREATE DATABASE gn_scratch"`; migrate it with `DB=scratch bash tools/ef-container.sh database
+  update`), a stub for Enable Banking on the compose network (an `nginx:alpine` container `gn-eb-stub`, a static
+  `aspsps.json` with invented banks; POST endpoints need a small script stub), and the host started with
+  `bash tools/run-functions-container.sh gn-func -e "ConnectionStrings__Postgres=Host=greedy-nose-postgres;Port=5432;Database=gn_scratch;Username=greedynose;Password=greedynose-dev" -e "EnableBanking__BaseUrl=http://gn-eb-stub"`.
+  Then `curl` with the API key read from the user secrets (never printed). Verified 2026-10-22 (Story 5.2).
 - Backend API key (Story 1.3): the backend refuses to start without `Api:Key` (at least 32
   characters, no leading/trailing whitespace) — `dotnet user-secrets set "Api:Key" "<random>"`.
   Put the same value into `app/src/data/apiKey.local.ts`. Every endpoint except `/connect` and

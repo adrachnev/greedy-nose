@@ -811,6 +811,8 @@ and only that account is stored (see "Consent lifecycle"); until that is built, 
 `CACC` and the exact product "Girokonto"; zero or several matches choose nothing and close the new session). **This currently
 assumes a eurozone ASPSP** (R15 hard-assumes EUR); a non-EUR bank needs a currency model that
 doesn't exist yet, and is out of scope until one does (see `CLAUDE.md`'s Open/deferred).
+Known limit: a consent is stored under the bank's name only, not its country, so the "connected" mark of the bank
+search and the refusal of a second consent treat one name in several countries as the same bank until the country is stored.
 
 What this costs the design, concretely:
 

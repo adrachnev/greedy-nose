@@ -213,7 +213,7 @@ public sealed class ConsentEndpointsTests : IDisposable
     {
         await using var db = NewDb();
         return await ConsentEndpoints.CreateLinkAsync(
-            request, db, new AspspResolver(NewClient()), _options, _pending, _clock, _logs, CancellationToken.None);
+            request, db, new AspspResolver(NewClient()), _consent, _options, _pending, _clock, _logs, CancellationToken.None);
     }
 
     private async Task<string> CreateToken(ConnectLinkRequest? request = null)
@@ -241,9 +241,23 @@ public sealed class ConsentEndpointsTests : IDisposable
     /// <summary>Link created and used; returns the state the bank was given.</summary>
     private async Task<string> StartedState(ConnectLinkRequest? request = null)
     {
+        await ExpireStoredConsentsAsync();
         var token = await CreateToken(request);
         Assert.IsType<RedirectHttpResult>(Unwrap(await Connect(token)));
         return ReadState(_calls.Last(c => c.Path == "/auth").Body);
+    }
+
+    /// <summary>
+    /// gn-4b3: a bank with a live consent cannot be started again, so every test that reconnects first lets the
+    /// stored consent run out (same session, same account, only the end date moves into the past).
+    /// </summary>
+    private async Task ExpireStoredConsentsAsync()
+    {
+        foreach (var state in _consent.GetStates(T0).Where(s => s.Status == ConsentStatus.Active))
+        {
+            await _consent.CompleteAsync(state.UserId, state.SessionId!, state.AspspName!, [state.Account!],
+                state.ConnectedAt ?? T0.AddDays(-10), T0.AddDays(-1));
+        }
     }
 
     private static string ReadState(string authBody) =>
@@ -1066,10 +1080,55 @@ public sealed class ConsentEndpointsTests : IDisposable
         await using var db = NewDb(lostRace: true);
         var ex = await Record.ExceptionAsync(() =>
             ConsentEndpoints.CreateLinkAsync(
-                null, db, new AspspResolver(NewClient()), _options, _pending, _clock, _logs, CancellationToken.None));
+                null, db, new AspspResolver(NewClient()), _consent, _options, _pending, _clock, _logs, CancellationToken.None));
 
         Assert.IsType<DbUpdateConcurrencyException>(ex);
         Assert.Equal(1, db.ChangeTracker.Entries<PendingConsent>().Count(e => e.State == EntityState.Added));
+    }
+
+    private Task StoreConsentAsync(string aspsp, DateTimeOffset expiresAt) =>
+        _consent.CompleteAsync(SeedData.UserId, "stored-session", aspsp,
+            [new ConnectedAccount("uid", BankIban, "Main", "EUR", null)], T0.AddDays(-10), expiresAt);
+
+    [Theory]
+    [InlineData("N26")]
+    [InlineData("n26")]
+    public async Task A_connected_bank_gets_409_and_no_link_is_stored(string requested)
+    {
+        await StoreConsentAsync("N26", T0.AddDays(40));
+
+        var result = await CreateLink(new ConnectLinkRequest(requested, "DE", null));
+
+        var problem = Assert.IsType<ProblemHttpResult>(result);
+        Assert.Equal(409, problem.StatusCode);
+        await using var db = NewDb();
+        Assert.Empty(db.PendingConsents);
+        Assert.DoesNotContain(_logs.Lines, l => l.Contains(BankIban));
+    }
+
+    [Fact]
+    public async Task An_expired_bank_may_be_reconnected()
+    {
+        await StoreConsentAsync("N26", T0.AddDays(-1));
+
+        Assert.IsType<Ok<ConnectLinkResponse>>(await CreateLink(new ConnectLinkRequest("N26", "DE", null)));
+    }
+
+    [Fact]
+    public async Task Another_bank_may_be_started_while_one_is_connected()
+    {
+        await StoreConsentAsync("N26", T0.AddDays(40));
+
+        Assert.IsType<Ok<ConnectLinkResponse>>(await CreateLink(new ConnectLinkRequest("DKB", "DE", null)));
+    }
+
+    [Fact]
+    public async Task A_bank_that_is_not_in_the_list_is_refused_before_the_connected_check()
+    {
+        await StoreConsentAsync("Unlisted", T0.AddDays(40));
+
+        var problem = Assert.IsType<ProblemHttpResult>(await CreateLink(new ConnectLinkRequest("Unlisted", "DE", null)));
+        Assert.Equal(400, problem.StatusCode);
     }
 
     [Fact]

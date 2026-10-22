@@ -98,6 +98,7 @@ public class ApiKeyMiddlewareTests
     [InlineData("/status")]
     [InlineData("/raw")]
     [InlineData("/aspsps")]
+    [InlineData("/banks")]
     [InlineData("/does-not-exist")]
     public async Task Other_paths_without_key_get_401(string path)
     {

@@ -13,6 +13,8 @@ internal sealed class FakeConsentPersistence : IConsentPersistence
 
     public int SaveCalls { get; private set; }
 
+    public int LoadCalls { get; private set; }
+
     public Task SaveAsync(ConsentSnapshot snapshot, CancellationToken ct = default)
     {
         SaveCalls++;
@@ -30,6 +32,7 @@ internal sealed class FakeConsentPersistence : IConsentPersistence
 
     public Task<IReadOnlyList<ConsentSnapshot>> LoadAsync(CancellationToken ct = default)
     {
+        LoadCalls++;
         if (LoadFails is not null)
         {
             throw LoadFails;

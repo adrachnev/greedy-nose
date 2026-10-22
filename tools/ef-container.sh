@@ -33,7 +33,10 @@ if [ "${DB:-}" = "neon" ]; then
   fi
   NET=()
 else
-  CONN="Host=greedy-nose-postgres;Port=5432;Database=greedynose;Username=greedynose;Password=greedynose-dev"
+  # DB=scratch: a throwaway database (gn_scratch) in the dev Postgres, for the checks of an automated run;
+  # create it with `docker exec greedy-nose-postgres psql -U greedynose -d greedynose -c "CREATE DATABASE gn_scratch"`.
+  DBNAME=greedynose; [ "${DB:-}" = "scratch" ] && DBNAME=gn_scratch
+  CONN="Host=greedy-nose-postgres;Port=5432;Database=$DBNAME;Username=greedynose;Password=greedynose-dev"
   NET=(--network backend_default)
 fi
 docker run --rm "${NET[@]}" \
