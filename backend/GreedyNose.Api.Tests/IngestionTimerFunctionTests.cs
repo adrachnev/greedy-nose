@@ -1,6 +1,8 @@
+using GreedyNose.Api.Consent;
 using GreedyNose.Api.Ingestion;
 using GreedyNose.Functions;
 using GreedyNose.Api.EnableBanking;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -163,12 +165,26 @@ public class ConsentRestoringTickTests
         public Task RunOnceAsync(CancellationToken ct) { order.Add("tick"); return Task.CompletedTask; }
     }
 
-    private static ConsentRestoringTick Make(OrderPersistence p, List<string> order, out ListLogger log)
+    private static ConsentRestoringTick Make(
+        OrderPersistence p, List<string> order, out ListLogger log, IIngestionTick? inner = null,
+        Microsoft.EntityFrameworkCore.IDbContextFactory<GreedyNose.Api.Data.GreedyNoseDbContext>? dbFactory = null)
     {
         log = new ListLogger();
         return new ConsentRestoringTick(
             new ConsentStore(p, TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance),
-            new RecordingTick(order), TimeProvider.System, log);
+            inner ?? new RecordingTick(order), TimeProvider.System, log,
+            new ConnectAttemptCleanup(
+                dbFactory ?? new EmptyDbFactory(), () => throw new InvalidOperationException("no bank call expected"),
+                new ConsentCipher(new byte[32]), TimeProvider.System, NullLogger<ConnectAttemptCleanup>.Instance));
+    }
+
+    private sealed class EmptyDbFactory : Microsoft.EntityFrameworkCore.IDbContextFactory<GreedyNose.Api.Data.GreedyNoseDbContext>
+    {
+        private readonly string _name = Guid.NewGuid().ToString();
+
+        public GreedyNose.Api.Data.GreedyNoseDbContext CreateDbContext() =>
+            new(new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<GreedyNose.Api.Data.GreedyNoseDbContext>()
+                .UseInMemoryDatabase(_name).Options);
     }
 
     private sealed class ListLogger : ILogger<ConsentRestoringTick>
@@ -190,6 +206,57 @@ public class ConsentRestoringTickTests
         await tick.RunOnceAsync(CancellationToken.None);
 
         Assert.Equal(["restore", "tick", "restore", "tick"], order);
+    }
+
+    private sealed class ThrowingDbFactory(Exception fault) : Microsoft.EntityFrameworkCore.IDbContextFactory<GreedyNose.Api.Data.GreedyNoseDbContext>
+    {
+        public GreedyNose.Api.Data.GreedyNoseDbContext CreateDbContext() => throw fault;
+    }
+
+    private sealed class ThrowingTick(Exception fault) : IIngestionTick
+    {
+        public Task RunOnceAsync(CancellationToken ct) => Task.FromException(fault);
+    }
+
+    [Fact]
+    public async Task A_failing_cleanup_does_not_change_the_result_of_a_good_tick()
+    {
+        var order = new List<string>();
+        var tick = Make(new OrderPersistence(order), order, out _,
+            dbFactory: new ThrowingDbFactory(new InvalidOperationException("Host=secret-db;Password=hunter2")));
+
+        await tick.RunOnceAsync(CancellationToken.None); // no exception
+
+        Assert.Equal(["restore", "tick"], order);
+    }
+
+    [Fact]
+    public async Task A_cleanup_that_runs_out_of_time_does_not_change_the_result_of_a_good_tick_and_is_logged()
+    {
+        var order = new List<string>();
+        var tick = Make(new OrderPersistence(order), order, out var log,
+            dbFactory: new ThrowingDbFactory(new OperationCanceledException()));
+
+        await tick.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(["restore", "tick"], order);
+        Assert.Contains(log.Entries, e => e.Level == LogLevel.Warning && e.Message.Contains("ran out of time"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task The_exception_of_the_tick_itself_reaches_the_caller_whatever_the_cleanup_does(bool cleanupTimesOut)
+    {
+        var order = new List<string>();
+        var own = new InvalidOperationException("the tick's own failure");
+        Exception cleanupFault = cleanupTimesOut ? new OperationCanceledException() : new InvalidOperationException("cleanup");
+        var tick = Make(new OrderPersistence(order), order, out _,
+            inner: new ThrowingTick(own), dbFactory: new ThrowingDbFactory(cleanupFault));
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => tick.RunOnceAsync(CancellationToken.None));
+
+        Assert.Same(own, thrown);
     }
 
     [Fact]

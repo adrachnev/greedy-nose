@@ -113,7 +113,11 @@ the single source of truth for product behavior; where anything else disagrees, 
   a failed or interrupted attempt needs a new link. The callback page shows no session id or IBAN.
   Since Story 3.3 the bank name and country are checked against Enable Banking's own list (an unknown or
   ambiguous bank is refused with a clear message and nothing is created) and `valid_until` follows the bank's
-  own maximum.
+  own maximum. Since Story 5.3 the rule-based account choice is gone: a bank with **several euro accounts** (DKB
+  offers five) ends the callback in the state "choose account" and nothing is saved, so `tools/connect-bank.sh`
+  **cannot finish a reconnect of such a bank** until the choice exists in the app (Story 5.4 backend, Story 5.7
+  app); a bank with one euro account (N26) works as before. Since Story 5.2 a link for a bank whose consent is
+  not expired is refused with 409.
 - Connection status (Story 4.2): `bash tools/status.sh [base-url]` prints `GET /status` (API key, read with
   `curl`): per bank the state (connected, expired, dead, first sync pending), valid-until, last success, last
   attempt, a short last error, and the number of debits waiting for a push — no session id, IBAN or amount.

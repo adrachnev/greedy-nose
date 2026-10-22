@@ -89,6 +89,7 @@ public class ApiKeyMiddlewareTests
 
     [Theory]
     [InlineData("/connect-links")]
+    [InlineData("/connect-attempts/0b6a1d2e-5c3f-4a8b-9e7d-1f2a3b4c5d6e")]
     [InlineData("/connectx")]
     [InlineData("/callbackx")]
     [InlineData("/connect/../health")]

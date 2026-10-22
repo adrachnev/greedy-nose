@@ -55,7 +55,8 @@ builder.Services.AddSingleton<IIngestionTick>(sp => new SerializedTick(new Conse
     sp.GetRequiredService<ConsentStore>(),
     sp.GetRequiredService<IngestionRunner>(),
     sp.GetRequiredService<TimeProvider>(),
-    sp.GetRequiredService<ILogger<ConsentRestoringTick>>())));
+    sp.GetRequiredService<ILogger<ConsentRestoringTick>>(),
+    sp.GetRequiredService<ConnectAttemptCleanup>())));
 
 // The 6 h floor: refuse to start on a schedule that would burn the bank's fetch quota. It judges the
 // value the HOST fires from — the environment variable (local.settings.json and Azure app settings

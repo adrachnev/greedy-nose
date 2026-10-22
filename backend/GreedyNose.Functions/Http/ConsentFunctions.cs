@@ -19,6 +19,7 @@ public sealed class ConsentFunctions(
     AspspResolver resolver,
     EnableBankingOptions options,
     PendingConsentOptions pending,
+    ConsentCipher cipher,
     ConsentStore consent,
     IFirstSyncTrigger firstSync,
     TimeProvider clock,
@@ -35,7 +36,7 @@ public sealed class ConsentFunctions(
             return body.Error.ToActionResult();
         }
 
-        return (await ConsentEndpoints.CreateLinkAsync(body.Value, db, resolver, consent, options, pending, clock, loggers, ct)).ToActionResult();
+        return (await ConsentEndpoints.CreateLinkAsync(body.Value, db, resolver, eb, cipher, consent, options, pending, clock, loggers, ct)).ToActionResult();
     }
 
     [Function("Connect")]
@@ -50,7 +51,7 @@ public sealed class ConsentFunctions(
         CancellationToken ct) =>
         (await ConsentEndpoints.CallbackAsync(
             req.Query.Text("code"), req.Query.Text("state"), req.Query.Text("error"),
-            db, eb, consent, firstSync, clock, loggers, ct)).ToActionResult();
+            db, eb, cipher, consent, firstSync, clock, loggers, ct)).ToActionResult();
 }
 
 internal static class QueryExtensions

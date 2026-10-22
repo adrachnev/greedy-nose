@@ -70,6 +70,11 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
             // Makes "single use" atomic — see PendingConsent. App-managed, like Payee.Version.
             pending.Property(p => p.Version).IsConcurrencyToken().HasDefaultValue(0);
 
+            // Story 5.3: the state of the attempt. Short codes only; the payload is ciphertext.
+            pending.Property(p => p.Outcome).HasMaxLength(20);
+            pending.Property(p => p.FailureReason).HasMaxLength(40);
+            pending.Property(p => p.WaitingPayload).HasColumnType("bytea");
+
             pending.HasOne<User>().WithMany().HasForeignKey(p => p.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 

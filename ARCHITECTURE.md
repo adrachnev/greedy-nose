@@ -716,8 +716,22 @@ backend holds the logic, the app asks and shows. Connecting and the first sync a
 4. **First sync.** Saving the bank puts one message in the first-sync queue (see "Ingestion modes"); the app reads the
    bank's state and shows syncing, failed or done.
 
-The rule-based `AccountSelector` (type `CACC` and product "Girokonto") goes away: the user chooses. The shell tool
-`tools/connect-bank.sh` is no second way any more. The backend stays free of any bank name (R22).
+The rule-based `AccountSelector` (type `CACC` and product "Girokonto") is gone (Story 5.3): the user chooses. The
+shell tool `tools/connect-bank.sh` is no second way any more and cannot finish a bank with several euro accounts. The
+backend stays free of any bank name (R22).
+
+**Built in the backend (Stories 5.2 and 5.3, 2026-10-22; the app side follows in Stories 5.6 to 5.9).** *Search:*
+`GET /banks?q=` reads Enable Banking's list for the search only (about 10 minutes in memory, name and country only) and
+marks the banks the owner has already connected; `POST /connect-links` refuses a bank whose consent is not expired
+(409). *The attempt* is the `PendingConsent` row (its id is the attempt id, returned by `POST /connect-links`);
+`GET /connect-attempts/{id}` answers `waiting`, `choose_account`, `saved`, `failed` (with a short reason) or `expired`
+and nothing else. The callback sets the outcome: one account in euro is saved as before; several in euro wait
+encrypted on the row (session id and account list, AES-GCM bound to row and column) for 15 minutes; none in euro (a
+missing currency does not count) closes the session and fails with `no-supported-account`; an error, a cancel or a
+failed trade fails with a code and never shows or logs the bank's text. A session that waits for a choice is closed at
+Enable Banking before its payload is deleted: on a state read, on a new link and on each ingestion tick; a failed close
+is retried (at most every 5 minutes per instance) until one day after the deadline. Known limit: the bank is compared
+by name only (`gn-gbv`).
 
 **A dead connection is never silent (R19).** No alerts arriving looks exactly like "nothing bad
 happened" — the one failure mode that breaks R1 while appearing to work perfectly. So expiry

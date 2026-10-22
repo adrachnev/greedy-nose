@@ -9,8 +9,8 @@ namespace GreedyNose.Api.Consent;
 /// <summary>The body of <c>POST /connect-links</c>. Every field optional; defaults come from <see cref="EnableBankingOptions"/>.</summary>
 public sealed record ConnectLinkRequest(string? Aspsp, string? Country, string? PsuType);
 
-/// <summary>The answer of <c>POST /connect-links</c>: the one-time browser URL.</summary>
-public sealed record ConnectLinkResponse(string Url);
+/// <summary>The answer of <c>POST /connect-links</c>: the one-time browser URL and the id of this attempt (Story 5.3), which the app uses to ask for its state.</summary>
+public sealed record ConnectLinkResponse(string Url, Guid AttemptId);
 
 /// <summary>
 /// Starting a bank consent, in three steps (Story 1.4):
@@ -45,6 +45,8 @@ public static class ConsentEndpoints
         ConnectLinkRequest? request,
         GreedyNoseDbContext db,
         AspspResolver resolver,
+        EnableBankingClient eb,
+        ConsentCipher cipher,
         ConsentStore consent,
         EnableBankingOptions options,
         PendingConsentOptions pending,
@@ -133,7 +135,10 @@ public static class ConsentEndpoints
 
         // Expired rows are dead weight (nothing can use them); clearing them here keeps the table
         // small without a background job. Small table, so load-and-remove rather than a bulk delete.
-        var expired = await db.PendingConsents.Where(p => p.ExpiresAt <= now).ToListAsync(ct);
+        // Story 5.3: a row that still holds a waiting session (a choice whose deadline has not passed, even if the
+        // flow's own deadline has) is kept; choices that ran out are closed first, so no open session is dropped blind.
+        await ConnectAttempts.CloseExpiredChoicesAsync(db, eb, cipher, now, loggers.CreateLogger(Category), ct);
+        var expired = await db.PendingConsents.Where(p => p.ExpiresAt <= now && p.WaitingPayload == null).ToListAsync(ct);
         if (expired.Count > 0)
         {
             db.PendingConsents.RemoveRange(expired);
@@ -150,9 +155,10 @@ public static class ConsentEndpoints
         }
 
         var token = OneTimeSecret.Generate();
+        var attemptId = Guid.NewGuid();
         db.PendingConsents.Add(new PendingConsent
         {
-            Id = Guid.NewGuid(),
+            Id = attemptId,
             UserId = SeedData.UserId,
             // The list's own spelling, not the caller's: this string becomes the consent key, and "n26"
             // and "N26" must not become two consents for one bank.
@@ -172,7 +178,7 @@ public static class ConsentEndpoints
         // browser back to is, by construction, an address the owner can reach.
         var url = $"{redirect.GetLeftPart(UriPartial.Authority)}/connect?token={Uri.EscapeDataString(token)}";
 
-        return Results.Ok(new ConnectLinkResponse(url));
+        return Results.Ok(new ConnectLinkResponse(url, attemptId));
     }
 
     public static async Task<IResult> ConnectAsync(
@@ -262,14 +268,13 @@ public static class ConsentEndpoints
         return new BrowserResult(Results.Redirect(url));
     }
 
-    private static readonly TimeSpan CloseSessionTimeout = TimeSpan.FromSeconds(5);
-
     public static async Task<IResult> CallbackAsync(
         string? code,
         string? state,
         string? error,
         GreedyNoseDbContext db,
         EnableBankingClient eb,
+        ConsentCipher cipher,
         ConsentStore consent,
         IFirstSyncTrigger firstSync,
         TimeProvider clock,
@@ -277,22 +282,31 @@ public static class ConsentEndpoints
         CancellationToken ct)
     {
         var logger = loggers.CreateLogger(Category);
+        var now = clock.GetUtcNow();
 
         if (error is not null)
         {
-            // The text comes from the query string, so anyone can choose it: it is never echoed. Only
-            // a short, control-stripped code goes to the log (e.g. access_denied).
-            var loggedError = new string([.. error.Where(c => !char.IsControl(c)).Take(MaxLoggedErrorLength)]);
-            logger.LogInformation("The bank returned an error to the callback: {Error}", loggedError);
+            // The text comes from the query string, so anyone can choose it: it is never echoed and never
+            // logged. Only the reason it maps to (cancelled / bank-error) is.
+            var reason = string.Equals(error.Trim(), "access_denied", StringComparison.OrdinalIgnoreCase)
+                ? ConnectFailure.Cancelled
+                : ConnectFailure.BankError;
+            logger.LogInformation("The bank returned an error to the callback ({Reason}).", reason);
+            await FailByStateAsync(db, state, now, reason, logger);
             return CallbackPage(StatusCodes.Status400BadRequest);
         }
 
         if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state) || state.Length > MaxSecretLength)
         {
+            // No code but a usable state: the attempt would wait for nothing, so it is marked.
+            if (string.IsNullOrEmpty(code))
+            {
+                await FailByStateAsync(db, state, now, ConnectFailure.BankError, logger);
+            }
+
             return CallbackPage(StatusCodes.Status400BadRequest);
         }
 
-        var now = clock.GetUtcNow();
         var stateHash = OneTimeSecret.Hash(state);
         var record = await db.PendingConsents.SingleOrDefaultAsync(
             p => p.StateHash == stateHash && p.LinkUsedAt != null && p.CompletedAt == null && p.ExpiresAt > now, ct);
@@ -324,6 +338,7 @@ public static class ConsentEndpoints
                 logger.LogWarning("Enable Banking refused the session request (HTTP {Status}).", result.StatusCode);
             }
 
+            await MarkAsync(db, record, ConnectOutcome.Failed, ConnectFailure.CodeNotTraded, logger);
             return CallbackPage(StatusCodes.Status502BadGateway);
         }
 
@@ -343,34 +358,53 @@ public static class ConsentEndpoints
             // A 200 without a session id means the shape changed under us; the body stays out of the
             // page and the log (it may carry account data).
             logger.LogWarning("Enable Banking answered the session request without a session id.");
+            await MarkAsync(db, record, ConnectOutcome.Failed, ConnectFailure.BankAnswerUnusable, logger);
             return CallbackPage(StatusCodes.Status502BadGateway);
         }
 
+        // R15: EUR only, case-insensitive. A missing currency does not count: nothing is assumed.
         var offered = ReadAccounts(root);
-        var accounts = offered;
-        if (offered.Count > 0)
-        {
-            // Several accounts: the current account is chosen by type CACC and product "Girokonto". Only the chosen one is stored.
-            var chosen = AccountSelector.Pick(offered);
-            // The product is free text from the bank (it may hold a name), so it is logged only when we refuse
-            // and need it to decide what to do next — never on a successful connect.
-            logger.LogInformation(
-                "{Aspsp} offered {AccountCount} account(s) [type/usage/currency]: {Shapes}; chosen: {Chosen}.",
-                record.AspspName, offered.Count, DescribeShapes(offered, withProduct: false), chosen is not null);
+        var euro = offered.Where(a => string.Equals(a.Currency?.Trim(), "EUR", StringComparison.OrdinalIgnoreCase)).ToList();
+        // The product is free text from the bank (it may hold a name), so it is never logged.
+        logger.LogInformation(
+            "{Aspsp} offered {AccountCount} account(s) [type/usage/currency]: {Shapes}; in euro: {EuroCount}.",
+            record.AspspName, offered.Count, DescribeShapes(offered), euro.Count);
 
-            if (chosen is null)
+        if (euro.Count == 0)
+        {
+            // Also an empty list. Nothing stored; the session just opened is useless, so close it (best effort).
+            logger.LogWarning("{Aspsp} offered no account in euro; nothing was stored.", record.AspspName);
+            await ConnectAttempts.CloseSessionAsync(eb, sessionId, record.AspspName, logger, "The new session");
+            await MarkAsync(db, record, ConnectOutcome.Failed, ConnectFailure.NoSupportedAccount, logger);
+            return CallbackPage(StatusCodes.Status400BadRequest);
+        }
+
+        if (euro.Count > 1)
+        {
+            // The owner chooses (Story 5.4). Nothing is saved as a connection; the session and the list wait
+            // encrypted on the attempt until the deadline.
+            try
             {
-                logger.LogInformation(
-                    "{Aspsp} refused accounts [type/product/usage/currency]: {Shapes}.",
-                    record.AspspName, DescribeShapes(offered, withProduct: true));
-                // Nothing stored, nothing synced; the session just opened is useless, so close it (best effort).
-                logger.LogWarning("{Aspsp} offered several accounts and none could be chosen safely; nothing was stored.", record.AspspName);
-                await CloseOldSessionAsync(eb, sessionId, record.AspspName, logger);
-                return CallbackPage(StatusCodes.Status400BadRequest);
+                record.WaitingPayload = WaitingPayload.Seal(cipher, record.Id, new WaitingChoice(sessionId, euro));
+                record.ChoiceDeadline = now + ConnectAttempts.ChoiceLifetime;
+                record.Outcome = ConnectOutcome.ChooseAccount;
+                record.Version = unchecked(record.Version + 1);
+                await db.SaveChangesAsync(CancellationToken.None);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError("Could not keep the account choice: {ExceptionType}.", ex.GetType().Name);
+                db.ChangeTracker.Clear();
+                await ConnectAttempts.CloseSessionAsync(eb, sessionId, record.AspspName, logger, "The new session");
+                await FailByIdAsync(db, record.Id, ConnectFailure.StoreFailed, logger);
+                return CallbackPage(StatusCodes.Status502BadGateway);
             }
 
-            accounts = [chosen];
+            logger.LogInformation("{Aspsp} offered several accounts in euro; waiting for the owner's choice.", record.AspspName);
+            return CallbackPage(StatusCodes.Status200OK);
         }
+
+        List<ConnectedAccount> accounts = [euro[0]];
 
         // Story 4.3: the session this bank had before (same user, same bank only), read from the database before it is replaced.
         var oldSessionId = await consent.GetStoredSessionIdAsync(record.UserId, record.AspspName, ct);
@@ -384,10 +418,14 @@ public static class ConsentEndpoints
             // E.g. the database or the encryption fails. The code is already traded and the state spent,
             // so the owner just requests a new link. Type only: a message can carry connection details.
             logger.LogError("Could not store the consent: {ExceptionType}.", ex.GetType().Name);
+            // The code is traded, so the new session is open and nothing will ever use it: close it, best effort.
+            await ConnectAttempts.CloseSessionAsync(eb, sessionId, record.AspspName, logger, "The new session");
+            await MarkAsync(db, record, ConnectOutcome.Failed, ConnectFailure.StoreFailed, logger);
             return CallbackPage(StatusCodes.Status502BadGateway);
         }
 
         logger.LogInformation("Consent completed for {Aspsp}, {AccountCount} account(s).", record.AspspName, accounts.Count);
+        await MarkAsync(db, record, ConnectOutcome.Saved, null, logger);
 
         // Only after the consent is stored, never on a failure above. Best effort: if the request fails
         // the owner still has a working consent, and the next scheduled tick runs the same first sync.
@@ -412,45 +450,109 @@ public static class ConsentEndpoints
     }
 
     /// <summary>
-    /// Story 4.3: closes the bank's previous session once the new consent is stored. Best effort — nothing here
-    /// can fail the reconnect. "Already closed / expired / unknown" answers are fine. Logs carry the bank name and
-    /// the status only, never the session id (it reads the real account).
+    /// Records how the attempt ended. Best effort and quiet: the browser page is the same either way, and the worst
+    /// outcome of a failed write is that the app keeps reading "waiting" until the attempt expires. Only short codes
+    /// are written; the exception type is the only thing logged.
     /// </summary>
-    private static async Task CloseOldSessionAsync(EnableBankingClient eb, string oldSessionId, string aspspName, ILogger logger)
+    private static async Task MarkAsync(
+        GreedyNoseDbContext db, PendingConsent record, string outcome, string? reason, ILogger logger, DateTimeOffset? spentAt = null)
     {
-        try
+        // The whole mutation, so the second try applies all of it again to a freshly read row: the spent state
+        // (CompletedAt) must not be lost with the first try, or the callback could be replayed into a code trade.
+        // The payload goes in the same write: no outcome other than choose-account may leave one behind.
+        void Apply(PendingConsent r)
         {
-            // A tick holding a pre-reconnect snapshot may see CLOSED_SESSION: IngestionRunner re-reads the stored session before it pushes, so that race does not alert.
-            using var timeout = new CancellationTokenSource(CloseSessionTimeout);
-            var answer = await eb.DeleteAsync($"/sessions/{Uri.EscapeDataString(oldSessionId)}", timeout.Token);
-            if (answer.IsSuccess || answer.StatusCode is 404 or 410 || (answer.StatusCode == 401 && HasErrorField(answer.Body)))
+            if (spentAt is { } at)
             {
-                logger.LogInformation("The old session of {Aspsp} was closed or already gone (HTTP {Status}).", aspspName, answer.StatusCode);
+                r.CompletedAt = at;
             }
-            else
+
+            r.Outcome = outcome;
+            r.FailureReason = reason;
+            r.WaitingPayload = null;
+            r.Version = unchecked(r.Version + 1);
+        }
+
+        // Two tries: the second starts from a fresh tracking state and a fresh read of the row (a Neon that was
+        // asleep or a lost race can fail the first write); a third would only hide a database that is really down.
+        var id = record.Id;
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            try
             {
-                logger.LogWarning("The old session of {Aspsp} could not be closed (HTTP {Status}); the new consent stays.", aspspName, answer.StatusCode);
+                if (attempt == 2)
+                {
+                    db.ChangeTracker.Clear();
+                    record = await db.PendingConsents.SingleOrDefaultAsync(p => p.Id == id) ?? record;
+                }
+
+                Apply(record);
+                await db.SaveChangesAsync(CancellationToken.None);
+                return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning("Could not record the outcome of the attempt ({ExceptionType}), try {Attempt}.", ex.GetType().Name, attempt);
             }
         }
-        catch (Exception ex)
+
+        db.ChangeTracker.Clear();
+    }
+
+    /// <summary>
+    /// A bank error or a cancel comes back with the state in the query: find the attempt by it and mark it failed.
+    /// Without a usable state, or with one that is unknown, spent or expired, nothing is touched. The state is spent
+    /// here too, so the same callback cannot be replayed into a code trade.
+    /// </summary>
+    private static async Task FailByStateAsync(GreedyNoseDbContext db, string? state, DateTimeOffset now, string reason, ILogger logger)
+    {
+        if (string.IsNullOrEmpty(state) || state.Length > MaxSecretLength)
         {
-            // Type only: a message can carry the URL, which holds the session id.
-            logger.LogWarning("The old session of {Aspsp} could not be closed ({ExceptionType}); the new consent stays.", aspspName, ex.GetType().Name);
+            return;
+        }
+
+        try
+        {
+            var stateHash = OneTimeSecret.Hash(state);
+            var record = await db.PendingConsents.SingleOrDefaultAsync(
+                p => p.StateHash == stateHash && p.LinkUsedAt != null && p.CompletedAt == null && p.ExpiresAt > now);
+            if (record is null)
+            {
+                return;
+            }
+
+            await MarkAsync(db, record, ConnectOutcome.Failed, reason, logger, spentAt: now);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning("Could not record the outcome of the attempt ({ExceptionType}).", ex.GetType().Name);
+            db.ChangeTracker.Clear();
         }
     }
 
-    private static bool HasErrorField(string body)
+    private static async Task FailByIdAsync(GreedyNoseDbContext db, Guid id, string reason, ILogger logger)
     {
         try
         {
-            using var doc = JsonDocument.Parse(body);
-            return doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("error", out _);
+            var record = await db.PendingConsents.SingleOrDefaultAsync(p => p.Id == id);
+            if (record is not null)
+            {
+                await MarkAsync(db, record, ConnectOutcome.Failed, reason, logger);
+            }
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return false;
+            logger.LogWarning("Could not record the outcome of the attempt ({ExceptionType}).", ex.GetType().Name);
         }
     }
+
+    /// <summary>
+    /// Story 4.3: closes the bank's previous session once the new consent is stored. Best effort — nothing here
+    /// can fail the reconnect. A tick holding a pre-reconnect snapshot may see CLOSED_SESSION: IngestionRunner
+    /// re-reads the stored session before it pushes, so that race does not alert.
+    /// </summary>
+    private static Task CloseOldSessionAsync(EnableBankingClient eb, string oldSessionId, string aspspName, ILogger logger) =>
+        ConnectAttempts.CloseSessionAsync(eb, oldSessionId, aspspName, logger, "The old session");
 
     private static IResult Rejected(string title, string message, int status = StatusCodes.Status400BadRequest) =>
         Page(status, $"<h1>{title}</h1><p>{message}</p>");
@@ -514,13 +616,11 @@ public static class ConsentEndpoints
     }
 
     /// <summary>
-    /// Per-account type/product/usage/currency for the log, so a live response shows what a bank really sends.
+    /// Per-account type/usage/currency for the log, so a live response shows what a bank really sends.
     /// Never the IBAN, name or uid. The values come from the bank, so they are control-stripped and short.
     /// </summary>
-    private static string DescribeShapes(IEnumerable<ConnectedAccount> accounts, bool withProduct) =>
-        string.Join(", ", accounts.Select(a => withProduct
-            ? $"{Safe(a.CashAccountType)}/{Safe(a.Product)}/{Safe(a.Usage)}/{Safe(a.Currency)}"
-            : $"{Safe(a.CashAccountType)}/{Safe(a.Usage)}/{Safe(a.Currency)}"));
+    private static string DescribeShapes(IEnumerable<ConnectedAccount> accounts) =>
+        string.Join(", ", accounts.Select(a => $"{Safe(a.CashAccountType)}/{Safe(a.Usage)}/{Safe(a.Currency)}"));
 
     private static string Safe(string? value) =>
         value is null ? "-" : new string([.. value.Where(c => !char.IsControl(c)).Take(MaxLoggedErrorLength)]);

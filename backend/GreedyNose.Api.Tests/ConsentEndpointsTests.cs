@@ -1,6 +1,8 @@
 using System.Net;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using GreedyNose.Api.Auth;
 using GreedyNose.Api.Consent;
 using GreedyNose.Api.Data;
 using GreedyNose.Api.EnableBanking;
@@ -37,6 +39,8 @@ public sealed class ConsentEndpointsTests : IDisposable
     private readonly FakeClock _clock = new(T0);
     private readonly CapturingLoggerFactory _logs = new();
     private readonly FakeFirstSync _firstSync = new();
+    private readonly ConsentCipher _cipher = new(RandomNumberGenerator.GetBytes(32));
+    private Guid _attemptId; // the attempt of the link created last by CreateToken
 
     // What the next Enable Banking call answers, by path.
     private Func<string, (HttpStatusCode Status, string Body)> _bank;
@@ -192,12 +196,27 @@ public sealed class ConsentEndpointsTests : IDisposable
             throw new DbUpdateConcurrencyException("lost the race");
     }
 
-    private GreedyNoseDbContext NewDb(bool lostRace = false)
+    /// <summary>Fails exactly one save, the n-th of this context (1-based), like a database that blinks once.</summary>
+    private sealed class FailNthSaveInterceptor(int failOn) : SaveChangesInterceptor
+    {
+        private int _saves;
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default) =>
+            ++_saves == failOn ? throw new InvalidOperationException("db blip") : ValueTask.FromResult(result);
+    }
+
+    private GreedyNoseDbContext NewDb(bool lostRace = false, int? failSave = null)
     {
         var builder = new DbContextOptionsBuilder<GreedyNoseDbContext>().UseInMemoryDatabase(_dbName);
         if (lostRace)
         {
             builder.AddInterceptors(new LostRaceInterceptor());
+        }
+
+        if (failSave is { } failOn)
+        {
+            builder.AddInterceptors(new FailNthSaveInterceptor(failOn));
         }
 
         return new(builder.Options);
@@ -213,13 +232,14 @@ public sealed class ConsentEndpointsTests : IDisposable
     {
         await using var db = NewDb();
         return await ConsentEndpoints.CreateLinkAsync(
-            request, db, new AspspResolver(NewClient()), _consent, _options, _pending, _clock, _logs, CancellationToken.None);
+            request, db, new AspspResolver(NewClient()), NewClient(), _cipher, _consent, _options, _pending, _clock, _logs, CancellationToken.None);
     }
 
     private async Task<string> CreateToken(ConnectLinkRequest? request = null)
     {
         var ok = Assert.IsType<Ok<ConnectLinkResponse>>(await CreateLink(request));
-        var query = new Uri(ok.Value!.Url).Query;
+        _attemptId = ok.Value!.AttemptId;
+        var query = new Uri(ok.Value.Url).Query;
         return Uri.UnescapeDataString(query["?token=".Length..]);
     }
 
@@ -231,11 +251,11 @@ public sealed class ConsentEndpointsTests : IDisposable
             token, db, client, new AspspResolver(client), _options, _clock, _logs, CancellationToken.None);
     }
 
-    private async Task<IResult> Callback(string? code, string? state, string? error = null, bool lostRace = false)
+    private async Task<IResult> Callback(string? code, string? state, string? error = null, bool lostRace = false, int? failSave = null)
     {
-        await using var db = NewDb(lostRace);
+        await using var db = NewDb(lostRace, failSave);
         return await ConsentEndpoints.CallbackAsync(
-            code, state, error, db, NewClient(), _consent, _firstSync, _clock, _logs, CancellationToken.None);
+            code, state, error, db, NewClient(), _cipher, _consent, _firstSync, _clock, _logs, CancellationToken.None);
     }
 
     /// <summary>Link created and used; returns the state the bank was given.</summary>
@@ -808,14 +828,17 @@ public sealed class ConsentEndpointsTests : IDisposable
     }
 
     [Fact]
-    public async Task A_bank_error_is_logged_capped_and_stripped_of_control_characters()
+    public async Task A_bank_error_text_never_reaches_a_log_line_only_its_reason_does()
     {
-        await Callback(null, null, "a\r\nb" + new string('x', 5000));
+        await Callback(null, null, "a\r\nb SECRET-BANK-TEXT" + new string('x', 5000));
 
+        // The text is chosen by whoever builds the query string: only the reason it maps to is logged.
         var line = Assert.Single(_logs.Lines, l => l.Contains("returned an error"));
         Assert.DoesNotContain('\n', line);
         Assert.DoesNotContain('\r', line);
-        Assert.True(line.Length < 150);
+        Assert.Contains("bank-error", line);
+        Assert.True(line.Length < 100);
+        Assert.DoesNotContain(_logs.Lines, l => l.Contains("SECRET-BANK-TEXT") || l.Contains("xxxx"));
     }
 
     [Fact]
@@ -921,7 +944,7 @@ public sealed class ConsentEndpointsTests : IDisposable
         await using (var db = NewDb())
         {
             await ConsentEndpoints.CallbackAsync(
-                "the-code", failingStore, null, db, NewClient(), broken, _firstSync, _clock, _logs, CancellationToken.None);
+                "the-code", failingStore, null, db, NewClient(), _cipher, broken, _firstSync, _clock, _logs, CancellationToken.None);
         }
 
         Assert.Equal(0, _firstSync.Requests);
@@ -980,18 +1003,19 @@ public sealed class ConsentEndpointsTests : IDisposable
     }
 
     [Fact]
-    public async Task Spending_the_link_and_then_the_state_each_bump_Version()
+    public async Task Spending_the_link_the_state_and_recording_the_outcome_each_bump_Version()
     {
-        var state = await StartedState();
-        await using (var db = NewDb())
-        {
-            Assert.Equal(1, Assert.Single(db.PendingConsents).Version);
-        }
+        var token = await CreateToken();
+        var created = (await RowAsync(_attemptId)).Version;
+        Assert.IsType<RedirectHttpResult>(Unwrap(await Connect(token)));
+        var state = ReadState(_calls.Last(c => c.Path == "/auth").Body);
+        var linkSpent = (await RowAsync(_attemptId)).Version;
+        Assert.True(linkSpent > created);
 
         await Callback("the-code", state);
 
-        await using var after = NewDb();
-        Assert.Equal(2, Assert.Single(after.PendingConsents).Version);
+        var outcomeRecorded = (await RowAsync(_attemptId)).Version;
+        Assert.True(outcomeRecorded > linkSpent);
     }
 
     [Fact]
@@ -1080,7 +1104,7 @@ public sealed class ConsentEndpointsTests : IDisposable
         await using var db = NewDb(lostRace: true);
         var ex = await Record.ExceptionAsync(() =>
             ConsentEndpoints.CreateLinkAsync(
-                null, db, new AspspResolver(NewClient()), _consent, _options, _pending, _clock, _logs, CancellationToken.None));
+                null, db, new AspspResolver(NewClient()), NewClient(), _cipher, _consent, _options, _pending, _clock, _logs, CancellationToken.None));
 
         Assert.IsType<DbUpdateConcurrencyException>(ex);
         Assert.Equal(1, db.ChangeTracker.Entries<PendingConsent>().Count(e => e.State == EntityState.Added));
@@ -1172,7 +1196,7 @@ public sealed class ConsentEndpointsTests : IDisposable
         await using var db = NewDb();
 
         var result = await ConsentEndpoints.CallbackAsync(
-            "the-code", state, null, db, NewClient(), broken, _firstSync, _clock, _logs, CancellationToken.None);
+            "the-code", state, null, db, NewClient(), _cipher, broken, _firstSync, _clock, _logs, CancellationToken.None);
 
         var (status, html) = Page(result);
         Assert.Equal(502, status);
@@ -1312,7 +1336,7 @@ public sealed class ConsentEndpointsTests : IDisposable
     }
 
     [Fact]
-    public async Task A_failed_store_closes_nothing()
+    public async Task A_failed_store_keeps_the_old_session_and_closes_the_new_one()
     {
         await ConnectBank("N26", "old-session-aaaa1111");
         var persistence = new FakeConsentPersistence();
@@ -1324,12 +1348,13 @@ public sealed class ConsentEndpointsTests : IDisposable
         var state = await StartedState(new ConnectLinkRequest("N26", "DE", null));
         await using var db = NewDb();
         var result = await ConsentEndpoints.CallbackAsync(
-            "the-code", state, null, db, NewClient(), failing, _firstSync, _clock, _logs, CancellationToken.None);
+            "the-code", state, null, db, NewClient(), _cipher, failing, _firstSync, _clock, _logs, CancellationToken.None);
 
         var (storeStatus, storeHtml) = Page(result);
         Assert.Equal(502, storeStatus);
         Assert.Equal(await NeutralHtml(), storeHtml);
-        Assert.Empty(_deletes);
+        Assert.Equal("/sessions/new-session-bbbb2222", Assert.Single(_deletes).Path); // the traded session is useless
+        Assert.Equal("store-failed", await ReasonOf(_attemptId));
     }
 
     [Fact]
@@ -1346,94 +1371,181 @@ public sealed class ConsentEndpointsTests : IDisposable
         var state = await StartedState(new ConnectLinkRequest("N26", "DE", null));
         await using var db = NewDb();
         var result = await ConsentEndpoints.CallbackAsync(
-            "the-code", state, null, db, NewClient(), stale, _firstSync, _clock, _logs, CancellationToken.None);
+            "the-code", state, null, db, NewClient(), _cipher, stale, _firstSync, _clock, _logs, CancellationToken.None);
 
         Assert.Equal(200, Page(result).Status);
         Assert.Equal("/sessions/db-session-dddd4444", Assert.Single(_deletes).Path);
     }
 
-    // --- several accounts: the current account is chosen by type -------------------------------------
+    // --- Story 5.3: accounts in euro, and the attempt the app follows ------------------------------
 
-    private static string AccountJson(string uid, string iban, string? type, string product = "Product", string usage = "PRIV") =>
-        $$"""{"uid":"{{uid}}","account_id":{"iban":"{{iban}}"},"name":"Name {{uid}}","currency":"EUR","cash_account_type":{{(type is null ? "null" : $"\"{type}\"")}},"product":"{{product}}","usage":"{{usage}}"}""";
+    private static string AccountJson(string uid, string iban, string? type, string product = "Product", string usage = "PRIV", string? currency = "EUR") =>
+        $$"""{"uid":"{{uid}}","account_id":{"iban":"{{iban}}"},"name":"Name {{uid}}","currency":{{(currency is null ? "null" : $"\"{currency}\"")}},"cash_account_type":{{(type is null ? "null" : $"\"{type}\"")}},"product":"{{product}}","usage":"{{usage}}"}""";
 
     private void OfferAccounts(params string[] accountJson) => _bank = path => path == "/auth"
         ? (HttpStatusCode.OK, $$"""{"url":"{{BankUrl}}"}""")
         : (HttpStatusCode.OK, $$"""{"session_id":"{{_sessionId}}","access":{"valid_until":"2027-01-01T00:00:00Z"},"accounts":[{{string.Join(',', accountJson)}}]}""");
 
-    private static string[] DkbAccounts(params string[] products) =>
-        [.. products.Select((p, i) => AccountJson($"u{i}", $"DE0000000000000000000{i}", "CACC", product: p))];
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(2)]
-    [InlineData(4)]
-    public async Task The_real_dkb_shape_stores_exactly_the_girokonto_in_any_position(int position)
+    private sealed class TestUser(Guid id) : ICurrentUser
     {
-        var products = new[] { "Tagesgeld", "Girokonto u18", "Tagesgeld", "Girokonto u18", "Tagesgeld" };
-        products[position] = "Girokonto";
-        OfferAccounts(DkbAccounts(products));
+        public Guid UserId => id;
+    }
 
-        var (status, _) = await ConnectBank("DKB", "dkb-session-eeee5555");
+    /// <summary>Asks for the state of an attempt the way the Function does; returns the status and the JSON text.</summary>
+    private async Task<(int Status, JsonElement Body, string Text)> AttemptState(string id, Guid? user = null, ConsentCipher? cipher = null)
+    {
+        await using var db = NewDb();
+        var result = await ConnectAttempts.HandleAsync(
+            id, new TestUser(user ?? SeedData.UserId), db, NewClient(), cipher ?? _cipher, _clock, _logs, CancellationToken.None);
+        var status = (result as IStatusCodeHttpResult)?.StatusCode ?? 200;
+        var text = result is IValueHttpResult { Value: not null } v ? JsonSerializer.Serialize(v.Value, JsonSerializerOptions.Web) : "{}";
+        return (status, JsonDocument.Parse(text).RootElement.Clone(), text);
+    }
+
+    private async Task<string> StateOf(Guid attemptId)
+    {
+        var (status, body, _) = await AttemptState(attemptId.ToString());
+        Assert.Equal(200, status);
+        return body.GetProperty("state").GetString()!;
+    }
+
+    private async Task<string?> ReasonOf(Guid attemptId)
+    {
+        var (_, body, _) = await AttemptState(attemptId.ToString());
+        return body.TryGetProperty("reason", out var reason) ? reason.GetString() : null;
+    }
+
+    private async Task<PendingConsent> RowAsync(Guid attemptId)
+    {
+        await using var db = NewDb();
+        return await db.PendingConsents.AsNoTracking().SingleAsync(p => p.Id == attemptId);
+    }
+
+    private const string Iban1 = "DE00000000000000000001";
+    private const string Iban2 = "DE00000000000000000002";
+
+    [Fact]
+    public async Task A_link_answers_the_url_and_the_id_of_the_attempt_which_is_the_stored_row()
+    {
+        var ok = Assert.IsType<Ok<ConnectLinkResponse>>(await CreateLink());
+
+        Assert.NotEqual(Guid.Empty, ok.Value!.AttemptId);
+        Assert.Equal(ok.Value.AttemptId, (await RowAsync(ok.Value.AttemptId)).Id);
+        Assert.DoesNotContain(ok.Value.AttemptId.ToString(), ok.Value.Url);
+        Assert.Equal("waiting", await StateOf(ok.Value.AttemptId));
+    }
+
+    [Fact]
+    public async Task One_euro_account_is_saved_the_first_sync_queued_and_the_state_is_saved()
+    {
+        var state = await StartedState();
+
+        var (status, _) = Page(await Callback("the-code", state));
 
         Assert.Equal(200, status);
-        var stored = Assert.Single(_consent.Accounts);
-        Assert.Equal($"u{position}", stored.Uid);
-        Assert.Equal("CACC", stored.CashAccountType);
-        Assert.Equal("Girokonto", stored.Product);
-        Assert.Equal("PRIV", stored.Usage);
+        Assert.Equal(BankIban, Assert.Single(_consent.Accounts).Iban);
         Assert.Equal(1, _firstSync.Requests);
-        Assert.Empty(_deletes);
+        Assert.Equal("saved", await StateOf(_attemptId));
+        var row = await RowAsync(_attemptId);
+        Assert.Null(row.WaitingPayload);
+        Assert.Null(row.FailureReason);
     }
 
     [Theory]
-    [InlineData("Tagesgeld", "Girokonto u18", "Tagesgeld", "Girokonto u18", "Tagesgeld")] // no Girokonto
-    [InlineData("Girokonto", "Girokonto", "Tagesgeld", "Girokonto u18", "Tagesgeld")]     // duplicated
-    [InlineData("Girokonto u18", "Girokonto u18")]                                        // only the u18 ones
-    [InlineData("Tagesgeld", "Tagesgeld")]                                                // only Tagesgeld
-    public async Task Several_accounts_without_exactly_one_girokonto_store_nothing_and_close_the_new_session(params string[] products)
+    [InlineData("EUR")]
+    [InlineData("eur")]
+    [InlineData("Eur")]
+    public async Task The_currency_is_compared_ignoring_case(string currency)
     {
-        OfferAccounts(DkbAccounts(products));
+        OfferAccounts(AccountJson("u1", Iban1, "CACC", currency: currency));
+        var state = await StartedState();
+
+        Assert.Equal(200, Page(await Callback("the-code", state)).Status);
+        Assert.Single(_consent.Accounts);
+    }
+
+    [Fact]
+    public async Task Of_several_accounts_only_the_euro_ones_count_and_one_of_them_is_saved()
+    {
+        OfferAccounts(
+            AccountJson("u1", Iban1, "CACC", currency: "USD"),
+            AccountJson("u2", Iban2, "CACC"),
+            AccountJson("u3", "DE00000000000000000003", "CACC", currency: null));
+        var state = await StartedState();
+
+        Assert.Equal(200, Page(await Callback("the-code", state)).Status);
+        Assert.Equal("u2", Assert.Single(_consent.Accounts).Uid);
+        Assert.Equal("saved", await StateOf(_attemptId));
+    }
+
+    [Fact]
+    public async Task Several_euro_accounts_save_nothing_and_wait_for_the_choice_with_a_deadline()
+    {
+        await ConnectBank("DKB", "old-session-aaaa1111"); // a bank with an older session: a reconnect
+        _clock.Now = T0.AddMinutes(1);
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"), AccountJson("u3", "DE00000000000000000003", "SVGS", currency: "USD"));
+
+        var (status, html) = await ConnectBank("DKB", "new-session-bbbb2222");
+
+        Assert.Equal(200, status);
+        Assert.Equal(await NeutralHtml(), html);
+        Assert.Equal("choose_account", await StateOf(_attemptId));
+        // Nothing saved as a connection: the old consent, its session and its account are untouched, and nothing is closed yet.
+        Assert.Equal("old-session-aaaa1111", _consent.SessionIdFor(_consentUser(), "DKB"));
+        Assert.Equal(BankIban, Assert.Single(_consent.Accounts).Iban);
+        Assert.Equal(1, _firstSync.Requests); // only the first connect's
+        Assert.Empty(_deletes);
+        var row = await RowAsync(_attemptId);
+        Assert.Equal(T0.AddMinutes(16), row.ChoiceDeadline);
+        Assert.Equal(ConnectOutcome.ChooseAccount, row.Outcome);
+    }
+
+    [Fact]
+    public async Task The_waiting_payload_is_ciphertext_bound_to_its_row_and_column()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+
+        var row = await RowAsync(_attemptId);
+        var raw = Encoding.UTF8.GetString(row.WaitingPayload!);
+        Assert.DoesNotContain("dkb-session-eeee5555", raw);
+        Assert.DoesNotContain(Iban1, raw);
+        Assert.DoesNotContain("Name u1", raw);
+
+        // It opens with the key, and only for its own row.
+        var choice = WaitingPayload.Open(_cipher, row.Id, row.WaitingPayload!);
+        Assert.Equal("dkb-session-eeee5555", choice.SessionId);
+        Assert.Equal([Iban1, Iban2], choice.Accounts.Select(a => a.Iban));
+        Assert.Throws<ConsentDecryptionException>(() => WaitingPayload.Open(_cipher, Guid.NewGuid(), row.WaitingPayload!));
+        Assert.Throws<ConsentDecryptionException>(() =>
+            WaitingPayload.Open(new ConsentCipher(RandomNumberGenerator.GetBytes(32)), row.Id, row.WaitingPayload!));
+    }
+
+    [Theory]
+    [InlineData("none")]
+    [InlineData("foreign")]
+    [InlineData("missing")]
+    public async Task No_euro_account_closes_the_new_session_stores_nothing_and_fails_with_a_reason(string kind)
+    {
+        switch (kind)
+        {
+            case "none": OfferAccounts(); break;
+            case "foreign": OfferAccounts(AccountJson("u1", Iban1, "CACC", currency: "USD"), AccountJson("u2", Iban2, "CACC", currency: "GBP")); break;
+            default: OfferAccounts(AccountJson("u1", Iban1, "CACC", currency: null)); break;
+        }
 
         var (status, html) = await ConnectBank("DKB", "dkb-session-eeee5555");
 
         Assert.Equal(400, status);
         Assert.Equal(await NeutralHtml(), html);
-        Assert.Null(_consent.SessionIdFor(_consentUser(), "DKB"));
         Assert.Empty(_consent.Accounts);
+        Assert.Null(_consent.SessionIdFor(_consentUser(), "DKB"));
         Assert.Equal(0, _firstSync.Requests);
         Assert.Equal("/sessions/dkb-session-eeee5555", Assert.Single(_deletes).Path);
-        // The log shows what the bank sent per account, never who owns it.
-        Assert.Contains(_logs.Lines, l => l.Contains($"offered {products.Length} account(s)") && l.Contains("CACC/PRIV/EUR") && !l.Contains("Tagesgeld"));
-        Assert.Contains(_logs.Lines, l => l.Contains("refused accounts") && l.Contains($"CACC/{products[0]}/PRIV/EUR"));
-        Assert.DoesNotContain(_logs.Lines, l => l.Contains("DE0000000000000000000") || l.Contains("Name u1") || l.Contains("dkb-session-eeee5555"));
-    }
-
-    [Fact]
-    public async Task Accounts_that_are_not_typed_CACC_are_refused_even_if_called_Girokonto()
-    {
-        OfferAccounts(
-            AccountJson("u1", "DE00000000000000000001", "SVGS", product: "Girokonto"),
-            AccountJson("u2", "DE00000000000000000002", null, product: "Girokonto"));
-
-        var (status, _) = await ConnectBank("DKB", "dkb-session-eeee5555");
-
-        Assert.Equal(400, status);
-        Assert.Empty(_consent.Accounts);
-    }
-
-    [Fact]
-    public async Task A_successful_connect_never_logs_the_product_text()
-    {
-        OfferAccounts(
-            AccountJson("u1", "DE00000000000000000001", "CACC", product: "Max Mustermann DE99FAKEIBAN"),
-            AccountJson("u2", "DE00000000000000000002", "CACC", product: "Girokonto"));
-
-        var (status, _) = await ConnectBank("DKB", "dkb-session-eeee5555");
-
-        Assert.Equal(200, status);
-        Assert.Contains(_logs.Lines, l => l.Contains("offered 2 account(s)") && l.Contains("CACC/PRIV/EUR"));
-        Assert.DoesNotContain(_logs.Lines, l => l.Contains("Mustermann") || l.Contains("FAKEIBAN") || l.Contains("Girokonto"));
+        Assert.Equal("failed", await StateOf(_attemptId));
+        Assert.Equal("no-supported-account", await ReasonOf(_attemptId));
+        Assert.Null((await RowAsync(_attemptId)).WaitingPayload);
+        AssertNoAccountDataInLog();
     }
 
     [Fact]
@@ -1442,9 +1554,7 @@ public sealed class ConsentEndpointsTests : IDisposable
         await ConnectBank("DKB", "old-session-aaaa1111");
         var before = Assert.Single(_consent.Accounts);
 
-        OfferAccounts(
-            AccountJson("u1", "DE00000000000000000001", "SVGS"),
-            AccountJson("u2", "DE00000000000000000002", "CARD"));
+        OfferAccounts(AccountJson("u1", Iban1, "SVGS", currency: "USD"));
         var (status, _) = await ConnectBank("DKB", "new-session-bbbb2222");
 
         Assert.Equal(400, status);
@@ -1453,31 +1563,539 @@ public sealed class ConsentEndpointsTests : IDisposable
         Assert.Equal("/sessions/new-session-bbbb2222", Assert.Single(_deletes).Path);
     }
 
-    [Fact]
-    public async Task An_empty_account_list_is_stored_as_before()
-    {
-        OfferAccounts();
-
-        var (status, _) = await ConnectBank("DKB", "dkb-session-eeee5555");
-
-        Assert.Equal(200, status);
-        Assert.Equal("dkb-session-eeee5555", _consent.SessionIdFor(_consentUser(), "DKB"));
-        Assert.Empty(_consent.Accounts);
-        Assert.Empty(_deletes);
-    }
-
     [Theory]
     [InlineData("SVGS")]
     [InlineData(null)]
-    public async Task Exactly_one_account_is_stored_whatever_its_type(string? type)
+    public async Task Exactly_one_euro_account_is_saved_whatever_its_type(string? type)
     {
-        OfferAccounts(AccountJson("u1", "DE00000000000000000001", type));
+        OfferAccounts(AccountJson("u1", Iban1, type));
 
         var (status, _) = await ConnectBank("DKB", "dkb-session-eeee5555");
 
         Assert.Equal(200, status);
         Assert.Equal("u1", Assert.Single(_consent.Accounts).Uid);
         Assert.Empty(_deletes);
+    }
+
+    [Fact]
+    public async Task A_successful_connect_never_logs_the_product_text_or_account_data()
+    {
+        OfferAccounts(
+            AccountJson("u1", Iban1, "CACC", product: "Max Mustermann DE99FAKEIBAN"),
+            AccountJson("u2", Iban2, "CACC", product: "Girokonto"));
+
+        var (status, _) = await ConnectBank("DKB", "dkb-session-eeee5555");
+
+        Assert.Equal(200, status);
+        Assert.Contains(_logs.Lines, l => l.Contains("offered 2 account(s)") && l.Contains("CACC/PRIV/EUR") && l.Contains("in euro: 2"));
+        Assert.DoesNotContain(_logs.Lines, l => l.Contains("Mustermann") || l.Contains("FAKEIBAN") || l.Contains("Girokonto"));
+        AssertNoAccountDataInLog();
+    }
+
+    private void AssertNoAccountDataInLog()
+    {
+        Assert.DoesNotContain(_logs.Lines, l =>
+            l.Contains("dkb-session-eeee5555") || l.Contains(Iban1) || l.Contains(Iban2) || l.Contains("Name u1"));
+    }
+
+    [Fact]
+    public async Task A_bank_error_fails_the_attempt_by_its_state_with_a_code_and_no_bank_text()
+    {
+        var state = await StartedState();
+
+        var (status, html) = Page(await Callback(null, state, "server_error SECRET-BANK-TEXT"));
+
+        Assert.Equal(400, status);
+        Assert.Equal(await NeutralHtml(), html);
+        var (_, _, text) = await AttemptState(_attemptId.ToString());
+        Assert.Equal("""{"state":"failed","reason":"bank-error"}""", text);
+        Assert.DoesNotContain(_calls, c => c.Path == "/sessions");
+        // The state is spent: the same callback with a code now trades nothing.
+        Assert.Equal(400, Page(await Callback("the-code", state)).Status);
+        Assert.DoesNotContain(_calls, c => c.Path == "/sessions");
+    }
+
+    [Fact]
+    public async Task A_cancel_fails_the_attempt_with_the_reason_cancelled()
+    {
+        var state = await StartedState();
+
+        Assert.Equal(400, Page(await Callback(null, state, "access_denied")).Status);
+
+        Assert.Equal("failed", await StateOf(_attemptId));
+        Assert.Equal("cancelled", await ReasonOf(_attemptId));
+    }
+
+    [Fact]
+    public async Task An_error_without_a_usable_state_marks_nothing()
+    {
+        await StartedState();
+
+        Assert.Equal(400, Page(await Callback(null, null, "access_denied")).Status);
+        Assert.Equal(400, Page(await Callback(null, "unknown-state", "access_denied")).Status);
+
+        Assert.Equal("waiting", await StateOf(_attemptId));
+        Assert.Equal(400, Page(await Callback(null, new string('x', 500), "access_denied")).Status);
+        Assert.Equal("waiting", await StateOf(_attemptId));
+    }
+
+    [Fact]
+    public async Task A_trade_that_fails_gives_code_not_traded()
+    {
+        var state = await StartedState();
+        _bank = path => path == "/auth" ? (HttpStatusCode.OK, "{}") : (HttpStatusCode.BadRequest, "SECRET-BANK-TEXT");
+
+        Assert.Equal(502, Page(await Callback("the-code", state)).Status);
+
+        Assert.Equal("code-not-traded", await ReasonOf(_attemptId));
+    }
+
+    [Fact]
+    public async Task A_network_fault_on_the_trade_gives_code_not_traded()
+    {
+        var state = await StartedState();
+        _bankThrows = new HttpRequestException("down");
+
+        Assert.Equal(502, Page(await Callback("the-code", state)).Status);
+
+        Assert.Equal("code-not-traded", await ReasonOf(_attemptId));
+    }
+
+    [Fact]
+    public async Task An_answer_without_a_session_id_gives_bank_answer_unusable()
+    {
+        var state = await StartedState();
+        _bank = path => path == "/auth" ? (HttpStatusCode.OK, "{}") : (HttpStatusCode.OK, """{"accounts":[]}""");
+
+        Assert.Equal(502, Page(await Callback("the-code", state)).Status);
+
+        Assert.Equal("bank-answer-unusable", await ReasonOf(_attemptId));
+    }
+
+    [Fact]
+    public async Task A_consent_that_cannot_be_stored_gives_store_failed()
+    {
+        var state = await StartedState();
+        var persistence = new FakeConsentPersistence { SaveFails = new InvalidOperationException("db down") };
+        var failing = new ConsentStore(persistence, TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
+        await using var db = NewDb();
+
+        var result = await ConsentEndpoints.CallbackAsync(
+            "the-code", state, null, db, NewClient(), _cipher, failing, _firstSync, _clock, _logs, CancellationToken.None);
+
+        Assert.Equal(502, Page(result).Status);
+        Assert.Equal("store-failed", await ReasonOf(_attemptId));
+    }
+
+    // --- GET /connect-attempts/{id} ---------------------------------------------------------------
+
+    [Theory]
+    [InlineData("not-a-guid")]
+    [InlineData("")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task A_malformed_or_unknown_id_is_404(string id)
+    {
+        await CreateLink();
+
+        Assert.Equal(404, (await AttemptState(id)).Status);
+    }
+
+    [Fact]
+    public async Task Another_users_attempt_is_404()
+    {
+        await CreateLink();
+
+        Assert.Equal(404, (await AttemptState(_attemptId.ToString(), user: Guid.NewGuid())).Status);
+    }
+
+    [Fact]
+    public async Task A_started_attempt_waits_and_expires_with_its_deadline()
+    {
+        await StartedState();
+        Assert.Equal("waiting", await StateOf(_attemptId));
+
+        _clock.Now = T0 + _pending.Lifetime;
+
+        Assert.Equal("expired", await StateOf(_attemptId));
+    }
+
+    [Fact]
+    public async Task The_answers_have_exactly_the_documented_shape()
+    {
+        await CreateToken();
+        Assert.Equal("""{"state":"waiting"}""", (await AttemptState(_attemptId.ToString())).Text);
+
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+        Assert.Equal("""{"state":"choose_account"}""", (await AttemptState(_attemptId.ToString())).Text);
+    }
+
+    [Fact]
+    public async Task A_choice_whose_deadline_passed_is_expired_its_session_closed_and_its_payload_deleted()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+        _clock.Now = T0.AddMinutes(14);
+        Assert.Equal("choose_account", await StateOf(_attemptId)); // a read before the deadline closes nothing
+        Assert.Empty(_deletes);
+
+        _clock.Now = T0.AddMinutes(16);
+
+        Assert.Equal("expired", await StateOf(_attemptId));
+        Assert.Equal("/sessions/dkb-session-eeee5555", Assert.Single(_deletes).Path);
+        var row = await RowAsync(_attemptId);
+        Assert.Null(row.WaitingPayload);
+        Assert.Null(_consent.SessionIdFor(_consentUser(), "DKB"));
+
+        Assert.Equal("expired", await StateOf(_attemptId)); // closed once, not again
+        Assert.Single(_deletes);
+        AssertNoAccountDataInLog();
+    }
+
+    [Fact]
+    public async Task A_failing_close_keeps_the_payload_and_the_row_even_past_the_flows_own_deadline()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+        _deleteThrows = new HttpRequestException("down /sessions/dkb-session-eeee5555");
+        _clock.Now = T0.AddHours(2); // past the deadline of the choice and past ExpiresAt of the row
+
+        Assert.Equal("expired", await StateOf(_attemptId));
+        await CreateLink(new ConnectLinkRequest("ING", "DE", null)); // the cleanup of old rows must not drop it either
+
+        var row = await RowAsync(_attemptId);
+        Assert.NotNull(row.WaitingPayload);
+        Assert.Equal("dkb-session-eeee5555", WaitingPayload.Open(_cipher, row.Id, row.WaitingPayload!).SessionId);
+        Assert.Contains(_logs.Lines, l => l.Contains("could not be closed"));
+        AssertNoAccountDataInLog();
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.Unauthorized)] // no error field: our own fault, not "already closed"
+    public async Task A_refusing_bank_counts_as_a_failed_close(HttpStatusCode status)
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+        _deleteAnswer = (status, "Wrong signature");
+        _clock.Now = T0.AddMinutes(20);
+
+        await StateOf(_attemptId);
+
+        Assert.NotNull((await RowAsync(_attemptId)).WaitingPayload);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.Gone)]
+    public async Task An_already_gone_session_counts_as_closed(HttpStatusCode status)
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+        _deleteAnswer = (status, "");
+        _clock.Now = T0.AddMinutes(20);
+
+        await StateOf(_attemptId);
+
+        Assert.Null((await RowAsync(_attemptId)).WaitingPayload);
+    }
+
+    [Fact]
+    public async Task The_next_read_or_tick_retries_a_failed_close_and_then_deletes_the_payload()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+        _deleteThrows = new HttpRequestException("down");
+        _clock.Now = T0.AddMinutes(20);
+        await StateOf(_attemptId);
+        Assert.NotNull((await RowAsync(_attemptId)).WaitingPayload);
+
+        _clock.Now = T0.AddHours(3);
+        await StateOf(_attemptId); // still down: tried again, kept again
+        Assert.NotNull((await RowAsync(_attemptId)).WaitingPayload);
+        Assert.Equal(2, _deletes.Count);
+
+        _deleteThrows = null; // the bank is back; this time it is the tick that retries (6 h later, past the backoff)
+        _clock.Now = T0.AddHours(9);
+        var cleanup = new ConnectAttemptCleanup(
+            new TestDbFactory(this), NewClient, _cipher, _clock, NullLogger<ConnectAttemptCleanup>.Instance);
+        await cleanup.RunAsync(CancellationToken.None);
+
+        Assert.Equal(3, _deletes.Count);
+        Assert.All(_deletes, d => Assert.Equal("/sessions/dkb-session-eeee5555", d.Path));
+        Assert.Null((await RowAsync(_attemptId)).WaitingPayload);
+        await StateOf(_attemptId);
+        Assert.Equal(3, _deletes.Count); // closed once, not again
+    }
+
+    [Fact]
+    public async Task A_failed_close_is_not_tried_again_within_the_backoff_but_is_after_it()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+        _deleteThrows = new HttpRequestException("down");
+        _clock.Now = T0.AddMinutes(20);
+        await StateOf(_attemptId);
+        Assert.Single(_deletes);
+
+        _clock.Now = T0.AddMinutes(20) + ConnectAttempts.CloseBackoff - TimeSpan.FromSeconds(1);
+        await StateOf(_attemptId);
+        await CreateLink(new ConnectLinkRequest("ING", "DE", null)); // a new link asks the same question
+        Assert.Single(_deletes); // no second call to the bank within the pause
+
+        _clock.Now = T0.AddMinutes(20) + ConnectAttempts.CloseBackoff;
+        await StateOf(_attemptId);
+        Assert.Equal(2, _deletes.Count);
+        Assert.NotNull((await RowAsync(_attemptId)).WaitingPayload);
+
+        _deleteThrows = null;
+        _clock.Now = T0.AddMinutes(40);
+        await StateOf(_attemptId);
+        Assert.Equal(3, _deletes.Count);
+        Assert.Null((await RowAsync(_attemptId)).WaitingPayload);
+    }
+
+    [Fact]
+    public async Task A_failed_row_that_still_holds_a_payload_gets_its_session_closed_and_is_then_removable()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+        // As if the choice was saved but the call failed, and the attempt was marked failed without clearing it.
+        await using (var db = NewDb())
+        {
+            var row = await db.PendingConsents.SingleAsync(p => p.Id == _attemptId);
+            row.Outcome = ConnectOutcome.Failed;
+            row.FailureReason = ConnectFailure.StoreFailed;
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal("failed", await StateOf(_attemptId)); // well before the choice deadline: it is not live any more
+
+        Assert.Equal("/sessions/dkb-session-eeee5555", Assert.Single(_deletes).Path);
+        Assert.Null((await RowAsync(_attemptId)).WaitingPayload);
+
+        _clock.Now = T0.AddHours(2);
+        await CreateLink(new ConnectLinkRequest("ING", "DE", null));
+        await using var after = NewDb();
+        Assert.DoesNotContain(after.PendingConsents, p => p.Id == _attemptId);
+    }
+
+    [Fact]
+    public async Task A_live_choice_is_left_alone_by_the_cleanup()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+        _clock.Now = T0.AddMinutes(5);
+
+        await StateOf(_attemptId);
+        await CreateLink(new ConnectLinkRequest("ING", "DE", null));
+
+        Assert.Empty(_deletes);
+        Assert.NotNull((await RowAsync(_attemptId)).WaitingPayload);
+    }
+
+    [Fact]
+    public async Task A_payload_that_cannot_be_decrypted_is_deleted_at_once_without_a_bank_call()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+        _clock.Now = T0.AddMinutes(20);
+
+        var (status, _, _) = await AttemptState(_attemptId.ToString(), cipher: new ConsentCipher(RandomNumberGenerator.GetBytes(32)));
+
+        Assert.Equal(200, status);
+        Assert.Empty(_deletes);
+        Assert.Null((await RowAsync(_attemptId)).WaitingPayload);
+        Assert.Contains(_logs.Lines, l => l.Contains("could not be read") && l.Contains("ConsentDecryptionException"));
+        AssertNoAccountDataInLog();
+    }
+
+    [Fact]
+    public async Task A_cancelled_token_ends_the_close_as_not_closed_and_keeps_the_payload()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        Assert.False(await ConnectAttempts.CloseSessionAsync(NewClient(), "dkb-session-eeee5555", "DKB", _logs.CreateLogger("t"), "The waiting session", cancelled.Token));
+
+        _clock.Now = T0.AddMinutes(20);
+        var cleanup = new ConnectAttemptCleanup(
+            new TestDbFactory(this), NewClient, _cipher, _clock, NullLogger<ConnectAttemptCleanup>.Instance);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cleanup.RunAsync(cancelled.Token));
+        Assert.NotNull((await RowAsync(_attemptId)).WaitingPayload);
+        AssertNoAccountDataInLog();
+    }
+
+    [Fact]
+    public async Task A_cancel_callback_whose_first_write_fails_still_spends_the_state_and_cannot_be_replayed()
+    {
+        var state = await StartedState();
+
+        // The only save of the cancel branch is the mark (fails); the retry re-applies all of it, spent state included.
+        Assert.Equal(400, Page(await Callback(null, state, "access_denied", failSave: 1)).Status);
+
+        var row = await RowAsync(_attemptId);
+        Assert.NotNull(row.CompletedAt);
+        Assert.Equal("cancelled", row.FailureReason);
+        Assert.Equal(400, Page(await Callback("the-code", state)).Status);
+        Assert.DoesNotContain(_calls, c => c.Path == "/sessions");
+        Assert.Equal("cancelled", await ReasonOf(_attemptId));
+    }
+
+    [Fact]
+    public async Task A_close_that_keeps_failing_is_given_up_a_day_after_the_deadline_with_one_warning()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+        _deleteThrows = new HttpRequestException("down");
+        var deadline = (await RowAsync(_attemptId)).ChoiceDeadline!.Value;
+
+        _clock.Now = deadline + ConnectAttempts.CloseRetryWindow - TimeSpan.FromMinutes(1);
+        await StateOf(_attemptId);
+        Assert.NotNull((await RowAsync(_attemptId)).WaitingPayload);
+
+        _clock.Now = deadline + ConnectAttempts.CloseRetryWindow;
+        await StateOf(_attemptId);
+
+        Assert.Null((await RowAsync(_attemptId)).WaitingPayload);
+        var warning = Assert.Single(_logs.Lines, l => l.Contains("giving up"));
+        Assert.Contains("DKB", warning);
+        AssertNoAccountDataInLog();
+    }
+
+    [Fact]
+    public async Task A_choice_that_cannot_be_kept_closes_the_new_session_and_fails_with_store_failed()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        _sessionId = "dkb-session-eeee5555";
+        var state = await StartedState(new ConnectLinkRequest("DKB", "DE", null));
+
+        // Saves of this callback: 1 spends the state, 2 keeps the choice (fails), 3 records the failure.
+        var (status, html) = Page(await Callback("the-code", state, failSave: 2));
+
+        Assert.Equal(502, status);
+        Assert.Equal(await NeutralHtml(), html);
+        Assert.Equal("/sessions/dkb-session-eeee5555", Assert.Single(_deletes).Path);
+        Assert.Equal("failed", await StateOf(_attemptId));
+        Assert.Equal("store-failed", await ReasonOf(_attemptId));
+        Assert.Null((await RowAsync(_attemptId)).WaitingPayload);
+        Assert.Empty(_consent.Accounts);
+    }
+
+    [Fact]
+    public async Task A_replayed_callback_after_the_choice_trades_no_second_code_and_changes_nothing()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        _sessionId = "dkb-session-eeee5555";
+        var state = await StartedState(new ConnectLinkRequest("DKB", "DE", null));
+        Assert.Equal(200, Page(await Callback("the-code", state)).Status);
+        var before = await RowAsync(_attemptId);
+        var sessionCalls = _calls.Count(c => c.Path == "/sessions");
+
+        Assert.Equal(400, Page(await Callback("the-code", state)).Status);
+        Assert.Equal(400, Page(await Callback(null, state, "access_denied")).Status);
+
+        Assert.Equal(sessionCalls, _calls.Count(c => c.Path == "/sessions"));
+        Assert.Equal("choose_account", await StateOf(_attemptId));
+        var after = await RowAsync(_attemptId);
+        Assert.Equal(before.WaitingPayload, after.WaitingPayload);
+        Assert.Equal(before.Version, after.Version);
+    }
+
+    [Fact]
+    public async Task One_failing_write_of_the_saved_outcome_is_retried_once_and_the_page_is_unchanged()
+    {
+        var state = await StartedState();
+
+        // Saves of this callback: 1 spends the state, 2 records "saved" (fails), 3 is the retry.
+        var (status, html) = Page(await Callback("the-code", state, failSave: 2));
+
+        Assert.Equal(200, status);
+        Assert.Equal(await NeutralHtml(), html);
+        Assert.Equal("saved", await StateOf(_attemptId));
+        Assert.Equal(1, _firstSync.Requests);
+        Assert.Single(_consent.Accounts);
+        Assert.Contains(_logs.Lines, l => l.Contains("Could not record the outcome") && l.Contains("InvalidOperationException"));
+    }
+
+    [Fact]
+    public async Task A_choice_still_open_after_the_flows_own_deadline_is_kept_and_a_new_link_does_not_drop_it()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        _sessionId = "dkb-session-eeee5555";
+        var state = await StartedState(new ConnectLinkRequest("DKB", "DE", null));
+        var waiting = _attemptId;
+        _clock.Now = T0.AddMinutes(29); // the bank answers late: the choice ends 14 minutes after the flow's own expiry
+        Assert.Equal(200, Page(await Callback("the-code", state)).Status);
+
+        _clock.Now = T0.AddMinutes(35);
+        await CreateLink(new ConnectLinkRequest("ING", "DE", null));
+
+        Assert.Equal("choose_account", await StateOf(waiting));
+        Assert.NotNull((await RowAsync(waiting)).WaitingPayload);
+        Assert.Empty(_deletes);
+    }
+
+    [Fact]
+    public async Task A_new_link_closes_a_choice_that_ran_out_before_its_row_is_deleted()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+        var old = _attemptId;
+
+        _clock.Now = T0.AddHours(2);
+        await CreateLink(new ConnectLinkRequest("ING", "DE", null));
+
+        Assert.Equal("/sessions/dkb-session-eeee5555", Assert.Single(_deletes).Path);
+        await using var db = NewDb();
+        Assert.DoesNotContain(db.PendingConsents, p => p.Id == old);
+    }
+
+    [Fact]
+    public async Task The_ticks_cleanup_closes_a_choice_that_ran_out_and_never_throws()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+        var cleanup = new ConnectAttemptCleanup(
+            new TestDbFactory(this), NewClient, _cipher, _clock, NullLogger<ConnectAttemptCleanup>.Instance);
+
+        await cleanup.RunAsync(CancellationToken.None);
+        Assert.Empty(_deletes); // before the deadline
+
+        _clock.Now = T0.AddMinutes(16);
+        await cleanup.RunAsync(CancellationToken.None);
+
+        Assert.Equal("/sessions/dkb-session-eeee5555", Assert.Single(_deletes).Path);
+        Assert.Null((await RowAsync(_attemptId)).WaitingPayload);
+
+        _deleteThrows = new HttpRequestException("down");
+        await cleanup.RunAsync(CancellationToken.None); // nothing left to do, and no fault
+    }
+
+    private sealed class TestDbFactory(ConsentEndpointsTests owner) : IDbContextFactory<GreedyNoseDbContext>
+    {
+        public GreedyNoseDbContext CreateDbContext() => owner.NewDb();
+    }
+
+    [Fact]
+    public async Task No_state_answer_holds_a_session_id_iban_or_account_name()
+    {
+        OfferAccounts(AccountJson("u1", Iban1, "CACC"), AccountJson("u2", Iban2, "CACC"));
+        await ConnectBank("DKB", "dkb-session-eeee5555");
+
+        var texts = new List<string> { (await AttemptState(_attemptId.ToString())).Text };
+        _clock.Now = T0.AddMinutes(20);
+        texts.Add((await AttemptState(_attemptId.ToString())).Text);
+
+        foreach (var text in texts)
+        {
+            Assert.DoesNotContain("dkb-session-eeee5555", text);
+            Assert.DoesNotContain(Iban1, text);
+            Assert.DoesNotContain("Name u1", text);
+            Assert.DoesNotContain("uid", text);
+        }
     }
 
     private Guid _consentUser() => _consent.UserId;

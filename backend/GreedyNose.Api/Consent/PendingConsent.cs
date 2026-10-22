@@ -46,4 +46,42 @@ public sealed class PendingConsent
     public DateTimeOffset ExpiresAt { get; set; }
 
     public int Version { get; set; }
+
+    // Story 5.3: the row is also the attempt the app follows (its Id is the attempt id). No secret: the API key
+    // protects the reads. Only short codes here, never a bank text.
+
+    /// <summary>How the callback ended, see <see cref="ConnectOutcome"/>; null = still waiting for the bank.</summary>
+    public string? Outcome { get; set; }
+
+    /// <summary>A short kebab-case code (see <see cref="ConnectFailure"/>) when <see cref="Outcome"/> is failed.</summary>
+    public string? FailureReason { get; set; }
+
+    /// <summary>
+    /// The session id and the euro accounts the owner can choose from, encrypted with <c>ConsentCipher</c>
+    /// (associated data = row id and column, see <see cref="WaitingPayload"/>). Set only while the outcome is
+    /// choose-account; deleted when the choice is made, cancelled or the deadline passes.
+    /// </summary>
+    public byte[]? WaitingPayload { get; set; }
+
+    /// <summary>Until when the owner may choose an account; set together with <see cref="WaitingPayload"/>.</summary>
+    public DateTimeOffset? ChoiceDeadline { get; set; }
+}
+
+/// <summary>The values of <see cref="PendingConsent.Outcome"/>.</summary>
+public static class ConnectOutcome
+{
+    public const string ChooseAccount = "choose-account";
+    public const string Saved = "saved";
+    public const string Failed = "failed";
+}
+
+/// <summary>The values of <see cref="PendingConsent.FailureReason"/>: short codes, never a bank text.</summary>
+public static class ConnectFailure
+{
+    public const string Cancelled = "cancelled";
+    public const string BankError = "bank-error";
+    public const string CodeNotTraded = "code-not-traded";
+    public const string BankAnswerUnusable = "bank-answer-unusable";
+    public const string StoreFailed = "store-failed";
+    public const string NoSupportedAccount = "no-supported-account";
 }

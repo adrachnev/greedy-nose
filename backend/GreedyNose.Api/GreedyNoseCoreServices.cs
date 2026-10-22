@@ -82,6 +82,17 @@ public static class GreedyNoseCoreServices
 
         services.AddTransient<AspspResolver>();
 
+        // Story 5.3: the tick closes account choices that ran out; it is not a request, so it builds its own client.
+        services.AddSingleton(sp => new ConnectAttemptCleanup(
+            sp.GetRequiredService<IDbContextFactory<GreedyNoseDbContext>>(),
+            () => EnableBankingClient.Create(
+                sp.GetRequiredService<IHttpClientFactory>(),
+                sp.GetRequiredService<EnableBankingSigner>(),
+                sp.GetRequiredService<TimeProvider>()),
+            sp.GetRequiredService<ConsentCipher>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<ILogger<ConnectAttemptCleanup>>()));
+
         // Story 5.2: the bank list for the search, cached for a few minutes. A singleton cannot hold the typed
         // client, so it builds one per read from the factory, like the debits fetcher.
         services.AddSingleton(sp => new BankCatalogue(

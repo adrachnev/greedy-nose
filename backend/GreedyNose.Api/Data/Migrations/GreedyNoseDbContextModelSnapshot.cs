@@ -33,6 +33,9 @@ namespace GreedyNose.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<DateTimeOffset?>("ChoiceDeadline")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -47,6 +50,10 @@ namespace GreedyNose.Api.Data.Migrations
                     b.Property<DateTimeOffset>("ExpiresAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
                     b.Property<string>("LinkTokenHash")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -54,6 +61,10 @@ namespace GreedyNose.Api.Data.Migrations
 
                     b.Property<DateTimeOffset?>("LinkUsedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Outcome")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<string>("PsuType")
                         .IsRequired()
@@ -72,6 +83,9 @@ namespace GreedyNose.Api.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
+
+                    b.Property<byte[]>("WaitingPayload")
+                        .HasColumnType("bytea");
 
                     b.HasKey("Id");
 
