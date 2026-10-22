@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Net;
 using System.Text.Json;
 using GreedyNose.Api.Data;
 using GreedyNose.Api.EnableBanking;
@@ -166,7 +165,7 @@ public static class ConsentEndpoints
         // Nothing below runs — no database write, no call to Enable Banking — without a plausible token.
         if (string.IsNullOrEmpty(token) || token.Length > MaxSecretLength)
         {
-            return Rejected("Link not valid", "This link is not valid. Request a new one.");
+            return Rejected("Link not valid", "This link is not valid. Go back to Greedy Nose and try again.");
         }
 
         var now = clock.GetUtcNow();
@@ -176,7 +175,7 @@ public static class ConsentEndpoints
 
         if (record is null)
         {
-            return Rejected("Link not valid", "This link is not valid. Request a new one.");
+            return Rejected("Link not valid", "This link is not valid. Go back to Greedy Nose and try again.");
         }
 
         // Spend the link before anything else. The state is minted in the same write, so the callback
@@ -193,7 +192,7 @@ public static class ConsentEndpoints
         catch (DbUpdateConcurrencyException)
         {
             // A second request spent the same link first — it is used, which is all the loser learns.
-            return Rejected("Link not valid", "This link is not valid. Request a new one.");
+            return Rejected("Link not valid", "This link is not valid. Go back to Greedy Nose and try again.");
         }
 
         // The bank's own limit, read fresh now: the link may be older than the list it was checked against.
@@ -204,7 +203,7 @@ public static class ConsentEndpoints
         {
             logger.LogWarning("The bank could not be resolved when the link was used: {Outcome}.", bank.Outcome);
             return Rejected(
-                "Could not start", "The bank connection could not be started. Request a new link.",
+                "Could not start", "The bank connection could not be started. Go back to Greedy Nose and try again.",
                 StatusCodes.Status502BadGateway);
         }
 
@@ -231,7 +230,7 @@ public static class ConsentEndpoints
             }
 
             return Rejected(
-                "Could not start", "The bank connection could not be started. Request a new link.",
+                "Could not start", "The bank connection could not be started. Go back to Greedy Nose and try again.",
                 StatusCodes.Status502BadGateway);
         }
 
@@ -260,12 +259,12 @@ public static class ConsentEndpoints
             // a short, control-stripped code goes to the log (e.g. access_denied).
             var loggedError = new string([.. error.Where(c => !char.IsControl(c)).Take(MaxLoggedErrorLength)]);
             logger.LogInformation("The bank returned an error to the callback: {Error}", loggedError);
-            return Rejected("Authorization failed", "Authorization was not completed.");
+            return CallbackPage(StatusCodes.Status400BadRequest);
         }
 
         if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state) || state.Length > MaxSecretLength)
         {
-            return Rejected("Connection failed", "This connection could not be completed. Start again.");
+            return CallbackPage(StatusCodes.Status400BadRequest);
         }
 
         var now = clock.GetUtcNow();
@@ -275,7 +274,7 @@ public static class ConsentEndpoints
 
         if (record is null)
         {
-            return Rejected("Connection failed", "This connection could not be completed. Start again.");
+            return CallbackPage(StatusCodes.Status400BadRequest);
         }
 
         // Spend the state before trading the code: a replay (or a concurrent twin) loses here and never
@@ -289,7 +288,7 @@ public static class ConsentEndpoints
         }
         catch (DbUpdateConcurrencyException)
         {
-            return Rejected("Connection failed", "This connection could not be completed. Start again.");
+            return CallbackPage(StatusCodes.Status400BadRequest);
         }
 
         var result = await TryPostAsync(eb, "/sessions", new SessionRequest(code), logger, ct);
@@ -300,9 +299,7 @@ public static class ConsentEndpoints
                 logger.LogWarning("Enable Banking refused the session request (HTTP {Status}).", result.StatusCode);
             }
 
-            return Rejected(
-                "Connection failed", "The bank connection could not be completed. Start again.",
-                StatusCodes.Status502BadGateway);
+            return CallbackPage(StatusCodes.Status502BadGateway);
         }
 
         JsonElement root;
@@ -321,9 +318,7 @@ public static class ConsentEndpoints
             // A 200 without a session id means the shape changed under us; the body stays out of the
             // page and the log (it may carry account data).
             logger.LogWarning("Enable Banking answered the session request without a session id.");
-            return Rejected(
-                "Connection failed", "The bank connection could not be completed. Start again.",
-                StatusCodes.Status502BadGateway);
+            return CallbackPage(StatusCodes.Status502BadGateway);
         }
 
         var offered = ReadAccounts(root);
@@ -346,9 +341,7 @@ public static class ConsentEndpoints
                 // Nothing stored, nothing synced; the session just opened is useless, so close it (best effort).
                 logger.LogWarning("{Aspsp} offered several accounts and none could be chosen safely; nothing was stored.", record.AspspName);
                 await CloseOldSessionAsync(eb, sessionId, record.AspspName, logger);
-                return Rejected(
-                    "No account chosen",
-                    "The bank offered several accounts and none could be chosen safely. Nothing was connected.");
+                return CallbackPage(StatusCodes.Status400BadRequest);
             }
 
             accounts = [chosen];
@@ -366,9 +359,7 @@ public static class ConsentEndpoints
             // E.g. the database or the encryption fails. The code is already traded and the state spent,
             // so the owner just requests a new link. Type only: a message can carry connection details.
             logger.LogError("Could not store the consent: {ExceptionType}.", ex.GetType().Name);
-            return Rejected(
-                "Connection failed", "The bank connection could not be completed. Start again.",
-                StatusCodes.Status502BadGateway);
+            return CallbackPage(StatusCodes.Status502BadGateway);
         }
 
         logger.LogInformation("Consent completed for {Aspsp}, {AccountCount} account(s).", record.AspspName, accounts.Count);
@@ -392,7 +383,7 @@ public static class ConsentEndpoints
             await CloseOldSessionAsync(eb, oldSessionId, record.AspspName, logger);
         }
 
-        return Page(StatusCodes.Status200OK, $"<h1>Connected</h1><p>Connected to {Encode(record.AspspName)}. You can close this page.</p>");
+        return CallbackPage(StatusCodes.Status200OK);
     }
 
     /// <summary>
@@ -436,14 +427,24 @@ public static class ConsentEndpoints
         }
     }
 
-    private static string Encode(string value) => WebUtility.HtmlEncode(value);
-
     private static IResult Rejected(string title, string message, int status = StatusCodes.Status400BadRequest) =>
         Page(status, $"<h1>{title}</h1><p>{message}</p>");
 
+    /// <summary>
+    /// Story 5.1a: the one page every /callback outcome ends in. It names neither the bank nor the outcome
+    /// (the app asks the backend for the result), and its link carries no secret, so a replayed or failed
+    /// callback looks exactly like a good one. Only the HTTP status differs.
+    /// </summary>
+    public const string CallbackLink = "greedynose://connected";
+
+    private static IResult CallbackPage(int status) => Page(status,
+        "<h1>You can close this page.</h1><p>Greedy Nose shows the result.</p>" +
+        $"<p><a href=\"{CallbackLink}\" style=\"display:inline-block;padding:12px 20px;background:#111;color:#fff;border-radius:8px;text-decoration:none\">Open Greedy Nose</a></p>" +
+        $"<script>setTimeout(function(){{window.location.href=\"{CallbackLink}\";}},300);</script>");
+
     private static IResult Page(int status, string body) =>
         new BrowserResult(Results.Content(
-            $"<!doctype html><meta charset=\"utf-8\"><body style=\"font-family:sans-serif\">{body}</body>",
+            $"<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><body style=\"font-family:sans-serif\">{body}</body>",
             "text/html",
             statusCode: status));
 

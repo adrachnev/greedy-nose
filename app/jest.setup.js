@@ -53,3 +53,14 @@ global.fetch = function fetchNotMocked(input) {
     ),
   );
 };
+
+// react-native-inappbrowser-reborn (src/data/openConnectLink.ts) is a native module: no device in
+// Jest. A stand-in for the surface the app calls; a test that cares sets its own return values.
+jest.mock('react-native-inappbrowser-reborn', () => {
+  const InAppBrowser = {
+    isAvailable: jest.fn(() => Promise.resolve(true)),
+    open: jest.fn(() => Promise.resolve({ type: 'dismiss' })),
+    close: jest.fn(),
+  };
+  return { InAppBrowser, default: InAppBrowser };
+});

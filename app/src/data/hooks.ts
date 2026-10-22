@@ -8,7 +8,8 @@
 // derives it from the current rule), so there is nothing on the wire to
 // switch, and rules stay in the local store under both flags.
 
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { AppState, Linking } from 'react-native';
 import { Debit, Payee, Rule, RuleDraft } from '../domain/model';
 import { debits as fixtureDebits, payees as fixturePayees, subscribeToDataChanges } from '../mocks/data';
 import {
@@ -20,6 +21,15 @@ import {
   subscribe as subscribeToFeed,
 } from './backendFeed';
 import { USE_BACKEND } from './config';
+import {
+  checkAfterReturn,
+  ConnectFlow,
+  getConnectFlow,
+  resetConnectFlow,
+  returnToApp,
+  startConnect,
+  subscribeToConnectFlow,
+} from './connectStore';
 import {
   getRegistrationState,
   RegistrationState,
@@ -165,4 +175,81 @@ export function useRulesResync(): void {
   useEffect(() => {
     startRulesResync();
   }, []);
+}
+
+// --- Connect a bank -------------------------------------------------------------
+
+/** The link the backend's callback page opens (ARCHITECTURE.md, "Consent lifecycle"). */
+export const CONNECTED_LINK_PREFIX = 'greedynose://connected';
+
+export type ConnectBank = {
+  flow: ConnectFlow;
+  start: (bankName: string) => void;
+  /** Back to the form; also what "Try again" does. */
+  reset: () => void;
+  /** Reads the result now, for the user who came back and sees "not yet". */
+  checkNow: () => void;
+};
+
+/**
+ * The ways back from the bank's pages, for as long as the app runs — call it
+ * once from the root component (the Settings tab is not mounted until opened,
+ * and the app may have been killed and restarted while the user was at the
+ * bank): the app link, the app coming to the foreground, and the app start
+ * itself. All three only ask the store to look; it resumes a stored attempt
+ * after a restart and ignores the call when there is none.
+ */
+export function useConnectReturn(onResumed?: () => void): void {
+  // Latest callback without re-attaching the listeners when its identity changes.
+  const onResumedRef = useRef(onResumed);
+  onResumedRef.current = onResumed;
+
+  useEffect(() => {
+    const onUrl = (url: string | null) => {
+      if (typeof url === 'string' && url.startsWith(CONNECTED_LINK_PREFIX)) {
+        resume(true);
+      }
+    };
+    const resume = (viaLink: boolean) => {
+      returnToApp(viaLink).then(
+        checked => {
+          if (checked) {
+            onResumedRef.current?.();
+          }
+        },
+        () => {},
+      );
+    };
+    resume(false);
+    const linkSubscription = Linking.addEventListener('url', event => onUrl(event.url));
+    Linking.getInitialURL().then(onUrl, () => {});
+    const stateSubscription = AppState.addEventListener('change', state => {
+      if (state === 'active') {
+        resume(false);
+      }
+    });
+    return () => {
+      linkSubscription.remove();
+      stateSubscription.remove();
+    };
+  }, []);
+}
+
+/** The flow of connecting one bank, for the screen that shows it. */
+export function useConnectBank(): ConnectBank {
+  const flow = useSyncExternalStore(subscribeToConnectFlow, getConnectFlow);
+
+  return useMemo(
+    () => ({
+      flow,
+      start: (bankName: string) => {
+        startConnect(bankName);
+      },
+      reset: resetConnectFlow,
+      checkNow: () => {
+        checkAfterReturn();
+      },
+    }),
+    [flow],
+  );
 }

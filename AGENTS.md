@@ -129,6 +129,15 @@ the single source of truth for product behavior; where anything else disagrees, 
 - Wireless `adb` pairing lapses and needs redoing periodically. Separately, a missing
   `adb reverse` tunnel for Metro's port (8081) looks identical on the device to "Metro isn't
   running" even when Metro is healthy — check the tunnel before assuming the bundler is down.
+- Phone: `adb devices` lists the phone twice (two mDNS entries of one device); pass `-s adb-<serial>._adb-tls-connect._tcp`.
+  A command sent while no device is connected hangs until it comes back. Check a process death with `adb shell am kill
+  com.greedynose` (background only; `force-stop` drops the saved state and gives a false pass), then start it by
+  `adb shell am start -a android.intent.action.VIEW -d greedynose://connected com.greedynose` and read `adb logcat -d -b
+  crash`. The phone freezes and kills background apps under memory pressure (`moto_freezer`, low-memory killer), so the
+  app must survive a cold start at any time (sign-in attempt kept in AsyncStorage; `MainActivity` installs
+  `RNScreensFragmentFactory`). Recording a sign-in run: the focus log (`dumpsys window | grep mCurrentFocus`) and
+  `logcat -b all` filtered to `ActivityTaskManager.*START u0`, `moto_freezer`, `am_proc_died`, `FATAL EXCEPTION`, with
+  `dat=` and URLs stripped (a one-time link carries a token). Pipe through `sed -u`, not `cut` (it buffers).
 
 ## Cloud and release operations
 

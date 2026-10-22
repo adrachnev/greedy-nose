@@ -249,6 +249,9 @@ public sealed class ConsentEndpointsTests : IDisposable
     private static string ReadState(string authBody) =>
         JsonDocument.Parse(authBody).RootElement.GetProperty("state").GetString()!;
 
+    /// <summary>The one neutral callback page (side-effect free path); every callback branch must equal it.</summary>
+    private async Task<string> NeutralHtml() => Page(await Callback(null, null, "x")).Html;
+
     private static (int Status, string Html) Page(IResult result)
     {
         var content = Assert.IsType<ContentHttpResult>(Unwrap(result));
@@ -579,7 +582,7 @@ public sealed class ConsentEndpointsTests : IDisposable
         Assert.Equal("DE", aspsp.GetProperty("country").GetString());
 
         var (_, html) = Page(await Callback("the-code", state));
-        Assert.Contains("Connected to Mock ASPSP.", html);
+        Assert.Contains("You can close this page.", html);
         Assert.Equal("Mock ASPSP", _consent.AspspName);
     }
 
@@ -656,7 +659,7 @@ public sealed class ConsentEndpointsTests : IDisposable
         var (status, html) = Page(await Callback("the-code", state));
 
         Assert.Equal(200, status);
-        Assert.Contains("Connected to N26. You can close this page.", html);
+        Assert.Contains("You can close this page.", html);
         Assert.Equal("N26", _consent.AspspName);
         Assert.Equal(BankSessionId, _consent.SessionId);
         Assert.Equal(BankIban, _consent.PrimaryAccount!.Iban);
@@ -785,9 +788,9 @@ public sealed class ConsentEndpointsTests : IDisposable
         var (status, html) = Page(await Callback(null, null, "<script>alert(1)</script>"));
 
         Assert.Equal(400, status);
-        Assert.DoesNotContain("script", html);
         Assert.DoesNotContain("alert", html);
-        Assert.Contains("Authorization was not completed.", html);
+        Assert.DoesNotContain("<script>alert", html);
+        Assert.Contains("You can close this page.", html);
     }
 
     [Fact]
@@ -808,8 +811,63 @@ public sealed class ConsentEndpointsTests : IDisposable
 
         var (_, html) = Page(await Callback("the-code", state));
 
-        Assert.DoesNotContain("<b>", html);
-        Assert.Contains("Connected to &lt;b&gt;Evil&lt;/b&gt; &amp; Co. You can close this page.", html);
+        Assert.DoesNotContain("Evil", html);
+        Assert.DoesNotContain("N26", html);
+        Assert.Contains("You can close this page.", html);
+    }
+
+    // --- Story 5.1a: one neutral page for every callback outcome -------------------------------------
+
+    [Fact]
+    public async Task Success_failure_and_a_spent_state_end_in_the_same_neutral_page()
+    {
+        var state = await StartedState();
+        var (okStatus, ok) = Page(await Callback("the-code", state));
+        var (spentStatus, spent) = Page(await Callback("the-code", state));
+        var (errStatus, err) = Page(await Callback(null, null, "access_denied"));
+        var (unknownStatus, unknown) = Page(await Callback("c", "no-such-state"));
+
+        Assert.Equal(200, okStatus);
+        Assert.Equal(400, spentStatus);
+        Assert.Equal(400, errStatus);
+        Assert.Equal(400, unknownStatus);
+        Assert.Equal(ok, spent);
+        Assert.Equal(ok, err);
+        Assert.Equal(ok, unknown);
+        Assert.Contains("You can close this page.", ok);
+        Assert.Contains("Greedy Nose shows the result.", ok);
+    }
+
+    [Fact]
+    public async Task A_failed_session_trade_keeps_its_status_but_shows_the_neutral_page()
+    {
+        var (okStatus, ok) = Page(await Callback("the-code", await StartedState()));
+        Assert.Equal(200, okStatus);
+        var state = await StartedState();
+        _bank = _ => (HttpStatusCode.Unauthorized, """{"error":"x"}""");
+
+        var (status, html) = Page(await Callback("bad-code", state));
+
+        Assert.Equal(502, status);
+        Assert.Equal(ok, html);
+    }
+
+    [Fact]
+    public async Task The_neutral_page_has_a_visible_link_and_a_script_to_the_same_secretless_link()
+    {
+        var state = await StartedState(new ConnectLinkRequest("N26", "DE", "personal"));
+
+        var (_, html) = Page(await Callback("the-code", state));
+
+        Assert.Contains("href=\"greedynose://connected\"", html);
+        Assert.Contains(">Open Greedy Nose</a>", html);
+        Assert.Contains("<script>", html);
+        Assert.Contains("window.location.href=\"greedynose://connected\"", html);
+        Assert.DoesNotContain(state, html);
+        Assert.DoesNotContain("the-code", html);
+        Assert.DoesNotContain("N26", html);
+        Assert.DoesNotContain("Connected to", html);
+        Assert.DoesNotContain("failed", html, StringComparison.OrdinalIgnoreCase);
     }
 
     // --- Story 2.4: the first sync is requested once, after the consent is stored ------------------
@@ -864,7 +922,7 @@ public sealed class ConsentEndpointsTests : IDisposable
         var (status, html) = Page(await Callback("the-code", state));
 
         Assert.Equal(200, status);
-        Assert.Contains("Connected to", html);
+        Assert.Contains("You can close this page.", html);
         Assert.Equal(BankSessionId, _consent.SessionId);
         Assert.Contains(_logs.Lines, l => l.Contains("InvalidOperationException"));
         Assert.DoesNotContain(_logs.Lines, l => l.Contains("secret detail") || l.Contains(BankSessionId));
@@ -879,6 +937,7 @@ public sealed class ConsentEndpointsTests : IDisposable
         var (status, html) = Page(await Callback("the-code", state));
 
         Assert.Equal(502, status);
+        Assert.Equal(await NeutralHtml(), html);
         Assert.DoesNotContain("secret-detail", html);
         Assert.Null(_consent.SessionId);
     }
@@ -889,7 +948,9 @@ public sealed class ConsentEndpointsTests : IDisposable
         var state = await StartedState();
         _bank = _ => (HttpStatusCode.OK, """{"accounts":[]}""");
 
-        Assert.Equal(502, Page(await Callback("the-code", state)).Status);
+        var (idStatus, idHtml) = Page(await Callback("the-code", state));
+        Assert.Equal(502, idStatus);
+        Assert.Equal(await NeutralHtml(), idHtml);
         Assert.Null(_consent.SessionId);
     }
 
@@ -971,6 +1032,7 @@ public sealed class ConsentEndpointsTests : IDisposable
         var (status, html) = Page(await Callback("the-code", state));
 
         Assert.Equal(502, status);
+        Assert.Equal(await NeutralHtml(), html);
         Assert.DoesNotContain("secret-detail", html);
         Assert.DoesNotContain(_logs.Lines, l => l.Contains("secret-detail"));
         Assert.Null(_consent.SessionId);
@@ -1055,6 +1117,7 @@ public sealed class ConsentEndpointsTests : IDisposable
 
         var (status, html) = Page(result);
         Assert.Equal(502, status);
+        Assert.Equal(await NeutralHtml(), html);
         Assert.DoesNotContain("secret detail", html);
         Assert.DoesNotContain(BankSessionId, html);
         Assert.DoesNotContain(_logs.Lines, l => l.Contains("secret detail") || l.Contains(BankSessionId));
@@ -1149,7 +1212,7 @@ public sealed class ConsentEndpointsTests : IDisposable
         var (page, html) = await ConnectBank("N26", "new-session-bbbb2222");
 
         Assert.Equal(200, page);
-        Assert.Contains("Connected to N26", html);
+        Assert.Contains("You can close this page.", html);
         Assert.Equal("new-session-bbbb2222", _consent.SessionIdFor(_consentUser(), "N26"));
         Assert.Contains(_logs.Lines, l => l.Contains("could not be closed") && l.Contains("N26"));
         AssertNoSessionIdInLog();
@@ -1204,7 +1267,9 @@ public sealed class ConsentEndpointsTests : IDisposable
         var result = await ConsentEndpoints.CallbackAsync(
             "the-code", state, null, db, NewClient(), failing, _firstSync, _clock, _logs, CancellationToken.None);
 
-        Assert.Equal(502, Page(result).Status);
+        var (storeStatus, storeHtml) = Page(result);
+        Assert.Equal(502, storeStatus);
+        Assert.Equal(await NeutralHtml(), storeHtml);
         Assert.Empty(_deletes);
     }
 
@@ -1274,7 +1339,7 @@ public sealed class ConsentEndpointsTests : IDisposable
         var (status, html) = await ConnectBank("DKB", "dkb-session-eeee5555");
 
         Assert.Equal(400, status);
-        Assert.Contains("none could be chosen safely", html);
+        Assert.Equal(await NeutralHtml(), html);
         Assert.Null(_consent.SessionIdFor(_consentUser(), "DKB"));
         Assert.Empty(_consent.Accounts);
         Assert.Equal(0, _firstSync.Requests);

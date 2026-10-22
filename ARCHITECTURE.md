@@ -676,6 +676,37 @@ backend holds the logic, the app asks and shows. Connecting and the first sync a
    close this page"), because a second call of the callback with a spent code looks like a failure although the first
    one worked. The app does not rely on the page: whenever it comes to the foreground it reads the state of the
    attempt (Story 5.3) and offers "Try again". A verified App Link (no browser question) is a later option.
+
+   **Research and chosen solution (Story 5.1a, 2026-10-21).** What established apps do: RFC 8252 ("OAuth 2.0 for
+   Native Apps") says a native app must not use an embedded WebView for the sign-in but the system browser or a
+   Chrome Custom Tab, and AppAuth for Android does exactly that and does not support a WebView at all (sources: the
+   AppAuth-Android README; Android developer docs, "In-app browsing using Embedded Web"). The way back is a redirect
+   to the app, by a custom scheme or, more safely, a verified App Link; a custom scheme can be claimed by another app,
+   an App Link needs a file on a server we control and has no browser question. Other open-banking providers say the
+   same (custom scheme or App Link as return; a custom scheme fails in a plain WebView; a provider may accept only
+   https as redirect URL). **Decided 2026-10-22, measured on the owner's phone (Motorola, Android, DKB and N26, cloud
+   backend):** a **Chrome Custom Tab** (`browserPackage` `com.android.chrome`; if Chrome is missing the default
+   browser's Custom Tab, then the plain browser) and the neutral callback page that opens `greedynose://connected` with
+   a visible button. The link carries no secret, so a foreign app claiming the scheme learns nothing; the state is
+   read from the backend with the API key. The app keeps the running attempt (bank name, the bank's `validUntil` before
+   the attempt, start time; never the link or any id) in AsyncStorage for 30 minutes, so a return after the app
+   process died still ends in "connected". Without a `browserPackage` the library takes the user's default browser if it
+   can do Custom Tabs (here DuckDuckGo), which is why Chrome has to be asked for by name.
+   **What the measurements showed.** (1) The Custom Tab survives the round trips to a password manager and the bank's
+   app (DuckDuckGo's did too); the page opens the app by itself in Chrome without a prompt (DuckDuckGo asks once).
+   (2) The bank's app (DKB, N26) does not reliably bring the browser back by itself (the owner saw it return in some
+   runs and not in others; in the one run recorded with start events the user switched back), so the waiting text
+   tells the user to switch back. (3) The phone (Motorola, 30 % battery, little free memory) freezes background apps (`moto_freezer`) and the
+   low-memory killer ended the Greedy Nose process while the user was in the bank's app, twice in four runs. (4) The
+   new process, started by the link, crashed once with "Screen fragments should never be restored"
+   (react-native-screens 4.27.0): `MainActivity` now installs `RNScreensFragmentFactory` before `super.onCreate`
+   (the README's current way; checked on the device with `am kill` plus a start by the link, before and after).
+   (5) The callback page is neutral for every outcome, so a replayed callback (N26 once) no longer looks like a failure.
+   **Not confirmed:** whether Enable Banking accepts anything but https as redirect URL (the redirect URL registered
+   with it stays the https callback of the backend, so the `greedynose://` hop is made by our own page and the
+   question does not arise); a reason why the bank's app returns to the browser by itself in some runs and not in
+   others (not found; the focus log cannot tell who brought the browser forward). These sources are partly vendor
+   blogs and forum posts; the RFC text and the Android docs were not read in full.
 3. **Account.** With one account the backend saves the bank at once. With several it keeps the session id and the
    account list **encrypted** (same key as `BankConsents`) on the pending consent, with a short deadline from the
    callback (set in the story), and the app fetches the list and sends the choice. The list holds a handle, the account

@@ -9,6 +9,7 @@ import DebitDetailScreen from '../screens/DebitDetailScreen';
 import DebitListScreen from '../screens/DebitListScreen';
 import PayeeEditScreen from '../screens/PayeeEditScreen';
 import RulesListScreen from '../screens/RulesListScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 import StubScreen from '../screens/StubScreen';
 import { dark, light } from '../theme/colors';
 import { MAIN_TAB_NAVIGATOR_ID } from './ids';
@@ -90,10 +91,6 @@ function RulesNavigator() {
       <RulesStack.Screen name="PayeeEdit" component={PayeeEditScreen} />
     </RulesStack.Navigator>
   );
-}
-
-function SettingsStub() {
-  return <StubScreen title="Settings" mockFile="06-settings.html" showDataSourceBadge />;
 }
 
 const TAB_ICON_BY_ROUTE: Record<keyof MainTabParamList, TabIconName> = {
@@ -197,7 +194,7 @@ function MainTabs() {
       />
       {/* Settings has no nested stack, so neither option has anything to do
           there — there is no stack to pop and nothing to blur away. */}
-      <Tab.Screen name="Settings" component={SettingsStub} />
+      <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
   );
 }
