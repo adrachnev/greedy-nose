@@ -91,6 +91,9 @@ public sealed class GreedyNoseDbContext(DbContextOptions<GreedyNoseDbContext> op
             consent.Property(c => c.PayloadCipher).HasColumnType("bytea");
 
             consent.Property(c => c.LastError).HasMaxLength(BankConsent.LastErrorMaxLength);
+            consent.Property(c => c.Country).HasMaxLength(2);
+            // Story 5.5: makes "repeat the first sync" atomic (two repeats at once: one wins). Model only, no column change.
+            consent.Property(c => c.FirstSyncRequestedAt).IsConcurrencyToken();
 
             consent.HasOne<User>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
         });

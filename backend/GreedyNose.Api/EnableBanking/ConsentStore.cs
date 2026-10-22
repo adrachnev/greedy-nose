@@ -71,7 +71,10 @@ public sealed record ConsentSnapshot(
     string? AspspName,
     IReadOnlyList<ConnectedAccount> Accounts,
     DateTimeOffset ConnectedAt,
-    DateTimeOffset? ExpiresAt);
+    DateTimeOffset? ExpiresAt,
+    // Story 5.5, trailing and optional: written to the row when a bank is saved; a snapshot read back leaves them null.
+    string? Country = null,
+    DateTimeOffset? FirstSyncRequestedAt = null);
 
 /// <summary>
 /// Holds the live consents in memory — one per <c>(UserId, AspspName)</c>, so several banks at once
@@ -213,12 +216,14 @@ public sealed class ConsentStore(IConsentPersistence persistence, TimeSpan conse
         IReadOnlyList<ConnectedAccount> accounts,
         DateTimeOffset now,
         DateTimeOffset? expiresAt,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? country = null,
+        DateTimeOffset? firstSyncRequestedAt = null)
     {
         await _completeGate.WaitAsync(ct);
         try
         {
-            var snapshot = new ConsentSnapshot(userId, sessionId, aspspName, accounts, now, expiresAt);
+            var snapshot = new ConsentSnapshot(userId, sessionId, aspspName, accounts, now, expiresAt, country, firstSyncRequestedAt);
             await persistence.SaveAsync(snapshot, ct);
 
             lock (_gate)

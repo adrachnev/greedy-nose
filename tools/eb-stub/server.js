@@ -16,6 +16,9 @@
 //   DELETE /sessions/{id}        answers 200 and counts the call
 //   GET    /deleted-count        {"count": n, "ids": [...]}  (the ids are invented session ids)
 //   POST   /scenario/{name}      switches the scenario without a restart
+//   GET    /accounts/{uid}/transactions   the first sync (Story 5.5), answered by a mode: ok = an empty list of
+//                                 transactions, limit = 429 with an error body, notfound = 404 (the default)
+//   POST   /transactions-mode/{ok|limit|notfound}   switches that mode
 const http = require('http');
 
 const ASPSPS = {
@@ -30,6 +33,8 @@ const ASPSPS = {
 
 const SCENARIOS = ['one', 'several', 'none'];
 let scenario = SCENARIOS.includes(process.env.SCENARIO) ? process.env.SCENARIO : 'one';
+const MODES = ['ok', 'limit', 'notfound'];
+let mode = 'notfound';
 let lastState = null;
 let sessionCounter = 0;
 const deleted = [];
@@ -78,6 +83,17 @@ http.createServer((req, res) => {
       return send(res, 200, {});
     }
     if (req.method === 'GET' && path === '/deleted-count') return send(res, 200, { count: deleted.length, ids: deleted });
+    if (req.method === 'GET' && path.startsWith('/accounts/') && path.endsWith('/transactions')) {
+      if (mode === 'ok') return send(res, 200, { transactions: [], continuation_key: null });
+      if (mode === 'limit') return send(res, 429, { error: 'RATE_LIMIT_EXCEEDED', message: 'stub: daily limit used up' });
+      return send(res, 404, { error: 'ACCOUNT_NOT_FOUND', message: 'stub: no such account' });
+    }
+    if (req.method === 'POST' && path.startsWith('/transactions-mode/')) {
+      const name = path.slice('/transactions-mode/'.length);
+      if (!MODES.includes(name)) return send(res, 400, { error: 'unknown mode' });
+      mode = name;
+      return send(res, 200, { mode });
+    }
     if (req.method === 'POST' && path.startsWith('/scenario/')) {
       const name = path.slice('/scenario/'.length);
       if (!SCENARIOS.includes(name)) return send(res, 400, { error: 'unknown scenario' });

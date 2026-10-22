@@ -128,8 +128,16 @@ namespace GreedyNose.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("Country")
+                        .HasMaxLength(2)
+                        .HasColumnType("character varying(2)");
+
                     b.Property<string>("ExpiryNotifiedSessionHash")
                         .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("FirstSyncRequestedAt")
+                        .IsConcurrencyToken()
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset?>("LastAttemptAt")
                         .HasColumnType("timestamp with time zone");

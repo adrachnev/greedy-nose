@@ -75,7 +75,10 @@ public static class ConnectChoice
             i == suggested))];
     }
 
-    private static string DisplayName(ConnectedAccount account)
+    private static string DisplayName(ConnectedAccount account) => AccountName(account) ?? "Account";
+
+    /// <summary>The account's name, else its product (control characters stripped, at most 100 characters); null when it has neither.</summary>
+    public static string? AccountName(ConnectedAccount account)
     {
         foreach (var candidate in new[] { account.Name, account.Product })
         {
@@ -86,7 +89,7 @@ public static class ConnectChoice
             }
         }
 
-        return "Account";
+        return null;
     }
 
     private static string Kind(string? cashAccountType) => cashAccountType?.Trim().ToUpperInvariant() switch
@@ -152,7 +155,7 @@ public static class ConnectChoice
             var aspsp = row.AspspName;
             // StoreConsentAsync never throws and closes the new session itself (once) when it fails.
             var stored = await ConsentEndpoints.StoreConsentAsync(
-                userId, aspsp, choice.SessionId, choice.Accounts[index], choice.ValidUntil, now, consent, eb, logger);
+                userId, aspsp, row.Country, choice.SessionId, choice.Accounts[index], choice.ValidUntil, now, consent, eb, logger);
 
             if (!stored.Stored)
             {

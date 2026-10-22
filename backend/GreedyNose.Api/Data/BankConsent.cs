@@ -46,4 +46,16 @@ public sealed class BankConsent
     /// is needed (SaveAsync leaves this column alone). Set only once a device took the push. Null = never told.
     /// </summary>
     public string? ExpiryNotifiedSessionHash { get; set; }
+
+    /// <summary>
+    /// The country of the bank (two letters), written when the bank is saved (Story 5.5) from the attempt that
+    /// started it. Null for rows saved before that; nothing calls the bank to fill it. Public data, not account data.
+    /// </summary>
+    public string? Country { get; set; }
+
+    /// <summary>
+    /// When the first sync was last requested: set when the bank is saved and again when the owner repeats a failed
+    /// first sync (Story 5.5). Null for older rows; then the time of connection counts.
+    /// </summary>
+    public DateTimeOffset? FirstSyncRequestedAt { get; set; }
 }

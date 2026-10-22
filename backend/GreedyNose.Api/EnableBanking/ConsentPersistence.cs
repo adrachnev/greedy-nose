@@ -63,6 +63,8 @@ public sealed class DbConsentPersistence(IDbContextFactory<GreedyNoseDbContext> 
                 SessionIdCipher = sessionCipher,
                 PayloadCipher = payloadCipher,
                 UpdatedAt = snapshot.ConnectedAt,
+                Country = snapshot.Country,
+                FirstSyncRequestedAt = snapshot.FirstSyncRequestedAt?.TruncateToMicroseconds(),
             });
         }
         else
@@ -70,6 +72,9 @@ public sealed class DbConsentPersistence(IDbContextFactory<GreedyNoseDbContext> 
             row.SessionIdCipher = sessionCipher;
             row.PayloadCipher = payloadCipher;
             row.UpdatedAt = snapshot.ConnectedAt;
+            // A reconnect overwrites what it knows and keeps what it does not (an older row has no country).
+            row.Country = snapshot.Country ?? row.Country;
+            row.FirstSyncRequestedAt = snapshot.FirstSyncRequestedAt?.TruncateToMicroseconds() ?? row.FirstSyncRequestedAt;
         }
 
         await db.SaveChangesAsync(ct);

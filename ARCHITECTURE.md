@@ -737,7 +737,15 @@ rows (a position as id, name, kind, the last four IBAN digits, and a "suggested"
 closes the waiting session. A choice first claims the attempt (Outcome saved, payload deleted, one writer wins by the
 row's version) and only then stores the consent; if the store fails the new session is closed and the attempt reads
 `failed`. Known residual: a process that dies between the claim and the store leaves a "saved" attempt without a
-consent and an open session until the bank's own validity ends.
+consent and an open session until the bank's own validity ends. *My banks* (Story 5.5): `GET /my-banks` lists the saved
+banks (name, country, account name, valid-until, one state) from stored data only, never calling a bank; the states are
+`expired` (also a dead and announced consent), `connected` (the account has its first-sync row), `syncing` and
+`sync_failed` (the last attempt failed after the first sync was requested, with the reason `daily-limit`, `timeout` or
+`bank-error`; or 30 minutes passed without a result, reason `not-finished`, which covers a queue message that was given
+up). `POST /my-banks/first-sync` repeats a failed first sync (no new consent): it is refused unless the state is
+`sync_failed`, and on the UTC day of a daily-limit failure (R29). `BankConsents` got `Country` (written when the bank is
+saved; older rows stay null) and `FirstSyncRequestedAt` (written at saving and by the repeat; an EF concurrency token,
+so two repeats cannot both queue a tick; timestamps are cut to whole microseconds because Postgres keeps no more).
 
 **A dead connection is never silent (R19).** No alerts arriving looks exactly like "nothing bad
 happened" — the one failure mode that breaks R1 while appearing to work perfectly. So expiry

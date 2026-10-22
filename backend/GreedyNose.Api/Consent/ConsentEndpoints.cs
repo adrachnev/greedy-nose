@@ -405,7 +405,7 @@ public static class ConsentEndpoints
         }
 
         var stored = await StoreConsentAsync(
-            record.UserId, record.AspspName, sessionId, euro[0], ReadValidUntil(root), now, consent, eb, logger);
+            record.UserId, record.AspspName, record.Country, sessionId, euro[0], ReadValidUntil(root), now, consent, eb, logger);
         if (!stored.Stored)
         {
             await MarkAsync(db, record, ConnectOutcome.Failed, ConnectFailure.StoreFailed, logger);
@@ -426,14 +426,16 @@ public static class ConsentEndpoints
     /// Everything runs with CancellationToken.None: the code is already traded, so a dropped client must not lose it.
     /// </summary>
     internal static async Task<StoreResult> StoreConsentAsync(
-        Guid userId, string aspspName, string sessionId, ConnectedAccount account, DateTimeOffset? validUntil, DateTimeOffset now,
-        ConsentStore consent, EnableBankingClient eb, ILogger logger)
+        Guid userId, string aspspName, string country, string sessionId, ConnectedAccount account, DateTimeOffset? validUntil,
+        DateTimeOffset now, ConsentStore consent, EnableBankingClient eb, ILogger logger)
     {
         string? oldSessionId;
         try
         {
             oldSessionId = await consent.GetStoredSessionIdAsync(userId, aspspName, CancellationToken.None);
-            await consent.CompleteAsync(userId, sessionId, aspspName, [account], now, validUntil, CancellationToken.None);
+            // Story 5.5: the bank's country and the time the first sync is requested (right after this) are stored with it.
+            await consent.CompleteAsync(
+                userId, sessionId, aspspName, [account], now, validUntil, CancellationToken.None, country, firstSyncRequestedAt: now.TruncateToMicroseconds());
         }
         catch (Exception ex)
         {

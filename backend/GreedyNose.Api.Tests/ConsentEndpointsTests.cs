@@ -39,6 +39,7 @@ public sealed class ConsentEndpointsTests : IDisposable
     private readonly FakeClock _clock = new(T0);
     private readonly CapturingLoggerFactory _logs = new();
     private readonly FakeFirstSync _firstSync = new();
+    private readonly FakeConsentPersistence _savedConsents = new();
     private readonly ConsentCipher _cipher = new(RandomNumberGenerator.GetBytes(32));
     private Guid _attemptId; // the attempt of the link created last by CreateToken
 
@@ -85,7 +86,7 @@ public sealed class ConsentEndpointsTests : IDisposable
             RedirectUrl = "https://greedy.example.com:8443/callback",
         };
         _signer = new EnableBankingSigner(_options);
-        _consent = new ConsentStore(new FakeConsentPersistence(), TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
+        _consent = new ConsentStore(_savedConsents, TimeSpan.FromDays(90), NullLogger<ConsentStore>.Instance);
         _bank = path => path == "/auth"
             ? (HttpStatusCode.OK, $$"""{"url":"{{BankUrl}}"}""")
             : (HttpStatusCode.OK, SessionBody());
@@ -2619,6 +2620,42 @@ public sealed class ConsentEndpointsTests : IDisposable
         var account = Assert.Single(_consent.Accounts);
         Assert.Null(account.Iban);
         Assert.Equal("hash-1", account.Key);
+    }
+
+    [Fact]
+    public async Task A_bank_saved_by_the_callback_carries_the_country_of_the_attempt_and_the_time_of_the_first_sync_request()
+    {
+        var state = await StartedState(new ConnectLinkRequest("N26", "DE", null));
+
+        Assert.Equal(200, Page(await Callback("the-code", state)).Status);
+
+        var saved = Assert.Single(await _savedConsents.LoadAsync());
+        Assert.Equal(("DE", T0), (saved.Country, saved.FirstSyncRequestedAt));
+    }
+
+    [Fact]
+    public async Task The_request_time_of_a_saved_bank_is_cut_to_whole_microseconds()
+    {
+        _clock.Now = T0.AddTicks(7);
+        var state = await StartedState(new ConnectLinkRequest("N26", "DE", null));
+
+        Assert.Equal(200, Page(await Callback("the-code", state)).Status);
+
+        var saved = Assert.Single(await _savedConsents.LoadAsync());
+        Assert.Equal(0, saved.FirstSyncRequestedAt!.Value.Ticks % 10);
+        Assert.Equal(T0, saved.FirstSyncRequestedAt);
+    }
+
+    [Fact]
+    public async Task A_bank_saved_by_the_choice_carries_the_country_and_the_time_of_the_choice()
+    {
+        var id = await ChoiceWaiting();
+        _clock.Now = T0.AddMinutes(3);
+
+        Assert.Equal(200, (await Choose(id, "2")).Status);
+
+        var saved = Assert.Single(await _savedConsents.LoadAsync());
+        Assert.Equal(("DE", T0.AddMinutes(3)), (saved.Country, saved.FirstSyncRequestedAt));
     }
 
     [Fact]
