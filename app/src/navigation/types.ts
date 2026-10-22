@@ -25,4 +25,5 @@ export type MainTabParamList = {
 export type SettingsStackParamList = {
   SettingsHome: undefined;
   SelectBank: undefined;
+  ConnectAttempt: undefined;
 };

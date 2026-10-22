@@ -1,7 +1,7 @@
 /**
  * Android may kill the app while the user is at the bank. The running attempt
- * is stored (bank name, baseline validUntil, start time — nothing else) and
- * resumed by the next process. Each case loads a fresh copy of the store under
+ * is stored (attempt id, bank, country, start time: nothing else) and resumed
+ * by the next process. Each case loads a fresh copy of the store under
  * jest.isolateModules, which is what a new process is; the fake storage is
  * shared across copies because it plays the disk.
  */
@@ -9,7 +9,8 @@
 export {};
 
 const SECRET_LINK = 'https://example.test/connect?token=one-time-secret';
-const KEY = 'connect.attempt.v1';
+const ATTEMPT_ID = 'attempt-7f3a91';
+const KEY = 'connect.attempt.v2';
 
 const disk = new Map<string, string>();
 const storage = {
@@ -27,18 +28,19 @@ const storage = {
 const fetchMock = jest.fn();
 const openMock = jest.fn();
 
-const bank = (validUntil: string) => ({ aspsp: 'Example Bank', state: 'connected', validUntil });
-const ok = (body: unknown) => ({ ok: true, status: 200, json: () => Promise.resolve(body) });
+const reply = (body: unknown) => ({ ok: true, status: 200, json: () => Promise.resolve(body) });
 
-function backend(statuses: unknown[]) {
-  let i = 0;
-  fetchMock.mockImplementation((url: string) =>
-    Promise.resolve(
-      url.endsWith('/connect-links')
-        ? ok({ url: SECRET_LINK })
-        : ok(statuses[Math.min(i++, statuses.length - 1)]),
-    ),
-  );
+/** The state the backend reports for the attempt; `/connect-links` answers with the link and the id. */
+function backend(state: string) {
+  fetchMock.mockImplementation((url: string) => {
+    if (url.endsWith('/connect-links')) {
+      return Promise.resolve(reply({ url: SECRET_LINK, attemptId: ATTEMPT_ID }));
+    }
+    if (url.endsWith('/accounts')) {
+      return Promise.resolve(reply({ accounts: [{ id: '1', name: 'Main account', kind: 'current', last4: '4521', suggested: true }] }));
+    }
+    return Promise.resolve(reply({ state }));
+  });
 }
 
 /** A new "process": a fresh store module over the same disk. */
@@ -74,51 +76,47 @@ beforeEach(() => {
 });
 afterEach(() => {
   jest.restoreAllMocks();
-  jest.useRealTimers();
 });
 
-async function startAndKill(statuses: unknown[] = [{ banks: [bank('2026-12-01T00:00:00Z')] }]) {
-  backend(statuses);
+async function startAndKill() {
+  backend('waiting');
   const first = newProcess();
-  await first.startConnect('Example Bank');
+  await first.startConnect('Example Bank', 'DE');
   expect(first.getConnectFlow().step).toBe('waiting');
 }
 
-it('resumes after a restart and shows the bank as connected', async () => {
+it('resumes after a restart and shows the result', async () => {
   await startAndKill();
 
-  backend([{ banks: [bank('2027-01-19T00:00:00Z')] }]);
+  backend('saved');
   const second = newProcess();
   expect(second.getConnectFlow().step).toBe('idle');
   await expect(second.returnToApp(false)).resolves.toBe(true);
 
-  expect(second.getConnectFlow()).toEqual({
-    step: 'connected',
-    bank: 'Example Bank',
-    validUntil: '2027-01-19T00:00:00Z',
-  });
+  expect(second.getConnectFlow()).toEqual({ step: 'saved', bank: 'Example Bank', country: 'DE' });
   await flush();
   expect(disk.has(KEY)).toBe(false);
 });
 
-it('reports false for a foreground event after the result, so the user is not pulled back again', async () => {
+it('resumes into the account choice', async () => {
   await startAndKill();
-  backend([{ banks: [bank('2027-01-19T00:00:00Z')] }]);
+  backend('choose_account');
   const second = newProcess();
   await expect(second.returnToApp(false)).resolves.toBe(true);
-  await expect(second.returnToApp(false)).resolves.toBe(false);
-});
-
-it('still uses the stored baseline: an unchanged consent is "not yet", not success', async () => {
-  await startAndKill();
-  backend([{ banks: [bank('2026-12-01T00:00:00Z')] }]);
-  const second = newProcess();
-  await second.returnToApp(true);
-  expect(second.getConnectFlow()).toMatchObject({ step: 'waiting', notYet: true, tries: 1 });
+  expect(second.getConnectFlow()).toMatchObject({ step: 'choose_account', bank: 'Example Bank', country: 'DE' });
   expect(disk.has(KEY)).toBe(true);
 });
 
-it('drops an attempt older than 30 minutes without a word', async () => {
+it('resumes a bank that is still waiting, and keeps the stored attempt', async () => {
+  await startAndKill();
+  backend('waiting');
+  const second = newProcess();
+  await expect(second.returnToApp(false)).resolves.toBe(true);
+  expect(second.getConnectFlow()).toMatchObject({ step: 'waiting', bank: 'Example Bank' });
+  expect(disk.has(KEY)).toBe(true);
+});
+
+it('drops an attempt older than 30 minutes without a word and without a request', async () => {
   await startAndKill();
   const stored = JSON.parse(disk.get(KEY)!);
   stored.startedAt = Date.now() - 31 * 60 * 1000;
@@ -126,9 +124,19 @@ it('drops an attempt older than 30 minutes without a word', async () => {
 
   const second = newProcess();
   fetchMock.mockClear();
-  await second.returnToApp(false);
+  await expect(second.returnToApp(false)).resolves.toBe(false);
   expect(second.getConnectFlow().step).toBe('idle');
   expect(fetchMock).not.toHaveBeenCalled();
+  await flush();
+  expect(disk.has(KEY)).toBe(false);
+});
+
+it('shows an unknown attempt (404) as expired', async () => {
+  await startAndKill();
+  fetchMock.mockResolvedValue({ ok: false, status: 404, json: () => Promise.resolve({}) });
+  const second = newProcess();
+  await expect(second.returnToApp(false)).resolves.toBe(true);
+  expect(second.getConnectFlow()).toMatchObject({ step: 'expired', bank: 'Example Bank', country: 'DE' });
   await flush();
   expect(disk.has(KEY)).toBe(false);
 });
@@ -143,56 +151,38 @@ it('does nothing when no attempt is stored, and ignores unreadable stored data',
   await garbage.returnToApp(false);
   expect(garbage.getConnectFlow().step).toBe('idle');
 
-  disk.set(KEY, JSON.stringify({ bank: 5, startedAt: 'x' }));
+  disk.set(KEY, JSON.stringify({ id: 5, bank: 5, startedAt: 'x' }));
   const wrongShape = newProcess();
   await wrongShape.returnToApp(false);
   expect(wrongShape.getConnectFlow().step).toBe('idle');
+  expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('/connect-attempts'), expect.anything());
 });
 
-it('clears the stored attempt on Start over and on a definite failure', async () => {
+it('clears the stored attempt when the user cancels', async () => {
   await startAndKill();
-  expect(disk.has(KEY)).toBe(true);
   const second = newProcess();
-  backend([{ banks: [bank('2026-12-01T00:00:00Z')] }]);
+  backend('waiting');
   await second.returnToApp(false);
-  second.resetConnectFlow();
-  await flush();
-  expect(disk.has(KEY)).toBe(false);
-
-  await startAndKill();
-  backend([{ banks: [{ ...bank('2027-02-01T00:00:00Z'), state: 'dead' }] }]);
-  const third = newProcess();
-  await third.returnToApp(false);
-  expect(third.getConnectFlow()).toMatchObject({ step: 'failed', reason: 'ended' });
+  await second.cancelAttempt();
   await flush();
   expect(disk.has(KEY)).toBe(false);
 });
 
-it('stores only the bank name, the baseline date and the start time', async () => {
+it('stores only the attempt id, the bank, the country and the start time', async () => {
   await startAndKill();
   const raw = disk.get(KEY)!;
-  expect(Object.keys(JSON.parse(raw)).sort()).toEqual(['bank', 'baseline', 'startedAt']);
-  expect(JSON.parse(raw).baseline).toEqual({ validUntil: '2026-12-01T00:00:00Z' });
+  expect(Object.keys(JSON.parse(raw)).sort()).toEqual(['bank', 'country', 'id', 'startedAt']);
   expect(raw).not.toContain('one-time-secret');
   expect(raw).not.toContain('http');
   expect(raw).not.toContain('test-api-key');
 });
 
-it('stores "not there" when the bank was not known before', async () => {
-  await startAndKill([{ banks: [] }]);
-  expect(JSON.parse(disk.get(KEY)!).baseline).toBeNull();
-  backend([{ banks: [bank('2027-01-19T00:00:00Z')] }]);
-  const second = newProcess();
-  await second.returnToApp(false);
-  expect(second.getConnectFlow().step).toBe('connected');
-});
-
 describe('storage failures behave as "no attempt"', () => {
   it('a failing write does not stop the attempt', async () => {
     storage.setItem.mockRejectedValueOnce(new Error('disk full'));
-    backend([{ banks: [] }]);
+    backend('waiting');
     const store = newProcess();
-    await store.startConnect('Example Bank');
+    await store.startConnect('Example Bank', 'DE');
     expect(store.getConnectFlow().step).toBe('waiting');
     expect(openMock).toHaveBeenCalledWith(SECRET_LINK);
   });
@@ -207,13 +197,51 @@ describe('storage failures behave as "no attempt"', () => {
     expect(() => store.resetConnectFlow()).not.toThrow();
     await flush();
   });
+
+  it('a delete that fails overwrites the attempt, so a finished attempt is not resumed', async () => {
+    await startAndKill();
+    const second = newProcess();
+    backend('saved');
+    storage.removeItem.mockRejectedValueOnce(new Error('nope'));
+    await second.returnToApp(false);
+    expect(second.getConnectFlow().step).toBe('saved');
+    await flush();
+    expect(disk.get(KEY)).toBe('ended');
+
+    fetchMock.mockClear();
+    const third = newProcess();
+    await expect(third.returnToApp(false)).resolves.toBe(false);
+    expect(third.getConnectFlow().step).toBe('idle');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
-it('shows Settings on the first resume after a restart even when nothing is new, but not on the next plain foreground event', async () => {
+it('after a cold start by the link, the start and the link share one read and one navigation', async () => {
   await startAndKill();
-  backend([{ banks: [bank('2026-12-01T00:00:00Z')] }]);
+  backend('waiting');
   const second = newProcess();
-  await expect(second.returnToApp(false)).resolves.toBe(true);
-  expect(second.getConnectFlow()).toMatchObject({ step: 'waiting', notYet: true });
-  await expect(second.returnToApp(false)).resolves.toBe(false);
+  fetchMock.mockClear();
+  // useConnectReturn calls once at the app start and once for the link that started the app.
+  const [atStart, byLink] = await Promise.all([second.returnToApp(false), second.returnToApp(true)]);
+  expect([atStart, byLink]).toEqual([true, false]);
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/connect-attempts/'))).toHaveLength(1);
+});
+
+it('a late fallback after a failed delete does not overwrite a newer attempt', async () => {
+  await startAndKill();
+  const store = newProcess();
+  backend('saved');
+  let failDelete!: (error: Error) => void;
+  storage.removeItem.mockReturnValueOnce(new Promise<void>((_, reject) => (failDelete = reject)));
+  await store.returnToApp(false);
+  expect(store.getConnectFlow().step).toBe('saved');
+
+  backend('waiting');
+  await store.startConnect('Other Bank', 'AT');
+  const newer = disk.get(KEY);
+  expect(JSON.parse(newer!).bank).toBe('Other Bank');
+
+  failDelete(new Error('nope'));
+  await flush();
+  expect(disk.get(KEY)).toBe(newer);
 });

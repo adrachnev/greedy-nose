@@ -7,6 +7,7 @@
 import React from 'react';
 import { Text, TextInput } from 'react-native';
 import ReactTestRenderer, { act } from 'react-test-renderer';
+import { __resetConnectStoreForTests, getConnectFlow } from '../../data/connectStore';
 import { MAX_SEARCH_LENGTH, SEARCH_PAUSE_MS } from '../../data/myBanksStore';
 import { formatCountry } from '../../utils/format';
 import SelectBankScreen from '../SelectBankScreen';
@@ -18,6 +19,10 @@ jest.mock('../../data/config', () => ({
   USE_BACKEND: true,
   BACKEND_BASE_URL: 'http://backend.test',
   BACKEND_TIMEOUT_MS: 1000,
+}));
+jest.mock('../../data/openConnectLink', () => ({
+  openConnectLink: jest.fn(() => Promise.resolve(false)),
+  dismissConnectLink: jest.fn(() => Promise.resolve()),
 }));
 jest.mock('../../data/backendAuth', () => ({
   hasApiKey: () => true,
@@ -41,6 +46,7 @@ function answer(banks: unknown[] | null) {
 beforeEach(() => {
   jest.useFakeTimers();
   navigate.mockReset();
+  __resetConnectStoreForTests();
   fetchMock.mockReset();
   (globalThis as unknown as { fetch: unknown }).fetch = fetchMock;
   jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -133,8 +139,53 @@ it('shows name and country of each hit, and a connected bank as "Connected" that
   const rowTexts = pressables(tree).map(b => b.findAllByType(Text).map(joined).join('|'));
   expect(rowTexts.some(t => t.includes('Connected'))).toBe(false);
   const row = pressables(tree).find(b => b.findAllByType(Text).some(t => joined(t) === formatCountry('DE')))!;
-  act(() => row.props.onPress()); // the tap leads nowhere yet
-  expect(navigate).not.toHaveBeenCalled();
+  expect(row).toBeDefined();
+});
+
+it('starts the attempt with the name and country of the tapped bank and shows its screen', async () => {
+  answer([hit('Example Bank', 'DE')]);
+  const tree = await render();
+  await type(tree, 'example');
+  await wait(SEARCH_PAUSE_MS);
+  fetchMock.mockResolvedValueOnce({
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve({ url: 'https://example.test/connect?token=t', attemptId: 'a1' }),
+  });
+  const row = pressables(tree).find(b => b.findAllByType(Text).some(t => joined(t) === formatCountry('DE')))!;
+  await act(async () => {
+    row.props.onPress();
+  });
+  const post = fetchMock.mock.calls[1];
+  expect(post[0]).toBe('http://backend.test/connect-links');
+  expect(JSON.parse(post[1].body)).toEqual({ aspsp: 'Example Bank', country: 'DE' });
+  expect(navigate).toHaveBeenCalledWith('ConnectAttempt');
+  expect(getConnectFlow()).toMatchObject({ step: 'waiting', bank: 'Example Bank', country: 'DE' });
+});
+
+it('while an attempt is running a tap starts nothing and shows that attempt', async () => {
+  answer([hit('Example Bank', 'DE'), hit('Other Bank', 'AT')]);
+  const tree = await render();
+  await type(tree, 'bank');
+  await wait(SEARCH_PAUSE_MS);
+  fetchMock.mockResolvedValueOnce({
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve({ url: 'https://example.test/connect?token=t', attemptId: 'a1' }),
+  });
+  const rowFor = (country: string) =>
+    pressables(tree).find(b => b.findAllByType(Text).some(t => joined(t) === formatCountry(country)))!;
+  await act(async () => {
+    rowFor('DE').props.onPress();
+  });
+  fetchMock.mockClear();
+  navigate.mockClear();
+  await act(async () => {
+    rowFor('AT').props.onPress();
+  });
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(navigate).toHaveBeenCalledWith('ConnectAttempt');
+  expect(getConnectFlow()).toMatchObject({ step: 'waiting', bank: 'Example Bank' });
 });
 
 it('shows "No bank found" with the typed text when nothing matches', async () => {

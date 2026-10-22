@@ -31,11 +31,14 @@ import {
 } from './backendFeed';
 import { USE_BACKEND } from './config';
 import {
-  checkAfterReturn,
+  cancelAttempt,
+  checkAttempt,
+  chooseAccount,
+  CONNECT_POLL_MS,
   ConnectFlow,
+  forgetEndedAttempt,
   getConnectFlow,
   isUsableBankName,
-  resetConnectFlow,
   returnToApp,
   startConnect,
   subscribeToConnectFlow,
@@ -204,13 +207,18 @@ export function useRulesResync(): void {
 /** The link the backend's callback page opens (ARCHITECTURE.md, "Consent lifecycle"). */
 export const CONNECTED_LINK_PREFIX = 'greedynose://connected';
 
-export type ConnectBank = {
+export type ConnectAttempt = {
   flow: ConnectFlow;
-  start: (bankName: string) => void;
-  /** Back to the form; also what "Try again" does. */
-  reset: () => void;
-  /** Reads the result now, for the user who came back and sees "not yet". */
+  /** Starts an attempt for a hit of the bank search. */
+  start: (bankName: string, country: string) => void;
+  /** Reads the state now ("Check again"). */
   checkNow: () => void;
+  /** Sends the chosen account row. */
+  choose: (accountId: string) => void;
+  /** Cancel or back while the attempt runs: leaves at once, tells the backend. */
+  cancel: () => void;
+  /** Forgets an ended attempt (the screen is left); does nothing for a running one. */
+  reset: () => void;
 };
 
 /**
@@ -219,7 +227,9 @@ export type ConnectBank = {
  * and the app may have been killed and restarted while the user was at the
  * bank): the app link, the app coming to the foreground, and the app start
  * itself. All three only ask the store to look; it resumes a stored attempt
- * after a restart and ignores the call when there is none.
+ * after a restart and ignores the call when there is none. `onResumed` runs
+ * when an attempt is running or was just ended by the look: the place to show
+ * its screen.
  */
 export function useConnectReturn(onResumed?: () => void): void {
   // Latest callback without re-attaching the listeners when its identity changes.
@@ -257,20 +267,85 @@ export function useConnectReturn(onResumed?: () => void): void {
   }, []);
 }
 
-/** The flow of connecting one bank, for the screen that shows it. */
-export function useConnectBank(): ConnectBank {
+/**
+ * Reads the state of a waiting attempt every few seconds while the calling
+ * screen is visible (stops at any other state, when the screen loses focus and
+ * on unmount). After repeated reads without an answer it stops too, and the
+ * screen offers "Check again". Without a navigator (a bare render) "visible"
+ * means "mounted".
+ */
+export function useConnectPolling(): void {
+  const flow = useSyncExternalStore(subscribeToConnectFlow, getConnectFlow);
+  const navigation = useContext(NavigationContext);
+  const pollable = flow.step === 'waiting' && !flow.noAnswer;
+
+  useEffect(() => {
+    if (!pollable) {
+      return;
+    }
+    // Polls only while the screen is focused AND the app is in the foreground: with the user in the
+    // browser the foreground return reads the state anyway (useConnectReturn).
+    let focused = !navigation || navigation.isFocused();
+    // Only an explicit background/inactive counts as away: the state can be unknown right at the start.
+    const isAway = (state: string | null) => state === 'background' || state === 'inactive';
+    let active = !isAway(AppState.currentState);
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const update = () => {
+      if (focused && active) {
+        timer ??= setInterval(() => {
+          checkAttempt();
+        }, CONNECT_POLL_MS);
+      } else if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    update();
+    const subscriptions = navigation
+      ? [
+          navigation.addListener('focus', () => {
+            focused = true;
+            update();
+          }),
+          navigation.addListener('blur', () => {
+            focused = false;
+            update();
+          }),
+        ]
+      : [];
+    const appState = AppState.addEventListener('change', next => {
+      active = !isAway(next);
+      update();
+    });
+    return () => {
+      focused = false;
+      update();
+      subscriptions.forEach(unsubscribe => unsubscribe());
+      appState.remove();
+    };
+  }, [pollable, navigation]);
+}
+
+/** The flow of connecting one bank, for the screens that start it and show it. */
+export function useConnectAttempt(): ConnectAttempt {
   const flow = useSyncExternalStore(subscribeToConnectFlow, getConnectFlow);
 
   return useMemo(
     () => ({
       flow,
-      start: (bankName: string) => {
-        startConnect(bankName);
+      start: (bankName: string, country: string) => {
+        startConnect(bankName, country);
       },
-      reset: resetConnectFlow,
       checkNow: () => {
-        checkAfterReturn();
+        checkAttempt();
       },
+      choose: (accountId: string) => {
+        chooseAccount(accountId);
+      },
+      cancel: () => {
+        cancelAttempt();
+      },
+      reset: forgetEndedAttempt,
     }),
     [flow],
   );

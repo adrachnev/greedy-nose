@@ -747,6 +747,19 @@ up). `POST /my-banks/first-sync` repeats a failed first sync (no new consent): i
 saved; older rows stay null) and `FirstSyncRequestedAt` (written at saving and by the repeat; an EF concurrency token,
 so two repeats cannot both queue a tick; timestamps are cut to whole microseconds because Postgres keeps no more).
 
+**Built in the app (Stories 5.6 and 5.7, 2026-10-22).** *Settings and search:* `myBanksStore` reads `/my-banks` and
+`/banks?q=`; the cards poll every 5 s only while a bank is syncing (the screen focused, stopped on blur and unmount); the
+search waits 400 ms, needs 2 characters and drops stale answers; the Settings tab is a nested stack (`SettingsHome`,
+`SelectBank`, `ConnectAttempt`). The first successful empty `/my-banks` answer of a process moves the user to Settings
+once (the flag is spent only after the jump really happened); a failed read never claims "no bank". *Attempt:*
+`connectStore` is built on the attempt id of the backend (the 5.1a baseline compare with `/status` is gone): start asks
+`POST /connect-links`, opens the link in the Custom Tab, then reads `GET /connect-attempts/{id}` on the app link, on the
+foreground, on the app start and every 4 s while the attempt screen is visible and the app active. One attempt runs at a
+time; the running attempt (id, bank, country, start time; never the link) is kept in AsyncStorage for 30 minutes and
+restored after a process kill. Cancel and going back while choosing or waiting post `/cancel`; a late answer after a
+cancel is dropped by an attempt identity check. `backendCall` is the one request helper (API key, timeout, status
+codes apart, no id or query in a log line).
+
 **A dead connection is never silent (R19).** No alerts arriving looks exactly like "nothing bad
 happened" — the one failure mode that breaks R1 while appearing to work perfectly. So expiry
 gets both channels:

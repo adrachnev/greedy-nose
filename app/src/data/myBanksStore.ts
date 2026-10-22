@@ -6,13 +6,7 @@
 // status: never an account name, an IBAN, a bank name or the text the user
 // typed into the search.
 //
-// PRAGMATIC: `get()` below repeats the fetch/timeout/header pattern of
-// connectStore.ts instead of sharing it. The 5.1a flow store is deliberately
-// left untouched in this story and Story 5.7 rebuilds it on the attempt
-// endpoints; the two copies merge then — see bead gn-1u1.7.
-
-import { backendHeaders, hasApiKey } from './backendAuth';
-import { BACKEND_BASE_URL, BACKEND_TIMEOUT_MS, USE_BACKEND } from './config';
+import { backendCall } from './backendCall';
 import { isUsableBankName } from './connectStore';
 
 // --- Wire shapes --------------------------------------------------------------
@@ -103,29 +97,8 @@ export function parseBankHitsBody(body: unknown): BankHit[] | null {
 
 /** `GET`; `null` means "no usable answer". `logPath` is the path without its query. */
 async function get(path: string, logPath: string): Promise<unknown | null> {
-  if (!USE_BACKEND || !hasApiKey() || BACKEND_BASE_URL === '') {
-    return null;
-  }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${BACKEND_BASE_URL}${path}`, {
-      method: 'GET',
-      signal: controller.signal,
-      headers: backendHeaders(),
-    });
-    if (!response.ok) {
-      console.warn(`[myBanksStore] ${logPath} answered HTTP ${response.status}`);
-      return null;
-    }
-    return await response.json();
-  } catch {
-    // The error object can echo the URL, which carries the search text.
-    console.warn(`[myBanksStore] ${logPath} failed`);
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
+  const reply = await backendCall('myBanksStore', path, logPath, { method: 'GET' });
+  return reply.ok ? reply.body : null;
 }
 
 export type BankSearchResult = { ok: true; banks: BankHit[] } | { ok: false };

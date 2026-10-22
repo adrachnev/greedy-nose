@@ -9,6 +9,7 @@ import DebitDetailScreen from '../screens/DebitDetailScreen';
 import DebitListScreen from '../screens/DebitListScreen';
 import PayeeEditScreen from '../screens/PayeeEditScreen';
 import RulesListScreen from '../screens/RulesListScreen';
+import ConnectAttemptScreen from '../screens/ConnectAttemptScreen';
 import SelectBankScreen from '../screens/SelectBankScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import StubScreen from '../screens/StubScreen';
@@ -96,12 +97,13 @@ function RulesNavigator() {
   );
 }
 
-/** Settings tab: the bank cards + the bank search, so the tab bar stays visible. */
+/** Settings tab: the bank cards, the bank search, the attempt to connect one, so the tab bar stays visible. */
 function SettingsNavigator() {
   return (
     <SettingsStack.Navigator screenOptions={{ headerShown: false }}>
       <SettingsStack.Screen name="SettingsHome" component={SettingsScreen} />
       <SettingsStack.Screen name="SelectBank" component={SelectBankScreen} />
+      <SettingsStack.Screen name="ConnectAttempt" component={ConnectAttemptScreen} />
     </SettingsStack.Navigator>
   );
 }

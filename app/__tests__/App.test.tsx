@@ -7,6 +7,7 @@ import ReactTestRenderer from 'react-test-renderer';
 import App from '../App';
 import { returnToApp } from '../src/data/connectStore';
 import { startDeviceRegistration } from '../src/data/deviceStore';
+import { showConnectAttempt } from '../src/navigation/showConnectAttempt';
 import { showSettingsTab } from '../src/navigation/showSettingsTab';
 
 // Mocked because the real one registers the phone with the backend, which under
@@ -17,23 +18,26 @@ import { showSettingsTab } from '../src/navigation/showSettingsTab';
 jest.mock('../src/data/deviceStore');
 
 // The real store would read AsyncStorage and /status; what belongs here is the wiring: App runs
-// useConnectReturn, and a resumed attempt brings the user to Settings through showSettingsTab.
+// useConnectReturn, and a resumed attempt brings the user to its screen through showConnectAttempt.
 jest.mock('../src/data/connectStore', () => ({
   ...jest.requireActual('../src/data/connectStore'),
   returnToApp: jest.fn(),
 }));
 jest.mock('../src/navigation/showSettingsTab', () => ({ showSettingsTab: jest.fn() }));
+jest.mock('../src/navigation/showConnectAttempt', () => ({ showConnectAttempt: jest.fn() }));
 
 const startMock = jest.mocked(startDeviceRegistration);
 
 const returnMock = jest.mocked(returnToApp);
 const showSettingsMock = jest.mocked(showSettingsTab);
+const showAttemptMock = jest.mocked(showConnectAttempt);
 
 beforeEach(() => {
   startMock.mockReset();
   returnMock.mockReset();
   returnMock.mockResolvedValue(false);
   showSettingsMock.mockReset();
+  showAttemptMock.mockReset();
 });
 
 test('renders correctly', async () => {
@@ -61,19 +65,19 @@ test('registers the device once when the app mounts, and detaches on unmount', a
   expect(stop).toHaveBeenCalledTimes(1);
 });
 
-test('looks for a bank attempt to resume at start, and a resumed one opens Settings', async () => {
+test('looks for a bank attempt to resume at start, and a running one opens its screen', async () => {
   returnMock.mockResolvedValue(true);
   await ReactTestRenderer.act(async () => {
     ReactTestRenderer.create(<App />);
   });
   expect(returnMock).toHaveBeenCalled();
-  expect(showSettingsMock).toHaveBeenCalledTimes(1);
+  expect(showAttemptMock).toHaveBeenCalledTimes(1);
 });
 
-test('does not open Settings when there is nothing to resume', async () => {
+test('does not open the attempt screen when there is nothing to resume', async () => {
   await ReactTestRenderer.act(async () => {
     ReactTestRenderer.create(<App />);
   });
   expect(returnMock).toHaveBeenCalled();
-  expect(showSettingsMock).not.toHaveBeenCalled();
+  expect(showAttemptMock).not.toHaveBeenCalled();
 });

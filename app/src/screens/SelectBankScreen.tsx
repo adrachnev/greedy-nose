@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'r
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Button from '../components/Button';
 import SearchField from '../components/SearchField';
-import { useBankSearch } from '../data/hooks';
+import { useBankSearch, useConnectAttempt } from '../data/hooks';
 import { BankHit, MAX_SEARCH_LENGTH } from '../data/myBanksStore';
 import { toInitials } from '../domain/payees';
 import { SettingsStackParamList } from '../navigation/types';
@@ -13,7 +13,7 @@ import { formatCountry } from '../utils/format';
 
 type Props = NativeStackScreenProps<SettingsStackParamList, 'SelectBank'>;
 
-function BankRow({ theme, bank }: { theme: Theme; bank: BankHit }) {
+function BankRow({ theme, bank, onPress }: { theme: Theme; bank: BankHit; onPress: () => void }) {
   const content = (
     <>
       <View style={[styles.logo, { backgroundColor: theme.neutralBg }]}>
@@ -37,11 +37,10 @@ function BankRow({ theme, bank }: { theme: Theme; bank: BankHit }) {
   if (bank.connected) {
     return <View style={[styles.row, styles.rowConnected, { backgroundColor: theme.surface }]}>{content}</View>;
   }
-  // TRACER-BULLET: the tap leads nowhere until Story 5.7 starts the consent from here.
   return (
     <Pressable
       accessibilityRole="button"
-      onPress={() => {}}
+      onPress={onPress}
       style={[styles.row, { backgroundColor: theme.surface }]}
     >
       {content}
@@ -54,6 +53,13 @@ export default function SelectBankScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
   const { search, retry } = useBankSearch(text);
+  const { start } = useConnectAttempt();
+
+  // The attempt starts here, the screen after it shows every state (also the first, 'opening').
+  const connect = (bank: BankHit) => {
+    start(bank.name, bank.country);
+    navigation.navigate('ConnectAttempt');
+  };
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
@@ -82,7 +88,12 @@ export default function SelectBankScreen({ navigation }: Props) {
               {search.banks.length === 1 ? '1 bank' : `${search.banks.length} banks`}
             </Text>
             {search.banks.map((bank, index) => (
-              <BankRow key={`${bank.name}:${bank.country}:${index}`} theme={theme} bank={bank} />
+              <BankRow
+                key={`${bank.name}:${bank.country}:${index}`}
+                theme={theme}
+                bank={bank}
+                onPress={() => connect(bank)}
+              />
             ))}
           </>
         )}
