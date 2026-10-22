@@ -5,14 +5,18 @@
 
 import {
   __resetMyBanksStoreForTests,
+  canRetryFirstSync,
+  findMyBank,
   getMyBanks,
   parseBankHitsBody,
   parseMyBanksBody,
   refreshMyBanks,
+  retryFirstSync,
   searchBanks,
   startMyBanksPolling,
   SYNC_POLL_MS,
   takeFirstStartNoBank,
+  watchMyBanks,
 } from '../myBanksStore';
 
 jest.mock('../config', () => ({
@@ -227,5 +231,124 @@ describe('searchBanks', () => {
     answer({}, false);
     await searchBanks('secrettext');
     expect(JSON.stringify(warn.mock.calls)).not.toContain('secrettext');
+  });
+});
+
+describe('Story 5.8: the first sync', () => {
+  const failed = bank({ state: 'sync_failed', reason: 'bank-error' });
+  const reply = (status: number, body: unknown = {}) =>
+    fetchMock.mockResolvedValueOnce({ ok: status < 300, status, json: () => Promise.resolve(body) });
+  const load = async (banks: unknown[]) => {
+    answer({ banks });
+    await refreshMyBanks();
+    fetchMock.mockClear();
+  };
+
+  it('finds the saved bank by normalized name, and by country when two share a name', () => {
+    const rows = parseMyBanksBody({ banks: [bank({ country: 'AT' }), bank({ country: 'DE' })] })!;
+    expect(findMyBank(rows, 'example-bank', 'DE')?.country).toBe('DE');
+    expect(findMyBank(rows, 'example-bank', 'AT')?.country).toBe('AT');
+    expect(findMyBank(rows, 'EXAMPLE BANK', null)?.country).toBe('AT');
+    expect(findMyBank(rows, 'Other', 'DE')).toBeUndefined();
+  });
+
+  it('with a country, never takes a row of another country; an old row without one still counts', () => {
+    const other = parseMyBanksBody({ banks: [bank({ country: 'AT' })] })!;
+    expect(findMyBank(other, 'Example Bank', 'DE')).toBeUndefined();
+    const old = parseMyBanksBody({ banks: [bank({ country: null }), bank({ country: 'AT' })] })!;
+    expect(findMyBank(old, 'Example Bank', 'DE')?.country).toBeNull();
+    expect(findMyBank(old, 'Example Bank', 'AT')?.country).toBe('AT');
+  });
+
+  it('offers Try again for a failed sync, but not for the daily limit or other states', () => {
+    const [plain, limit, ok] = parseMyBanksBody({
+      banks: [failed, bank({ name: 'B', state: 'sync_failed', reason: 'daily-limit' }), bank({ name: 'C' })],
+    })!;
+    expect(canRetryFirstSync(plain)).toBe(true);
+    expect(canRetryFirstSync(limit)).toBe(false);
+    expect(canRetryFirstSync(ok)).toBe(false);
+  });
+
+  it('posts the bank name, shows it syncing at once and reads again', async () => {
+    await load([failed]);
+    reply(200);
+    answer({ banks: [bank({ state: 'syncing' })] });
+    expect(await retryFirstSync('Example Bank')).toBe('queued');
+    expect(fetchMock.mock.calls[0][0]).toBe('http://backend.test/my-banks/first-sync');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ aspsp: 'Example Bank' });
+    expect(getMyBanks().banks[0].state).toBe('syncing');
+    expect(fetchMock.mock.calls[1][0]).toBe('http://backend.test/my-banks');
+  });
+
+  it('on 409 reads the state again and shows what it says', async () => {
+    await load([failed]);
+    reply(409);
+    answer({ banks: [bank({ state: 'sync_failed', reason: 'daily-limit' })] });
+    expect(await retryFirstSync('Example Bank')).toBe('conflict');
+    expect(getMyBanks().banks[0].reason).toBe('daily-limit');
+  });
+
+  it('on 503 or no network changes nothing', async () => {
+    await load([failed]);
+    reply(503);
+    expect(await retryFirstSync('Example Bank')).toBe('unavailable');
+    fetchMock.mockRejectedValueOnce(new Error('network'));
+    expect(await retryFirstSync('Example Bank')).toBe('unavailable');
+    expect(getMyBanks().banks[0].state).toBe('sync_failed');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores a second tap while the first is on its way', async () => {
+    await load([failed]);
+    reply(200);
+    answer({ banks: [bank({ state: 'syncing' })] });
+    const first = retryFirstSync('Example Bank');
+    expect(await retryFirstSync('Example Bank')).toBe('busy');
+    expect(await first).toBe('queued');
+    expect(fetchMock.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
+  });
+
+  it('a failed read already in flight does not bring back the old state after a queued retry', async () => {
+    await load([failed]);
+    let release!: () => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          release = () => resolve({ ok: true, status: 200, json: () => Promise.resolve({ banks: [failed] }) });
+        }),
+    );
+    const stale = refreshMyBanks();
+    reply(200);
+    answer({ banks: [bank({ state: 'syncing' })] });
+    const retry = retryFirstSync('Example Bank');
+    await Promise.resolve();
+    release();
+    await stale;
+    expect(await retry).toBe('queued');
+    expect(getMyBanks().banks[0].state).toBe('syncing');
+  });
+
+  it('logs no bank name', async () => {
+    await load([failed]);
+    reply(503);
+    await retryFirstSync('Example Bank');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('Example');
+  });
+
+  it('a watching screen keeps reading although no bank is syncing, and stops when it lets go', async () => {
+    jest.useFakeTimers();
+    answer({ banks: [] });
+    const stopPolling = startMyBanksPolling();
+    const stop = watchMyBanks();
+    await jest.advanceTimersByTimeAsync(0);
+    fetchMock.mockClear();
+    answer({ banks: [] });
+    await jest.advanceTimersByTimeAsync(SYNC_POLL_MS);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    stop();
+    await jest.advanceTimersByTimeAsync(SYNC_POLL_MS * 3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    stopPolling();
+    expect(jest.getTimerCount()).toBe(0);
   });
 });

@@ -1,11 +1,11 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React from 'react';
-import { ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Button from '../components/Button';
 import DataSourceBadge from '../components/DataSourceBadge';
-import { useMyBanks, useMyBanksPolling } from '../data/hooks';
-import { MyBank, MyBankState, refreshMyBanks } from '../data/myBanksStore';
+import { useFirstSyncRetry, useMyBanks, useMyBanksPolling } from '../data/hooks';
+import { canRetryFirstSync, MyBank, MyBankState, refreshMyBanks } from '../data/myBanksStore';
 import { toInitials } from '../domain/payees';
 import { SettingsStackParamList } from '../navigation/types';
 import { dark, light, Theme } from '../theme/colors';
@@ -13,9 +13,9 @@ import { formatDeviceDate, joinMeta } from '../utils/format';
 
 type Props = NativeStackScreenProps<SettingsStackParamList, 'SettingsHome'>;
 
-// The cards of mocks/06-settings.html. Delete (Epic 6), Reconnect (Epic 7) and
-// "Try again" for a failed first sync (Story 5.8) are not here yet; a card only
-// reports its state.
+// The cards of mocks/06-settings.html. Delete (Epic 6) and Reconnect (Epic 7) are
+// not here yet; a card reports its state and, after a failed first sync, offers
+// "Try again" (Story 5.8).
 
 const PILL: Record<MyBankState, { label: string; tone: 'good' | 'bad' | 'neutral' }> = {
   connected: { label: 'Active', tone: 'good' },
@@ -41,21 +41,35 @@ function BankCard({ theme, bank }: { theme: Theme; bank: MyBank }) {
   const pill = PILL[bank.state];
   const color = { good: theme.good, bad: theme.bad, neutral: theme.textMuted }[pill.tone];
   const background = { good: theme.goodBg, bad: theme.badBg, neutral: theme.neutralBg }[pill.tone];
+  const { retry, couldNot } = useFirstSyncRetry();
 
   return (
     <View style={[styles.card, { backgroundColor: theme.surface }]}>
-      <View style={[styles.logo, { backgroundColor: theme.neutralBg }]}>
-        <Text style={[styles.logoText, { color: theme.textMuted }]}>{toInitials(bank.name)}</Text>
+      <View style={styles.cardRow}>
+        <View style={[styles.logo, { backgroundColor: theme.neutralBg }]}>
+          <Text style={[styles.logoText, { color: theme.textMuted }]}>{toInitials(bank.name)}</Text>
+        </View>
+        <View style={styles.info}>
+          <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
+            {bank.name}
+          </Text>
+          <Text style={[styles.meta, { color: theme.textMuted }]}>{describeBank(bank)}</Text>
+        </View>
+        <View style={[styles.pill, { backgroundColor: background }]}>
+          <Text style={[styles.pillText, { color }]}>{pill.label}</Text>
+        </View>
       </View>
-      <View style={styles.info}>
-        <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
-          {bank.name}
-        </Text>
-        <Text style={[styles.meta, { color: theme.textMuted }]}>{describeBank(bank)}</Text>
-      </View>
-      <View style={[styles.pill, { backgroundColor: background }]}>
-        <Text style={[styles.pillText, { color }]}>{pill.label}</Text>
-      </View>
+      {canRetryFirstSync(bank) && (
+        <>
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+          <View style={styles.actions}>
+            <Pressable accessibilityRole="button" onPress={() => retry(bank.name)}>
+              <Text style={[styles.action, { color: theme.accent }]}>Try again</Text>
+            </Pressable>
+            {couldNot && <Text style={[styles.meta, { color: theme.bad }]}>Couldn't try again just now</Text>}
+          </View>
+        </>
+      )}
     </View>
   );
 }
@@ -126,13 +140,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginHorizontal: 4,
   },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    borderRadius: 14,
-    padding: 16,
-  },
+  card: { gap: 12, borderRadius: 14, padding: 16 },
+  cardRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  divider: { height: StyleSheet.hairlineWidth },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  action: { fontSize: 14, fontWeight: '600' },
   logo: { width: 36, height: 36, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   logoText: { fontSize: 13, fontWeight: '800' },
   info: { flex: 1, gap: 2, minWidth: 0 },

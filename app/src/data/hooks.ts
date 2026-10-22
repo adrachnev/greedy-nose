@@ -48,12 +48,14 @@ import {
   getMyBanks,
   MyBanksState,
   peekFirstStartNoBank,
+  retryFirstSync,
   refreshMyBanks,
   searchBanks,
   SEARCH_PAUSE_MS,
   startMyBanksPolling,
   subscribeToMyBanks,
   takeFirstStartNoBank,
+  watchMyBanks,
 } from './myBanksStore';
 import {
   getRegistrationState,
@@ -364,10 +366,13 @@ export function useMyBanks(): MyBanksState {
  * seconds while a bank is syncing (see startMyBanksPolling). Without a
  * navigator (a bare render) "focused" means "mounted".
  */
-export function useMyBanksPolling(): void {
+export function useMyBanksPolling({ enabled = true, watch = false } = {}): void {
   const navigation = useContext(NavigationContext);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     let stop: (() => void) | null = null;
     const begin = () => {
       stop ??= startMyBanksPolling();
@@ -392,7 +397,36 @@ export function useMyBanksPolling(): void {
       subscriptions.forEach(unsubscribe => unsubscribe());
       appState.remove();
     };
-  }, [navigation]);
+  }, [navigation, enabled]);
+
+  // Held apart from the effect above so that a change of `watch` does not start the polling over with a read.
+  useEffect(() => (enabled && watch ? watchMyBanks() : undefined), [enabled, watch]);
+}
+
+/**
+ * "Try again" for the first sync of a bank (Story 5.8), for the card and the
+ * sync screen alike. `couldNot` is true after a try that got no usable answer;
+ * the next finished try replaces it. A refusal ("not failed", "tomorrow") is not an error:
+ * the state is read again and the screen shows what it says.
+ */
+export function useFirstSyncRetry(): { retry: (bankName: string) => void; couldNot: boolean } {
+  const [couldNot, setCouldNot] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const retry = useCallback((bankName: string) => {
+    retryFirstSync(bankName).then(outcome => {
+      // A second tap on its way ('busy') says nothing new and must not wipe a message that is showing.
+      if (outcome !== 'busy' && mountedRef.current) {
+        setCouldNot(outcome === 'unavailable');
+      }
+    });
+  }, []);
+  return { retry, couldNot };
 }
 
 /** How often and how long the jump is retried while the navigator cannot take it yet. */

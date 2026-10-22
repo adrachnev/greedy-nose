@@ -758,7 +758,12 @@ foreground, on the app start and every 4 s while the attempt screen is visible a
 time; the running attempt (id, bank, country, start time; never the link) is kept in AsyncStorage for 30 minutes and
 restored after a process kill. Cancel and going back while choosing or waiting post `/cancel`; a late answer after a
 cancel is dropped by an attempt identity check. `backendCall` is the one request helper (API key, timeout, status
-codes apart, no id or query in a log line).
+codes apart, no id or query in a log line). *First sync (Story 5.8):* a saved attempt hands over to the `Syncing`
+screen (the stack is reset to `SettingsHome` + `Syncing`), which reads the bank's row of `/my-banks` every 4 s (matched by
+name and country) until one read has succeeded since it opened, shows the state and stops waiting after 2 minutes (the
+backend sync runs on). `Try again` (screen and Settings card) posts `/my-banks/first-sync` and flips the row to syncing
+at once; it is not offered for the daily limit or an expired bank. When the sync is done the stack is reset and the debit
+list opens; the offer of Story 5.9 goes between those two steps.
 
 **A dead connection is never silent (R19).** No alerts arriving looks exactly like "nothing bad
 happened" — the one failure mode that breaks R1 while appearing to work perfectly. So expiry

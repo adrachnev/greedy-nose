@@ -36,6 +36,7 @@ jest.mock('../../data/openConnectLink', () => ({
 const BASE = 'http://backend.test';
 const fetchMock = jest.fn();
 const popTo = jest.fn();
+const resetStack = jest.fn();
 const preventDefault = jest.fn();
 let removeListener: ((event: unknown) => void) | undefined;
 let mounted: ReactTestRenderer.ReactTestRenderer | undefined;
@@ -90,6 +91,7 @@ beforeEach(() => {
   jest.useFakeTimers();
   fetchMock.mockReset();
   popTo.mockReset();
+  resetStack.mockReset();
   preventDefault.mockReset();
   removeListener = undefined;
   (globalThis as unknown as { fetch: unknown }).fetch = fetchMock;
@@ -135,6 +137,7 @@ async function render() {
         navigation={
           {
             popTo,
+            reset: resetStack,
             replace: jest.fn(),
             getState: () => ({
               routes: [{ name: 'SettingsHome' }, { name: 'SelectBank' }, { name: 'ConnectAttempt' }],
@@ -197,9 +200,9 @@ describe('waiting', () => {
     await tick(CONNECT_POLL_MS);
     expect(requests()).toEqual(['GET /connect-attempts/{id}', 'GET /connect-attempts/{id}']);
     await tick(CONNECT_POLL_MS * 5);
-    // The third read said "saved": the screen leaves for Settings and nothing is read any more.
+    // The third read said "saved": the screen hands over to the first sync and nothing is read any more.
     expect(requests()).toHaveLength(3);
-    expect(popTo).toHaveBeenCalledWith('SettingsHome');
+    expect(resetStack).toHaveBeenCalledTimes(1);
     expect(tree).toBeDefined();
   });
 
@@ -297,13 +300,16 @@ describe('the account choice', () => {
     expect(all.join(' ')).not.toMatch(/DE89|370400/);
   });
 
-  it('a tap saves the choice and leaves for Settings', async () => {
+  it('a tap saves the choice and hands over to the first sync, with Settings under it', async () => {
     const tree = await choosing();
     fetchMock.mockClear();
     await press(tree, 'Joint account');
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ accountId: '3' });
-    expect(getConnectFlow().step).toBe('idle');
-    expect(popTo).toHaveBeenCalledWith('SettingsHome');
+    expect(resetStack).toHaveBeenCalledWith({
+      index: 1,
+      routes: [{ name: 'SettingsHome' }, { name: 'Syncing', params: { bank: 'Example Bank', country: 'DE' } }],
+    });
+    expect(popTo).not.toHaveBeenCalled();
   });
 
   it('keeps the list and says so when the choice could not be saved', async () => {

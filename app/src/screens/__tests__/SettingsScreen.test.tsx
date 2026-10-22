@@ -105,6 +105,116 @@ async function press(tree: ReactTestRenderer.ReactTestRenderer, label: string) {
   });
 }
 
+describe('Try again on a failed first sync (Story 5.8)', () => {
+  const failed = (over: Record<string, unknown> = {}) => bank({ state: 'sync_failed', reason: 'bank-error', ...over });
+  const post = () => fetchMock.mock.calls.filter(([, init]) => init.method === 'POST');
+  const reply = (status: number) =>
+    fetchMock.mockResolvedValueOnce({ ok: status < 300, status, json: () => Promise.resolve({}) });
+
+  it('is offered on a failed card only, not for the daily limit', async () => {
+    answer([failed(), failed({ name: 'Limit Bank', reason: 'daily-limit' }), bank({ name: 'Fine Bank' })]);
+    const tree = await render();
+    const labels = pressables(tree).flatMap(n => n.findAllByType(Text).map(joined));
+    expect(labels.filter(label => label === 'Try again')).toHaveLength(1);
+  });
+
+  it('posts the bank and shows the card as syncing at once', async () => {
+    answer([failed()]);
+    const tree = await render();
+    reply(200);
+    answer([bank({ state: 'syncing' })]);
+    await press(tree, 'Try again');
+    expect(post()).toHaveLength(1);
+    expect(JSON.parse(post()[0][1].body)).toEqual({ aspsp: 'Example Bank' });
+    expect(texts(tree)).toContain('Syncing');
+    expect(texts(tree)).not.toContain('Try again');
+  });
+
+  it('on 409 shows what the state says, without an error text', async () => {
+    answer([failed()]);
+    const tree = await render();
+    reply(409);
+    answer([failed({ reason: 'daily-limit' })]);
+    await press(tree, 'Try again');
+    expect(texts(tree).join(' ')).not.toMatch(/just now/);
+    expect(texts(tree)).not.toContain('Try again');
+  });
+
+  it('on 503 says so and keeps the button', async () => {
+    answer([failed()]);
+    const tree = await render();
+    reply(503);
+    await press(tree, 'Try again');
+    expect(texts(tree)).toContain("Couldn't try again just now");
+    expect(texts(tree)).toContain('Try again');
+  });
+
+  it('on no network says so and keeps the button', async () => {
+    answer([failed()]);
+    const tree = await render();
+    fetchMock.mockRejectedValueOnce(new Error('network'));
+    await press(tree, 'Try again');
+    expect(texts(tree)).toContain("Couldn't try again just now");
+  });
+
+  it('a second tap that is ignored does not wipe the message that is showing', async () => {
+    answer([failed()]);
+    const tree = await render();
+    reply(503);
+    await press(tree, 'Try again');
+    expect(texts(tree)).toContain("Couldn't try again just now");
+    let release!: () => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          release = () => resolve({ ok: false, status: 503, json: () => Promise.resolve({}) });
+        }),
+    );
+    await act(async () => {
+      const again = pressables(tree).find(n => n.findAllByType(Text).some(t => joined(t) === 'Try again'))!;
+      again.props.onPress();
+      again.props.onPress();
+    });
+    expect(texts(tree)).toContain("Couldn't try again just now");
+    await act(async () => {
+      release();
+    });
+  });
+
+  it('leaving the screen while the try is on its way ends without an error', async () => {
+    answer([failed()]);
+    const tree = await render();
+    let release!: () => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          release = () => resolve({ ok: false, status: 503, json: () => Promise.resolve({}) });
+        }),
+    );
+    await press(tree, 'Try again');
+    act(() => tree.unmount());
+    mounted = undefined;
+    const errors = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await act(async () => {
+      release();
+    });
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  it('ignores a second tap while the first is on its way', async () => {
+    answer([failed()]);
+    const tree = await render();
+    reply(200);
+    answer([bank({ state: 'syncing' })]);
+    await act(async () => {
+      const again = pressables(tree).find(n => n.findAllByType(Text).some(t => joined(t) === 'Try again'))!;
+      again.props.onPress();
+      again.props.onPress();
+    });
+    expect(post()).toHaveLength(1);
+  });
+});
+
 describe('the cards', () => {
   it('shows one card per bank with name, account, date and one state label each', async () => {
     answer([
@@ -131,8 +241,8 @@ describe('the cards', () => {
     expect(describeBank(syncing as never)).toBe('Fetching your debits');
   });
 
-  it('has no Delete, Reconnect or Try again on a card, only "Connect a bank"', async () => {
-    answer([bank({ state: 'expired' }), bank({ name: 'Other', state: 'sync_failed' })]);
+  it('has no Delete, Reconnect or Try again on a card that does not need one, only "Connect a bank"', async () => {
+    answer([bank({ state: 'expired' }), bank({ name: 'Other', state: 'syncing' })]);
     const tree = await render();
     const labels = pressables(tree).flatMap(n => n.findAllByType(Text).map(joined));
     expect(labels).toEqual(['Connect a bank']);

@@ -26,4 +26,5 @@ export type SettingsStackParamList = {
   SettingsHome: undefined;
   SelectBank: undefined;
   ConnectAttempt: undefined;
+  Syncing: { bank: string; country: string };
 };

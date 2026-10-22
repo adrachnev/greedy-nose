@@ -7,7 +7,7 @@
 // typed into the search.
 //
 import { backendCall } from './backendCall';
-import { isUsableBankName } from './connectStore';
+import { isUsableBankName, normalizeBankName } from './connectStore';
 
 // --- Wire shapes --------------------------------------------------------------
 
@@ -36,7 +36,7 @@ export const MAX_SEARCH_LENGTH = 100;
 export const SEARCH_PAUSE_MS = 400;
 
 /** How often a list with a syncing bank is read again. */
-export const SYNC_POLL_MS = 5000;
+export const SYNC_POLL_MS = 4000;
 
 function textOrNull(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null;
@@ -60,6 +60,25 @@ export function parseMyBank(raw: unknown): MyBank | null {
     state: row.state as MyBankState,
     reason: textOrNull(row.reason),
   };
+}
+
+/**
+ * The saved bank a name from the search stands for: the same normalized name. With a country, only a row of that
+ * country (or one that has none, an old row) counts; the name alone decides only when no country is given.
+ * Names are matched, not ids, because the search hit is all the app has when an attempt ends.
+ */
+export function findMyBank(banks: MyBank[], name: string, country: string | null = null): MyBank | undefined {
+  const wanted = normalizeBankName(name);
+  const same = banks.filter(bank => normalizeBankName(bank.name) === wanted);
+  if (country === null) {
+    return same[0];
+  }
+  return same.find(bank => bank.country === country) ?? same.find(bank => bank.country === null);
+}
+
+/** Whether "Try again" is offered: a failed first sync, except when today's fetches of the bank are used up. */
+export function canRetryFirstSync(bank: MyBank): boolean {
+  return bank.state === 'sync_failed' && bank.reason !== 'daily-limit';
 }
 
 function bankList(body: unknown): unknown[] | null {
@@ -167,10 +186,10 @@ export function takeFirstStartNoBank(): boolean {
   return value;
 }
 
-let inFlight: Promise<void> | null = null;
+let inFlight: Promise<boolean> | null = null;
 
-/** Reads `/my-banks`. Concurrent calls share one request. Never rejects. */
-export function refreshMyBanks(): Promise<void> {
+/** Reads `/my-banks`. Concurrent calls share one request. Never rejects; `true` when the answer was usable. */
+export function refreshMyBanks(): Promise<boolean> {
   if (inFlight === null) {
     inFlight = (async () => {
       const banks = parseMyBanksBody(await get('/my-banks', '/my-banks'));
@@ -178,7 +197,7 @@ export function refreshMyBanks(): Promise<void> {
         if (state.status !== 'ready') {
           publish({ status: 'failed', banks: NO_BANKS });
         }
-        return;
+        return false;
       }
       if (!firstAnswerSeen) {
         firstAnswerSeen = true;
@@ -186,9 +205,10 @@ export function refreshMyBanks(): Promise<void> {
       }
       // Same answer as before: no new object, so a poll every few seconds does not re-render.
       if (state.status === 'ready' && JSON.stringify(state.banks) === JSON.stringify(banks)) {
-        return;
+        return true;
       }
       publish({ status: 'ready', banks });
+      return true;
     })().finally(() => {
       inFlight = null;
     });
@@ -196,9 +216,58 @@ export function refreshMyBanks(): Promise<void> {
   return inFlight;
 }
 
+// --- Trying the first sync again -----------------------------------------------------
+
+/**
+ * - `queued`: the backend took it; the bank shows as syncing at once.
+ * - `conflict`: the backend says it is not failed (any more) or "try again tomorrow"; the state was read again.
+ * - `unavailable`: no answer or a refusal; nothing changed.
+ * - `busy`: the same bank is already being sent; this call did nothing.
+ */
+export type RetryOutcome = 'queued' | 'conflict' | 'unavailable' | 'busy';
+
+const retrying = new Set<string>();
+
+/**
+ * `POST /my-banks/first-sync`: repeats only the pull (R25), no new consent. Never rejects.
+ * The contract takes the name only (`aspsp`), so two saved banks of one name cannot be told apart here.
+ */
+export async function retryFirstSync(name: string): Promise<RetryOutcome> {
+  if (retrying.has(name)) {
+    return 'busy';
+  }
+  retrying.add(name);
+  try {
+    const reply = await backendCall('myBanksStore', '/my-banks/first-sync', '/my-banks/first-sync', {
+      method: 'POST',
+      body: { aspsp: name },
+    });
+    if (reply.ok) {
+      // A read begun before the POST would answer with the old state; let it land first, then show the new one.
+      await inFlight;
+      publish({
+        status: 'ready',
+        banks: state.banks.map(bank =>
+          bank.name === name && bank.state === 'sync_failed' ? { ...bank, state: 'syncing', reason: null } : bank,
+        ),
+      });
+      refreshMyBanks();
+      return 'queued';
+    }
+    if (reply.status === 409) {
+      await refreshMyBanks();
+      return 'conflict';
+    }
+    return 'unavailable';
+  } finally {
+    retrying.delete(name);
+  }
+}
+
 // --- Polling ----------------------------------------------------------------------
 
 let pollUsers = 0;
+let watchers = 0;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
@@ -211,7 +280,7 @@ export function startMyBanksPolling(): () => void {
   refreshMyBanks();
   if (pollTimer === null) {
     pollTimer = setInterval(() => {
-      if (state.banks.some(bank => bank.state === 'syncing')) {
+      if (watchers > 0 || state.banks.some(bank => bank.state === 'syncing')) {
         refreshMyBanks();
       }
     }, SYNC_POLL_MS);
@@ -230,6 +299,21 @@ export function startMyBanksPolling(): () => void {
   };
 }
 
+/**
+ * While held, the running poll reads also when no bank is known to be syncing: the screen that waits for a
+ * just-saved bank (Story 5.8) may not have its row yet. Call the returned function once to let go.
+ */
+export function watchMyBanks(): () => void {
+  watchers += 1;
+  let released = false;
+  return () => {
+    if (!released) {
+      released = true;
+      watchers -= 1;
+    }
+  };
+}
+
 /** Test-only. */
 export function __resetMyBanksStoreForTests(): void {
   state = LOADING;
@@ -237,6 +321,8 @@ export function __resetMyBanksStoreForTests(): void {
   firstAnswerSeen = false;
   firstStartHadNoBank = false;
   pollUsers = 0;
+  watchers = 0;
+  retrying.clear();
   if (pollTimer !== null) {
     clearInterval(pollTimer);
     pollTimer = null;

@@ -138,12 +138,19 @@ export default function ConnectAttemptScreen({ navigation }: Props) {
   toSettingsRef.current = toSettings;
   useEffect(() => {
     if (flow.step === 'saved') {
-      // TRACER-BULLET: the first-sync screen (Story 5.8) is missing; for now Settings shows the card as Syncing.
-      reset();
+      // The bank is saved: the first sync (Story 5.8) takes this screen's place. The stack is rebuilt rather than
+      // replaced, so back from the sync screen lands on Settings and not on the search that led here.
+      navigation.reset({
+        index: 1,
+        routes: [
+          { name: 'SettingsHome' },
+          { name: 'Syncing', params: { bank: flow.bank, country: flow.country } },
+        ],
+      });
     } else if (flow.step === 'idle') {
       toSettingsRef.current();
     }
-  }, [flow.step, reset]);
+  }, [flow, navigation]);
 
   const again = () => {
     if (flow.step === 'failed' || flow.step === 'expired') {
