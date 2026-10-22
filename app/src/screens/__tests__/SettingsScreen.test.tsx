@@ -1,15 +1,16 @@
 /**
- * The temporary Settings entry for connecting a bank (Story 5.1a): what the
- * user reads at each step, and that the two ways back from the bank (the app
- * link, the app coming to the foreground) reach the store.
+ * Story 5.6: the Settings cards for each state, the no-bank variant, the
+ * polling that follows a syncing bank, and the first-start jump.
  */
 
 import React from 'react';
-import { AppState, Linking, Text, TextInput } from 'react-native';
+import { NavigationContext } from '@react-navigation/native';
+import { AppState, Text } from 'react-native';
 import ReactTestRenderer, { act } from 'react-test-renderer';
-import { __resetConnectStoreForTests } from '../../data/connectStore';
-import { useConnectReturn } from '../../data/hooks';
-import SettingsScreen, { FAILURE_TEXT, formatValidUntil } from '../SettingsScreen';
+import { useNoBankStartup } from '../../data/hooks';
+import { __resetMyBanksStoreForTests, refreshMyBanks, SYNC_POLL_MS } from '../../data/myBanksStore';
+import { formatDeviceDate } from '../../utils/format';
+import SettingsScreen, { describeBank } from '../SettingsScreen';
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -20,81 +21,82 @@ jest.mock('../../data/config', () => ({
   BACKEND_BASE_URL: 'http://backend.test',
   BACKEND_TIMEOUT_MS: 1000,
 }));
-jest.mock('../../data/openConnectLink', () => ({
-  openConnectLink: jest.fn(() => Promise.resolve(false)),
-  dismissConnectLink: jest.fn(() => Promise.resolve()),
+jest.mock('../../data/backendAuth', () => ({
+  hasApiKey: () => true,
+  backendHeaders: () => ({ Authorization: 'Bearer test' }),
 }));
 
 const fetchMock = jest.fn();
-let statusBodies: unknown[];
-let linkOk: boolean;
-let urlListener: ((event: { url: string }) => void) | undefined;
-let stateListener: ((state: string) => void) | undefined;
+const navigate = jest.fn();
+const UNTIL = '2027-01-19T12:00:00';
 
-const bank = (validUntil: string) => ({ aspsp: 'Example Bank', state: 'connected', validUntil });
+const bank = (over: Record<string, unknown> = {}) => ({
+  name: 'Example Bank',
+  country: 'DE',
+  account: 'Main account',
+  validUntil: UNTIL,
+  state: 'connected',
+  ...over,
+});
+
+function answer(banks: unknown[] | null) {
+  fetchMock.mockResolvedValueOnce(
+    banks === null
+      ? { ok: false, status: 500, json: () => Promise.resolve({}) }
+      : { ok: true, status: 200, json: () => Promise.resolve({ banks }) },
+  );
+}
+
+let mounted: ReactTestRenderer.ReactTestRenderer | undefined;
+let removeAppState: jest.Mock;
+let appStateListener: ((state: string) => void) | undefined;
 
 beforeEach(() => {
-  onResumed.mockClear();
-  __resetConnectStoreForTests();
-  linkOk = true;
-  statusBodies = [{ banks: [] }, { banks: [bank('2027-01-19T12:00:00')] }];
-  let i = 0;
+  __resetMyBanksStoreForTests();
+  navigate.mockReset();
   fetchMock.mockReset();
-  fetchMock.mockImplementation((url: string) => {
-    if (url.endsWith('/connect-links')) {
-      return Promise.resolve({
-        ok: linkOk,
-        status: linkOk ? 200 : 500,
-        json: () => Promise.resolve({ url: 'https://bank.test/x' }),
-      });
-    }
-    const body = statusBodies[Math.min(i++, statusBodies.length - 1)];
-    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
-  });
   (globalThis as unknown as { fetch: unknown }).fetch = fetchMock;
   jest.spyOn(console, 'warn').mockImplementation(() => {});
-  jest.spyOn(Linking, 'addEventListener').mockImplementation(((_: string, cb: never) => {
-    urlListener = cb;
-    return { remove: jest.fn() };
-  }) as never);
-  jest.spyOn(Linking, 'getInitialURL').mockImplementation(() => Promise.resolve(null));
-  jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, cb: never) => {
-    stateListener = cb;
-    return { remove: jest.fn() };
+  removeAppState = jest.fn();
+  jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, cb: (state: string) => void) => {
+    appStateListener = cb;
+    return { remove: removeAppState };
   }) as never);
 });
-let mounted: ReactTestRenderer.ReactTestRenderer | undefined;
 afterEach(() => {
   act(() => mounted?.unmount());
   mounted = undefined;
+  jest.useRealTimers();
   jest.restoreAllMocks();
 });
 
-// The listeners live at the app root (App.tsx), the screen only shows the state.
-const onResumed = jest.fn();
-function Harness() {
-  useConnectReturn(onResumed);
-  return <SettingsScreen />;
-}
+const pressables = (tree: ReactTestRenderer.ReactTestRenderer) =>
+  tree.root.findAll(
+    n =>
+      n.props.accessibilityRole === 'button' &&
+      typeof n.props.onPress === 'function' &&
+      n.parent?.props.accessibilityRole !== 'button',
+  );
+
+const joined = (t: ReactTestRenderer.ReactTestInstance) => [t.props.children].flat().join('');
+const texts = (tree: ReactTestRenderer.ReactTestRenderer) => tree.root.findAllByType(Text).map(joined);
 
 async function render() {
   let tree!: ReactTestRenderer.ReactTestRenderer;
   await act(async () => {
-    tree = ReactTestRenderer.create(<Harness />);
+    tree = ReactTestRenderer.create(
+      <SettingsScreen
+        navigation={{ navigate } as never}
+        route={{ key: 'k', name: 'SettingsHome' } as never}
+      />,
+    );
   });
   mounted = tree;
   return tree;
 }
 
-const joined = (t: ReactTestRenderer.ReactTestInstance) => [t.props.children].flat().join('');
-
-const texts = (tree: ReactTestRenderer.ReactTestRenderer) =>
-  tree.root.findAllByType(Text).map(joined);
-
 async function press(tree: ReactTestRenderer.ReactTestRenderer, label: string) {
-  const button = tree.root
-    .findAll(n => n.props.accessibilityRole === 'button' && typeof n.props.onPress === 'function')
-    .find(n => n.findAllByType(Text).some(t => joined(t) === label));
+  const button = pressables(tree).find(n => n.findAllByType(Text).some(t => joined(t) === label));
   if (!button) {
     throw new Error(`no button "${label}"`);
   }
@@ -103,103 +105,294 @@ async function press(tree: ReactTestRenderer.ReactTestRenderer, label: string) {
   });
 }
 
-async function connectAs(tree: ReactTestRenderer.ReactTestRenderer, name = 'Example Bank') {
-  await act(async () => {
-    tree.root.findByType(TextInput).props.onChangeText(name);
+describe('the cards', () => {
+  it('shows one card per bank with name, account, date and one state label each', async () => {
+    answer([
+      bank(),
+      bank({ name: 'Example Direct', state: 'syncing' }),
+      bank({ name: 'Example Bank Austria', state: 'sync_failed' }),
+      bank({ name: 'Example Savings', account: 'Current account', state: 'expired' }),
+    ]);
+    const all = texts(await render());
+    const date = formatDeviceDate(UNTIL);
+    expect(all).toContain('Example Bank');
+    expect(all).toContain(`Main account · access valid until ${date}`);
+    expect(all).toContain('Active');
+    expect(all).toContain('Main account · fetching your debits');
+    expect(all).toContain('Syncing');
+    expect(all).toContain("Main account · couldn't fetch your debits");
+    expect(all).toContain('Sync failed');
+    expect(all).toContain('Current account · access expired');
+    expect(all).toContain('Expired');
   });
-  await press(tree, 'Connect a bank');
-}
 
-it('explains the step before the bank, without naming any bank', async () => {
-  const tree = await render();
-  const all = texts(tree).join('\n');
-  expect(all).toContain('You sign in at your bank and approve in its app. Then switch back to your browser tab, which brings you back here.');
-  expect(all).not.toMatch(/\b(N26|DKB|ING)\b/);
-});
-
-it('does not enable the button before a name is typed', async () => {
-  const tree = await render();
-  const button = tree.root.findAll(n => n.props.accessibilityRole === 'button')[0];
-  expect(button.props.disabled).toBe(true);
-});
-
-it('shows a waiting text while the bank asks for approval, including how to get back', async () => {
-  const tree = await render();
-  await connectAs(tree);
-  expect(texts(tree)).toContain('Waiting for your bank');
-  expect(texts(tree).join(' ')).not.toContain('come back here');
-  expect(texts(tree)).toContain(
-    "After you approved in your bank's app, switch back to your browser tab. It brings you back here.",
-  );
-});
-
-it('shows "connected, valid until" after the app link arrives', async () => {
-  const tree = await render();
-  await connectAs(tree);
-  await act(async () => {
-    urlListener?.({ url: 'greedynose://connected' });
+  it('starts the line with a capital when the bank gave no account name', () => {
+    const syncing = bank({ account: null, state: 'syncing' });
+    expect(describeBank(syncing as never)).toBe('Fetching your debits');
   });
-  expect(texts(tree)).toContain('Example Bank is connected, valid until 19 Jan 2027');
-});
 
-it('reads the result when the app comes to the foreground by hand', async () => {
-  const tree = await render();
-  await connectAs(tree);
-  await act(async () => {
-    stateListener?.('active');
+  it('has no Delete, Reconnect or Try again on a card, only "Connect a bank"', async () => {
+    answer([bank({ state: 'expired' }), bank({ name: 'Other', state: 'sync_failed' })]);
+    const tree = await render();
+    const labels = pressables(tree).flatMap(n => n.findAllByType(Text).map(joined));
+    expect(labels).toEqual(['Connect a bank']);
   });
-  expect(texts(tree).join('\n')).toContain('is connected, valid until');
-});
 
-it('tells the root to show Settings after a resumed check, but not at app start without an attempt', async () => {
-  const tree = await render();
-  expect(onResumed).not.toHaveBeenCalled();
-  await connectAs(tree);
-  await act(async () => {
-    urlListener?.({ url: 'greedynose://connected' });
+  it('opens the bank search from "Connect a bank"', async () => {
+    answer([bank()]);
+    const tree = await render();
+    await press(tree, 'Connect a bank');
+    expect(navigate).toHaveBeenCalledWith('SelectBank');
   });
-  expect(onResumed).toHaveBeenCalledTimes(1);
-  await act(async () => {
-    stateListener?.('active');
+
+  it('names no bank in its own words', async () => {
+    answer([]);
+    expect(texts(await render()).join('\n')).not.toMatch(/\b(N26|DKB|ING)\b/);
   });
-  expect(onResumed).toHaveBeenCalledTimes(1);
 });
 
-it('ignores other links', async () => {
-  const tree = await render();
-  await connectAs(tree);
-  await act(async () => {
-    urlListener?.({ url: 'greedynose://something-else' });
+describe('without a bank, and when the read fails', () => {
+  it('shows the no-bank variant with one sentence and the main action', async () => {
+    answer([]);
+    const tree = await render();
+    expect(texts(tree)).toContain('No bank connected');
+    expect(texts(tree).join('\n')).toContain('Greedy Nose alerts you the moment a payee you marked Bad charges you.');
+    await press(tree, 'Connect a bank');
+    expect(navigate).toHaveBeenCalledWith('SelectBank');
   });
-  expect(texts(tree)).toContain('Waiting for your bank');
-});
 
-it('offers "Check again" when the bank has not confirmed, so there is no dead end', async () => {
-  statusBodies = [{ banks: [] }, { banks: [] }, { banks: [bank('2027-01-19T12:00:00')] }];
-  const tree = await render();
-  await connectAs(tree);
-  await act(async () => {
-    stateListener?.('active');
+  it('never claims "no bank" while loading or after a failed read, and retries', async () => {
+    answer(null);
+    const tree = await render();
+    expect(texts(tree)).not.toContain('No bank connected');
+    expect(texts(tree)).toContain("Couldn't load your banks");
+    answer([bank()]);
+    await press(tree, 'Try again');
+    expect(texts(tree)).toContain('Example Bank');
   });
-  expect(texts(tree).join('\n')).toContain('has not confirmed yet');
-  await press(tree, 'Check again');
-  expect(texts(tree).join('\n')).toContain('is connected');
 
-  await press(tree, 'Done');
-  expect(texts(tree)).toContain('Connect a bank');
+  it('shows a waiting text, not "no bank", before the first answer', async () => {
+    fetchMock.mockReturnValueOnce(new Promise(() => {}));
+    const tree = await render();
+    expect(texts(tree)).toContain('Loading your banks...');
+    expect(texts(tree)).not.toContain('No bank connected');
+  });
 });
 
-it('shows a failure with "Try again" that leads back to the form', async () => {
-  linkOk = false;
-  const tree = await render();
-  await connectAs(tree);
-  expect(texts(tree)).toContain(FAILURE_TEXT.link);
-  await press(tree, 'Try again');
-  expect(texts(tree)).toContain('Connect a bank');
+describe('a syncing bank', () => {
+  it('asks again every few seconds, changes by itself, and stops asking when the screen is left', async () => {
+    jest.useFakeTimers();
+    answer([bank({ state: 'syncing' })]);
+    const tree = await render();
+    expect(texts(tree)).toContain('Syncing');
+
+    answer([bank({ state: 'connected' })]);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(SYNC_POLL_MS);
+    });
+    expect(texts(tree)).toContain('Active');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(SYNC_POLL_MS * 3);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    act(() => tree.unmount());
+    mounted = undefined;
+    expect(jest.getTimerCount()).toBe(0);
+    expect(removeAppState).toHaveBeenCalled();
+  });
 });
 
-it('formats the date as a plain day and refuses non-dates', () => {
-  expect(formatValidUntil('2027-01-19T12:00:00')).toBe('19 Jan 2027');
-  expect(formatValidUntil('nonsense')).toBeNull();
-  expect(formatValidUntil(null)).toBeNull();
+describe('focus and foreground', () => {
+  function fakeNavigation(focused: boolean) {
+    const listeners: Record<string, () => void> = {};
+    return {
+      listeners,
+      navigation: {
+        isFocused: () => focused,
+        addListener: (event: string, cb: () => void) => {
+          listeners[event] = cb;
+          return jest.fn();
+        },
+        navigate,
+      },
+    };
+  }
+
+  it('stops asking on blur while the screen stays mounted, and resumes on focus', async () => {
+    jest.useFakeTimers();
+    const fake = fakeNavigation(true);
+    answer([bank({ state: 'syncing' })]);
+    await act(async () => {
+      mounted = ReactTestRenderer.create(
+        <NavigationContext.Provider value={fake.navigation as never}>
+          <SettingsScreen navigation={{ navigate } as never} route={{} as never} />
+        </NavigationContext.Provider>,
+      );
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // The timer count is global (the reads below are the real check); with one screen it is exactly the interval.
+    expect(jest.getTimerCount()).toBe(1);
+
+    act(() => fake.listeners.blur());
+    expect(jest.getTimerCount()).toBe(0);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(SYNC_POLL_MS * 3);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    answer([bank({ state: 'syncing' })]);
+    await act(async () => {
+      fake.listeners.focus();
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Polling really resumed: the interval reads again (checked by reads, the timer count is only a hint).
+    answer([bank({ state: 'syncing' })]);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(SYNC_POLL_MS);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not poll at all while the screen is not focused', async () => {
+    jest.useFakeTimers();
+    const fake = fakeNavigation(false);
+    await act(async () => {
+      mounted = ReactTestRenderer.create(
+        <NavigationContext.Provider value={fake.navigation as never}>
+          <SettingsScreen navigation={{ navigate } as never} route={{} as never} />
+        </NavigationContext.Provider>,
+      );
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(SYNC_POLL_MS * 3);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reads again when the app comes to the foreground', async () => {
+    answer([bank()]);
+    await render();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    answer([bank({ state: 'expired' })]);
+    await act(async () => {
+      appStateListener?.('background');
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      appStateListener?.('active');
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('first start', () => {
+  function Root({ onNoBank }: { onNoBank: () => boolean }) {
+    useNoBankStartup(onNoBank);
+    return null;
+  }
+  async function renderRoot(onNoBank: () => boolean) {
+    await act(async () => {
+      mounted = ReactTestRenderer.create(<Root onNoBank={onNoBank} />);
+    });
+  }
+
+  it('goes to Settings once when the first good answer has no bank', async () => {
+    answer([]);
+    const onNoBank = jest.fn(() => true);
+    await renderRoot(onNoBank);
+    expect(onNoBank).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps trying until the navigator can take the jump, then jumps once', async () => {
+    jest.useFakeTimers();
+    answer([]);
+    let ready = false;
+    const onNoBank = jest.fn(() => ready);
+    await renderRoot(onNoBank);
+    expect(onNoBank).toHaveBeenCalledTimes(1);
+
+    ready = true;
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(600);
+    });
+    expect(onNoBank).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5000);
+    });
+    expect(onNoBank).toHaveBeenCalledTimes(2);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('gives up after 20 tries', async () => {
+    jest.useFakeTimers();
+    answer([]);
+    const onNoBank = jest.fn(() => false);
+    await renderRoot(onNoBank);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(500 * 40);
+    });
+    expect(onNoBank).toHaveBeenCalledTimes(21);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('stops retrying when the root unmounts', async () => {
+    jest.useFakeTimers();
+    answer([]);
+    const onNoBank = jest.fn(() => false);
+    await renderRoot(onNoBank);
+    expect(onNoBank).toHaveBeenCalledTimes(1);
+    act(() => mounted?.unmount());
+    mounted = undefined;
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5000);
+    });
+    expect(onNoBank).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps one retry chain when the store publishes while a retry is pending', async () => {
+    jest.useFakeTimers();
+    answer([]);
+    const onNoBank = jest.fn(() => false);
+    await renderRoot(onNoBank);
+    expect(onNoBank).toHaveBeenCalledTimes(1);
+
+    answer([bank()]);
+    await act(async () => {
+      await refreshMyBanks();
+    });
+    expect(onNoBank).toHaveBeenCalledTimes(2); // the publish itself checked once
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(500);
+    });
+    expect(onNoBank).toHaveBeenCalledTimes(3); // two chains would have made it 4
+  });
+
+  it('does not move the user when a bank exists, or when the read failed', async () => {
+    answer([bank()]);
+    const withBank = jest.fn(() => true);
+    await renderRoot(withBank);
+    expect(withBank).not.toHaveBeenCalled();
+    act(() => mounted?.unmount());
+
+    __resetMyBanksStoreForTests();
+    answer(null);
+    const failed = jest.fn(() => true);
+    await renderRoot(failed);
+    expect(failed).not.toHaveBeenCalled();
+  });
+});
+
+it('formats the date by the device locale and refuses non-dates', () => {
+  expect(formatDeviceDate('2027-01-19T12:00:00', 'en-GB')).toBe('19 Jan 2027');
+  expect(formatDeviceDate('nonsense')).toBeNull();
+  expect(formatDeviceDate(null)).toBeNull();
 });

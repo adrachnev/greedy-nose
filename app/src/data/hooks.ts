@@ -8,7 +8,16 @@
 // derives it from the current rule), so there is nothing on the wire to
 // switch, and rules stay in the local store under both flags.
 
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { NavigationContext } from '@react-navigation/native';
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { AppState, Linking } from 'react-native';
 import { Debit, Payee, Rule, RuleDraft } from '../domain/model';
 import { debits as fixtureDebits, payees as fixturePayees, subscribeToDataChanges } from '../mocks/data';
@@ -25,11 +34,24 @@ import {
   checkAfterReturn,
   ConnectFlow,
   getConnectFlow,
+  isUsableBankName,
   resetConnectFlow,
   returnToApp,
   startConnect,
   subscribeToConnectFlow,
 } from './connectStore';
+import {
+  BankHit,
+  getMyBanks,
+  MyBanksState,
+  peekFirstStartNoBank,
+  refreshMyBanks,
+  searchBanks,
+  SEARCH_PAUSE_MS,
+  startMyBanksPolling,
+  subscribeToMyBanks,
+  takeFirstStartNoBank,
+} from './myBanksStore';
 import {
   getRegistrationState,
   RegistrationState,
@@ -252,4 +274,148 @@ export function useConnectBank(): ConnectBank {
     }),
     [flow],
   );
+}
+
+// --- My banks ---------------------------------------------------------------------
+
+/** The saved banks and their state; only reads, the Settings screen and the root ask the backend. */
+export function useMyBanks(): MyBanksState {
+  return useSyncExternalStore(subscribeToMyBanks, getMyBanks);
+}
+
+/**
+ * Keeps the banks fresh while the calling screen is on screen: one read when it
+ * gets focus and when the app comes to the foreground, and a read every few
+ * seconds while a bank is syncing (see startMyBanksPolling). Without a
+ * navigator (a bare render) "focused" means "mounted".
+ */
+export function useMyBanksPolling(): void {
+  const navigation = useContext(NavigationContext);
+
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    const begin = () => {
+      stop ??= startMyBanksPolling();
+    };
+    const end = () => {
+      stop?.();
+      stop = null;
+    };
+    if (!navigation || navigation.isFocused()) {
+      begin();
+    }
+    const subscriptions = navigation
+      ? [navigation.addListener('focus', begin), navigation.addListener('blur', end)]
+      : [];
+    const appState = AppState.addEventListener('change', next => {
+      if (next === 'active' && stop !== null) {
+        refreshMyBanks();
+      }
+    });
+    return () => {
+      end();
+      subscriptions.forEach(unsubscribe => unsubscribe());
+      appState.remove();
+    };
+  }, [navigation]);
+}
+
+/** How often and how long the jump is retried while the navigator cannot take it yet. */
+const NO_BANK_RETRY_MS = 500;
+const NO_BANK_RETRY_LIMIT = 20;
+
+/**
+ * First start (R36): when the first good answer of the process says "no bank",
+ * calls `onNoBank` until it reports that the jump happened (`true`), then never
+ * again. The navigator may not be ready, or may still show onboarding, when the
+ * answer arrives; the flag is spent only by a jump that was made. Call it once
+ * from the root component; it renders nothing. A failed or slow read never
+ * counts as "no bank".
+ */
+export function useNoBankStartup(onNoBank: () => boolean): void {
+  const onNoBankRef = useRef(onNoBank);
+  onNoBankRef.current = onNoBank;
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let retries = 0;
+    let cancelled = false;
+    const check = () => {
+      // One chain only: this is also the store listener, so a publish can arrive while a retry is pending.
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (cancelled || getMyBanks().status !== 'ready' || !peekFirstStartNoBank()) {
+        return;
+      }
+      if (onNoBankRef.current()) {
+        takeFirstStartNoBank();
+      } else if (retries < NO_BANK_RETRY_LIMIT) {
+        retries += 1;
+        timer = setTimeout(check, NO_BANK_RETRY_MS);
+      }
+    };
+    const unsubscribe = subscribeToMyBanks(check);
+    refreshMyBanks();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+    };
+  }, []);
+}
+
+// --- Bank search ------------------------------------------------------------------
+
+export type BankSearch =
+  | { phase: 'idle' }
+  | { phase: 'loading' }
+  | { phase: 'ready'; banks: BankHit[] }
+  | { phase: 'failed' };
+
+/**
+ * The search of Story 5.6 for the text typed so far: nothing below the minimum
+ * length, otherwise one request after a pause in typing. An answer for text that
+ * has since changed is dropped (`cancelled`), so a slow old answer never
+ * overwrites the newer one. `retry` asks again at once.
+ */
+export function useBankSearch(typed: string): { search: BankSearch; retry: () => void } {
+  // Trimmed, so a trailing space does not fire the same search again.
+  const text = typed.trim();
+  const [search, setSearch] = useState<BankSearch>({ phase: 'idle' });
+  const [attempt, setAttempt] = useState(0);
+  const retryingRef = useRef(false);
+
+  useEffect(() => {
+    if (!isUsableBankName(text)) {
+      setSearch({ phase: 'idle' });
+      return;
+    }
+    let cancelled = false;
+    // The previous hits stay on screen while the new ones load (no flicker per key).
+    setSearch(previous => (previous.phase === 'ready' ? previous : { phase: 'loading' }));
+    const wait = retryingRef.current ? 0 : SEARCH_PAUSE_MS;
+    retryingRef.current = false;
+    const timer = setTimeout(() => {
+      searchBanks(text).then(result => {
+        if (!cancelled) {
+          setSearch(result.ok ? { phase: 'ready', banks: result.banks } : { phase: 'failed' });
+        }
+      });
+    }, wait);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [text, attempt]);
+
+  const retry = useCallback(() => {
+    retryingRef.current = true;
+    setAttempt(n => n + 1);
+  }, []);
+
+  return { search, retry };
 }

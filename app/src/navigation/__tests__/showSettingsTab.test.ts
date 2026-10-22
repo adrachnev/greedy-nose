@@ -8,13 +8,13 @@ const ref = (over: { ready?: boolean; routes?: string[] | undefined } = {}) => (
 
 it('navigates to the Settings tab when the main tabs are showing', () => {
   const r = ref({ routes: ['Debits', 'Rules', 'Settings'] });
-  showSettingsTab(r);
+  expect(showSettingsTab(r)).toBe(true);
   expect(r.navigate).toHaveBeenCalledWith('Settings');
 });
 
 it('does nothing during onboarding, before the container is ready, or without a state', () => {
   const onboarding = ref({ routes: ['ConnectBank', 'Syncing'] });
-  showSettingsTab(onboarding);
+  expect(showSettingsTab(onboarding)).toBe(false);
   const notReady = ref({ ready: false, routes: ['Settings'] });
   showSettingsTab(notReady);
   const noState = ref({});

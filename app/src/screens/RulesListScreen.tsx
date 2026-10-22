@@ -3,11 +3,13 @@ import React, { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DataSourceBadge from '../components/DataSourceBadge';
+import NoBankNotice from '../components/NoBankNotice';
 import SearchField from '../components/SearchField';
-import { usePayees, useRuleByPayeeId } from '../data/hooks';
+import { useMyBanks, usePayees, useRules, useRuleByPayeeId } from '../data/hooks';
 import { classifyPayee } from '../domain/classification';
 import { Payee, Rule } from '../domain/model';
 import { useTabScopedSearch } from '../hooks/useTabScopedSearch';
+import { openSelectBank } from '../navigation/openSelectBank';
 import { RulesStackParamList } from '../navigation/types';
 import { dark, light, Theme } from '../theme/colors';
 import { formatCurrencyEUR } from '../utils/format';
@@ -78,7 +80,15 @@ export default function RulesListScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const payees = usePayees();
   const ruleByPayeeId = useRuleByPayeeId();
+  const rules = useRules();
+  const myBanks = useMyBanks();
   const { search, setSearch } = useTabScopedSearch();
+  // 04c#no-bank: rules outlive their bank (R18), so any payee or rule keeps the normal list.
+  const noBank =
+    myBanks.status === 'ready' &&
+    myBanks.banks.length === 0 &&
+    payees.length === 0 &&
+    rules.length === 0;
 
   const isSearching = search.trim().length > 0;
 
@@ -104,6 +114,23 @@ export default function RulesListScreen({ navigation }: Props) {
   const query = search.trim();
   const noMatches = isSearching && badPayees.length === 0 && goodPayees.length === 0;
   const noMatchText = `No payees match “${query}”.`;
+
+  // 04c#no-bank has no search field: there is nothing to search yet.
+  if (noBank) {
+    return (
+      <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
+        <DataSourceBadge />
+        <View style={styles.navBar}>
+          <Text style={[styles.navTitle, { color: theme.text }]}>Rules</Text>
+        </View>
+        <NoBankNotice
+          title="No payees yet"
+          note="Payees appear here once a bank is connected."
+          onConnect={() => openSelectBank(navigation)}
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>

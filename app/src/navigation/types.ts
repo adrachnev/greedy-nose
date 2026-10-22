@@ -21,3 +21,8 @@ export type MainTabParamList = {
   Rules: undefined; // nested RulesStackParamList
   Settings: undefined;
 };
+
+export type SettingsStackParamList = {
+  SettingsHome: undefined;
+  SelectBank: undefined;
+};

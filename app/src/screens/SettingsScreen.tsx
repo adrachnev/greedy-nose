@@ -1,180 +1,152 @@
-import React, { useState } from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  useColorScheme,
-  View,
-} from 'react-native';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import React from 'react';
+import { ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Button from '../components/Button';
 import DataSourceBadge from '../components/DataSourceBadge';
-import { ConnectFlow, FailureReason, HINT_AFTER_TRIES, isUsableBankName } from '../data/connectStore';
-import { useConnectBank } from '../data/hooks';
+import { useMyBanks, useMyBanksPolling } from '../data/hooks';
+import { MyBank, MyBankState, refreshMyBanks } from '../data/myBanksStore';
+import { toInitials } from '../domain/payees';
+import { SettingsStackParamList } from '../navigation/types';
 import { dark, light, Theme } from '../theme/colors';
+import { formatDeviceDate, joinMeta } from '../utils/format';
 
-// PRAGMATIC: temporary Settings entry for Story 5.1a, only to connect a bank and
-// judge the way there and back on the phone. Stories 5.6/5.7 replace it with the
-// bank cards of mocks/06-settings.html and the bank search of 01-select-bank.html
-// — see bead gn-1u1.10.
+type Props = NativeStackScreenProps<SettingsStackParamList, 'SettingsHome'>;
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// The cards of mocks/06-settings.html. Delete (Epic 6), Reconnect (Epic 7) and
+// "Try again" for a failed first sync (Story 5.8) are not here yet; a card only
+// reports its state.
 
-/** "19 Jan 2027" in the phone's local day; the raw text if it is not a date. */
-export function formatValidUntil(iso: string | null): string | null {
-  if (iso === null) {
-    return null;
-  }
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
-}
-
-export const FAILURE_TEXT: Record<FailureReason, string> = {
-  link: 'We could not start the sign-in. Check your connection and the bank name, then try again.',
-  browser: 'The sign-in page could not be opened. Try again.',
-  status: 'We could not check with your bank just now. Try again.',
-  ended: 'Your bank did not give access this time. Try again.',
+const PILL: Record<MyBankState, { label: string; tone: 'good' | 'bad' | 'neutral' }> = {
+  connected: { label: 'Active', tone: 'good' },
+  syncing: { label: 'Syncing', tone: 'neutral' },
+  sync_failed: { label: 'Sync failed', tone: 'bad' },
+  expired: { label: 'Expired', tone: 'bad' },
 };
 
-function connectedText(flow: Extract<ConnectFlow, { step: 'connected' }>): string {
-  const until = formatValidUntil(flow.validUntil);
-  return until ? `${flow.bank} is connected, valid until ${until}` : `${flow.bank} is connected`;
+/** The second line of a card: the account, then what the state means for the user. */
+export function describeBank(bank: MyBank): string {
+  const until = formatDeviceDate(bank.validUntil);
+  const status = {
+    connected: until ? `access valid until ${until}` : 'access valid',
+    syncing: 'fetching your debits',
+    sync_failed: "couldn't fetch your debits",
+    expired: 'access expired',
+  }[bank.state];
+  // Without an account name the status opens the line, so it takes a capital.
+  return joinMeta(bank.account, bank.account ? status : status.charAt(0).toUpperCase() + status.slice(1));
 }
 
-export default function SettingsScreen() {
-  const theme = useColorScheme() === 'dark' ? dark : light;
-  const insets = useSafeAreaInsets();
-  const { flow, start, reset, checkNow } = useConnectBank();
-  const [bankName, setBankName] = useState('');
+function BankCard({ theme, bank }: { theme: Theme; bank: MyBank }) {
+  const pill = PILL[bank.state];
+  const color = { good: theme.good, bad: theme.bad, neutral: theme.textMuted }[pill.tone];
+  const background = { good: theme.goodBg, bad: theme.badBg, neutral: theme.neutralBg }[pill.tone];
 
   return (
-    <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
-      <DataSourceBadge />
-      <Text style={[styles.title, { color: theme.text }]}>Settings</Text>
-      <View style={styles.content}>
-        <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>Banks</Text>
-        <View style={[styles.card, { backgroundColor: theme.surface }]}>
-          {flow.step === 'idle' && (
-            <>
-              <Text style={[styles.hint, { color: theme.textMuted }]}>
-                You sign in at your bank and approve in its app. Then switch back to your browser tab, which brings you back here.
-              </Text>
-              <TextInput
-                accessibilityLabel="Bank name"
-                placeholder="Name of your bank"
-                placeholderTextColor={theme.textMuted}
-                value={bankName}
-                onChangeText={setBankName}
-                autoCapitalize="words"
-                autoCorrect={false}
-                style={[styles.input, { color: theme.text, borderColor: theme.border }]}
-              />
-              <PrimaryButton
-                theme={theme}
-                label="Connect a bank"
-                disabled={!isUsableBankName(bankName)}
-                onPress={() => start(bankName)}
-              />
-            </>
-          )}
-
-          {(flow.step === 'opening' || flow.step === 'checking') && (
-            <Text style={[styles.status, { color: theme.text }]}>
-              {flow.step === 'opening' ? 'Preparing the sign-in...' : 'Checking with your bank...'}
-            </Text>
-          )}
-
-          {flow.step === 'waiting' && (
-            <>
-              <Text style={[styles.status, { color: theme.text }]}>Waiting for your bank</Text>
-              {flow.notYet && (
-                <Text style={[styles.hint, { color: theme.textMuted }]}>
-                  Your bank has not confirmed yet. If you have approved, check again in a moment.
-                </Text>
-              )}
-              <Text style={[styles.hint, { color: theme.textMuted }]}>
-                After you approved in your bank's app, switch back to your browser tab. It brings you back here.
-              </Text>
-              {flow.tries >= HINT_AFTER_TRIES && (
-                <Text style={[styles.hint, { color: theme.textMuted }]}>
-                  Still nothing? Check that the name matches your bank's own name, or start over with the full name.
-                </Text>
-              )}
-              <PrimaryButton theme={theme} label="Check again" onPress={checkNow} />
-              <TextButton theme={theme} label="Start over" onPress={reset} />
-            </>
-          )}
-
-          {flow.step === 'connected' && (
-            <>
-              <Text style={[styles.status, { color: theme.good }]}>{connectedText(flow)}</Text>
-              <PrimaryButton theme={theme} label="Done" onPress={reset} />
-            </>
-          )}
-
-          {flow.step === 'failed' && (
-            <>
-              <Text style={[styles.status, { color: theme.bad }]}>{FAILURE_TEXT[flow.reason]}</Text>
-              <PrimaryButton theme={theme} label="Try again" onPress={reset} />
-            </>
-          )}
-        </View>
+    <View style={[styles.card, { backgroundColor: theme.surface }]}>
+      <View style={[styles.logo, { backgroundColor: theme.neutralBg }]}>
+        <Text style={[styles.logoText, { color: theme.textMuted }]}>{toInitials(bank.name)}</Text>
+      </View>
+      <View style={styles.info}>
+        <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
+          {bank.name}
+        </Text>
+        <Text style={[styles.meta, { color: theme.textMuted }]}>{describeBank(bank)}</Text>
+      </View>
+      <View style={[styles.pill, { backgroundColor: background }]}>
+        <Text style={[styles.pillText, { color }]}>{pill.label}</Text>
       </View>
     </View>
   );
 }
 
-function PrimaryButton({
-  theme,
-  label,
-  onPress,
-  disabled,
-}: {
-  theme: Theme;
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      disabled={disabled}
-      onPress={onPress}
-      style={[styles.btn, { backgroundColor: theme.accent, opacity: disabled ? 0.5 : 1 }]}
-    >
-      <Text style={styles.btnText}>{label}</Text>
-    </Pressable>
-  );
-}
+export default function SettingsScreen({ navigation }: Props) {
+  const theme = useColorScheme() === 'dark' ? dark : light;
+  const insets = useSafeAreaInsets();
+  const { status, banks } = useMyBanks();
+  useMyBanksPolling();
 
-function TextButton({ theme, label, onPress }: { theme: Theme; label: string; onPress: () => void }) {
+  const connect = () => navigation.navigate('SelectBank');
+
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={styles.textBtn}>
-      <Text style={[styles.textBtnText, { color: theme.accent }]}>{label}</Text>
-    </Pressable>
+    <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
+      <DataSourceBadge />
+      <Text style={[styles.title, { color: theme.text }]}>Settings</Text>
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>Banks</Text>
+
+        {status === 'loading' && (
+          <Text style={[styles.note, { color: theme.textMuted }]}>Loading your banks...</Text>
+        )}
+
+        {status === 'failed' && (
+          <View style={[styles.emptyCard, { backgroundColor: theme.surface }]}>
+            <Text style={[styles.emptyTitle, { color: theme.text }]}>Couldn't load your banks</Text>
+            <Text style={[styles.note, { color: theme.textMuted }]}>
+              Check your connection and try again.
+            </Text>
+            <Button label="Try again" onPress={() => refreshMyBanks()} />
+          </View>
+        )}
+
+        {status === 'ready' && banks.length === 0 && (
+          <View style={[styles.emptyCard, { backgroundColor: theme.surface }]}>
+            <Text style={[styles.emptyTitle, { color: theme.text }]}>No bank connected</Text>
+            <Text style={[styles.note, { color: theme.textMuted }]}>
+              Greedy Nose alerts you the moment a payee you marked Bad charges you. Connect your
+              bank to start.
+            </Text>
+            <Button label="Connect a bank" onPress={connect} />
+          </View>
+        )}
+
+        {status === 'ready' && banks.length > 0 && (
+          <>
+            {banks.map((bank, index) => (
+              // Names are not unique (one bank in two countries); the list is short and has no reordering.
+              <BankCard key={`${bank.name}:${bank.country ?? ''}:${index}`} theme={theme} bank={bank} />
+            ))}
+            <Button variant="outline" label="Connect a bank" onPress={connect} />
+          </>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   title: { fontSize: 22, fontWeight: '700', paddingHorizontal: 16, paddingVertical: 12 },
-  content: { paddingHorizontal: 16, gap: 8 },
-  sectionLabel: { fontSize: 13, fontWeight: '600', textTransform: 'uppercase', marginTop: 8 },
-  card: { borderRadius: 12, padding: 16, gap: 12 },
-  hint: { fontSize: 14, lineHeight: 20 },
-  status: { fontSize: 16, fontWeight: '600' },
-  input: {
-    minHeight: 44,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    fontSize: 16,
+  content: { paddingHorizontal: 16, paddingBottom: 16, gap: 12 },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+    marginTop: 8,
+    marginHorizontal: 4,
   },
-  btn: { minHeight: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  btnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  textBtn: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  textBtnText: { fontSize: 15, fontWeight: '600' },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 14,
+    padding: 16,
+  },
+  logo: { width: 36, height: 36, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  logoText: { fontSize: 13, fontWeight: '800' },
+  info: { flex: 1, gap: 2, minWidth: 0 },
+  name: { fontSize: 15, fontWeight: '600' },
+  meta: { fontSize: 12 },
+  pill: { borderRadius: 999, paddingVertical: 3, paddingHorizontal: 8 },
+  pillText: { fontSize: 11, fontWeight: '600' },
+  emptyCard: {
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 14,
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+  },
+  emptyTitle: { fontSize: 17, fontWeight: '600' },
+  note: { fontSize: 13, lineHeight: 18, textAlign: 'center' },
 });

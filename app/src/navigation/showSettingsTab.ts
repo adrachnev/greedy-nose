@@ -13,11 +13,11 @@ export type RootNavigationRef = {
   navigate: (name: never) => void;
 };
 
-export function showSettingsTab(ref: RootNavigationRef): void {
-  if (!ref.isReady()) {
-    return;
+/** `true` when the jump was made, `false` when it could not be (not ready, onboarding). */
+export function showSettingsTab(ref: RootNavigationRef): boolean {
+  if (!ref.isReady() || !ref.getRootState()?.routeNames?.includes('Settings')) {
+    return false;
   }
-  if (ref.getRootState()?.routeNames?.includes('Settings')) {
-    (ref.navigate as (name: string) => void)('Settings');
-  }
+  (ref.navigate as (name: string) => void)('Settings');
+  return true;
 }

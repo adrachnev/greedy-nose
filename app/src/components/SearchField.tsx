@@ -15,10 +15,12 @@ export default function SearchField({
   value,
   onChangeText,
   placeholder,
+  maxLength,
 }: {
   value: string;
   onChangeText: (value: string) => void;
   placeholder: string;
+  maxLength?: number;
 }) {
   const theme = useColorScheme() === 'dark' ? dark : light;
 
@@ -30,6 +32,7 @@ export default function SearchField({
         placeholder={placeholder}
         placeholderTextColor={theme.textMuted}
         style={[styles.input, { color: theme.text }]}
+        maxLength={maxLength}
         autoCapitalize="none"
         autoCorrect={false}
         returnKeyType="search"

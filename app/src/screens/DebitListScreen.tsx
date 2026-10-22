@@ -4,13 +4,15 @@ import { Pressable, SectionList, StyleSheet, Text, useColorScheme, View } from '
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DataSourceBadge from '../components/DataSourceBadge';
 import ReleaseStatusLine from '../components/ReleaseStatusLine';
+import NoBankNotice from '../components/NoBankNotice';
 import SearchField from '../components/SearchField';
-import { useDebits, usePayees, useRuleByPayeeId } from '../data/hooks';
+import { useDebits, useMyBanks, usePayees, useRuleByPayeeId } from '../data/hooks';
 import { classifyDebit, classifyPayee } from '../domain/classification';
 import { Debit, Payee, Rule } from '../domain/model';
 import { createPayeeLookup } from '../domain/payees';
 import { dateFromDateKey, useCurrentDateKey } from '../hooks/useCurrentDateKey';
 import { useTabScopedSearch } from '../hooks/useTabScopedSearch';
+import { openSelectBank } from '../navigation/openSelectBank';
 import { DebitsStackParamList } from '../navigation/types';
 import { dark, light, Theme } from '../theme/colors';
 import {
@@ -127,6 +129,9 @@ export default function DebitListScreen({ navigation }: Props) {
   const ruleByPayeeId = useRuleByPayeeId();
   const { search, setSearch } = useTabScopedSearch();
   const dateKey = useCurrentDateKey();
+  // 02b#no-bank: only an answer that says "no bank" counts; loading or failed keeps the plain list.
+  const myBanks = useMyBanks();
+  const noBank = myBanks.status === 'ready' && myBanks.banks.length === 0 && debits.length === 0;
 
   // R1's last mile on this screen. A debit whose payee is missing used to be
   // filtered out below and rendered as null further down — two silent drops of
@@ -235,6 +240,23 @@ export default function DebitListScreen({ navigation }: Props) {
       </View>
     );
   }, [query, noMatchText, theme]);
+
+  // 02b#no-bank has no search field: there is nothing to search yet.
+  if (noBank) {
+    return (
+      <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
+        <DataSourceBadge />
+        <View style={styles.navBar}>
+          <Text style={[styles.navTitle, { color: theme.text }]}>Debits</Text>
+        </View>
+        <NoBankNotice
+          title="No bank connected"
+          note="Debits show up here once a bank is connected."
+          onConnect={() => openSelectBank(navigation)}
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>

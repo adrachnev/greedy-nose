@@ -9,6 +9,7 @@ import DebitDetailScreen from '../screens/DebitDetailScreen';
 import DebitListScreen from '../screens/DebitListScreen';
 import PayeeEditScreen from '../screens/PayeeEditScreen';
 import RulesListScreen from '../screens/RulesListScreen';
+import SelectBankScreen from '../screens/SelectBankScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import StubScreen from '../screens/StubScreen';
 import { dark, light } from '../theme/colors';
@@ -18,11 +19,13 @@ import {
   MainTabParamList,
   OnboardingStackParamList,
   RulesStackParamList,
+  SettingsStackParamList,
 } from './types';
 
 const OnboardingStack = createNativeStackNavigator<OnboardingStackParamList>();
 const DebitsStack = createNativeStackNavigator<DebitsStackParamList>();
 const RulesStack = createNativeStackNavigator<RulesStackParamList>();
+const SettingsStack = createNativeStackNavigator<SettingsStackParamList>();
 // The id type argument is what makes `id` mandatory below: drop the prop and
 // this stops compiling, rather than stopping R23b at runtime.
 const Tab = createBottomTabNavigator<MainTabParamList, typeof MAIN_TAB_NAVIGATOR_ID>();
@@ -90,6 +93,16 @@ function RulesNavigator() {
       <RulesStack.Screen name="RulesList" component={RulesListScreen} />
       <RulesStack.Screen name="PayeeEdit" component={PayeeEditScreen} />
     </RulesStack.Navigator>
+  );
+}
+
+/** Settings tab: the bank cards + the bank search, so the tab bar stays visible. */
+function SettingsNavigator() {
+  return (
+    <SettingsStack.Navigator screenOptions={{ headerShown: false }}>
+      <SettingsStack.Screen name="SettingsHome" component={SettingsScreen} />
+      <SettingsStack.Screen name="SelectBank" component={SelectBankScreen} />
+    </SettingsStack.Navigator>
   );
 }
 
@@ -192,9 +205,12 @@ function MainTabs() {
         options={LIST_TAB_OPTIONS}
         listeners={listTabListeners}
       />
-      {/* Settings has no nested stack, so neither option has anything to do
-          there — there is no stack to pop and nothing to blur away. */}
-      <Tab.Screen name="Settings" component={SettingsScreen} />
+      <Tab.Screen
+        name="Settings"
+        component={SettingsNavigator}
+        options={LIST_TAB_OPTIONS}
+        listeners={listTabListeners}
+      />
     </Tab.Navigator>
   );
 }

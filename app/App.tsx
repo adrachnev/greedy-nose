@@ -7,7 +7,7 @@
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import { StatusBar, useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { useConnectReturn, useDeviceRegistration, useRulesResync } from './src/data/hooks';
+import { useConnectReturn, useDeviceRegistration, useNoBankStartup, useRulesResync } from './src/data/hooks';
 import AppNavigator from './src/navigation/AppNavigator';
 import { showSettingsTab } from './src/navigation/showSettingsTab';
 
@@ -20,6 +20,7 @@ function App() {
   useDeviceRegistration();
   useRulesResync();
   useConnectReturn(showSettings);
+  useNoBankStartup(showSettings);
 
   return (
     <SafeAreaProvider>

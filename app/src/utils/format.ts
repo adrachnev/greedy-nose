@@ -170,3 +170,31 @@ export function groupByDateSection<T>(
 
   return Array.from(sections.values());
 }
+
+/**
+ * "19 Jan 2027" in the device's locale (Story 5.6, R17): the day of a bank's
+ * access limit, which carries no English copy next to it. `null` for text that
+ * is not a date. `locale` is for tests only, like formatCurrencyEUR's.
+ */
+export function formatDeviceDate(iso: string | null, locale?: string): string | null {
+  if (iso === null) {
+    return null;
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/**
+ * The country's name in the device's language ("Germany"), or the code itself
+ * where the runtime cannot translate it. `locale` is for tests only.
+ */
+export function formatCountry(code: string, locale?: string): string {
+  try {
+    return new Intl.DisplayNames(locale, { type: 'region' }).of(code.toUpperCase()) ?? code;
+  } catch {
+    return code;
+  }
+}
